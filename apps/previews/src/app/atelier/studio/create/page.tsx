@@ -4,12 +4,15 @@ import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { FlowCanvas } from "@/components/flow/canvas";
 import { HoursEditor } from "@/components/shared/hours";
 import { Button, Card, Eyebrow, field, Label, Range, Switch } from "@/components/atelier/ui";
 import { SERVICES } from "@/lib/demo-data";
 import { VOICES } from "@/lib/simulator";
 import { useWizard } from "@/lib/wizard";
 
+// Which conversation-map steps each chapter adds to the live preview.
+const UNLOCK = [["persona", "greet"], ["intent", "book"], ["slots", "details", "confirm", "booked"], ["guard"], ["kb", "fallback"], ["escalate", "transfer", "message"], ["end"]];
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
 const QUESTION: Record<string, string> = {
   business: "First, tell us about your studio.",
@@ -102,6 +105,11 @@ export default function Create() {
           ? <Button onClick={w.next} disabled={!w.canNext}>Continue <ArrowRight size={16} /></Button>
           : <Button onClick={() => { w.finish(); router.push("/atelier/studio/rehearse"); }}>Save and rehearse</Button>}
       </div>
+      <section className="mt-16 border-t border-atl-line pt-10">
+        <div className="flex items-baseline justify-between gap-4"><h2 className="font-serif text-2xl">Your conversation map, so far</h2><span className="text-sm text-atl-soft">{UNLOCK.slice(0, w.step + 1).flat().length} of 15 steps</span></div>
+        <p className="mt-1 text-sm text-atl-soft">Each chapter you finish adds the steps your receptionist will follow.</p>
+        <div className="mt-6"><FlowCanvas look="ivory" visited={UNLOCK.slice(0, w.step + 1).flat()} active={UNLOCK[w.step].at(-1)} height={520} interactive={false} /></div>
+      </section>
     </div>
   );
 }

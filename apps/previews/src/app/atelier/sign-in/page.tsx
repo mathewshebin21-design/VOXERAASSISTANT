@@ -22,6 +22,7 @@ export default function SignIn() {
           <label htmlFor="p" className="mt-4 block text-sm font-medium">Password</label>
           <input id="p" type="password" className={field + " mt-2"} defaultValue="demo-only" />
           <button className="mt-8 w-full rounded-full bg-atl-ink py-3 text-atl-paper hover:bg-atl-ink/85">Enter the demo studio</button>
+          <button type="button" onClick={() => router.push("/atelier/studio")} className="mt-3 w-full rounded-full py-3 text-sm ring-1 ring-atl-line hover:ring-atl-champ">Sign in with your work account (planned)</button>
           <p className="mt-6 text-center text-sm text-atl-soft"><Link href="/atelier" className="underline-offset-4 hover:underline">Return to the front page</Link></p>
         </form>
       </div>

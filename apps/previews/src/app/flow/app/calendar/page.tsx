@@ -47,7 +47,7 @@ export default function Calendar() {
                     const c = color(a.staffId);
                     return (
                       <button key={a.id} onClick={() => setSel(a)} title={`${a.customerName} · ${serviceById(a.serviceId).name}`}
-                        className="absolute overflow-hidden rounded-lg border px-1 py-0.5 text-left text-[10px] leading-tight transition hover:z-10"
+                        className="absolute flex flex-col justify-start overflow-hidden rounded-lg border px-1 py-0.5 text-left text-[10px] leading-tight transition hover:z-10"
                         style={{ top: (a.startMin - START) * PX, height: Math.max(14, a.durationMin * PX - 2), left: `${(STAFF.findIndex((s) => s.id === a.staffId) * 25)}%`, width: "24%", borderColor: `rgb(${c} / .6)`, background: `rgb(${c} / ${a.bookedVia === "voice_agent" ? 0.32 : 0.12})`, boxShadow: a.bookedVia === "voice_agent" ? `0 0 14px -4px rgb(${c})` : undefined }}>
                         <span className="truncate">{fmtTime(a.startMin)}</span>
                       </button>

@@ -43,9 +43,10 @@ Every screen carries a visible "demo / simulated" label (an E2E check enforces t
 **Luxury AI receptionist studio.** Route: `/atelier`
 
 - **Design system:** warm ivory paper, graphite ink, champagne accents, Cormorant Garamond display + Inter body, generous whitespace, rounded 22px cards, editorial rules.
-- **Navigation:** top pill navigation; on mobile a floating bottom tab bar plus a scrollable section strip.
-- **IA (plain language):** Today · Voice · Notebook (knowledge) · Rehearse (simulator) · Journal (calls) · Diary (calendar) · Connections · Plan. The wizard is told in "chapters".
-- **Signature interactions:** narrative dashboard ("This week Rye answered 55 calls…"); "Needs your eye" queue built from messages, failed calls and unverified knowledge; live "hear the difference" preview that re-runs the simulator as you move warmth/detail sliders; escalation rules written as sentences; phone-shaped rehearsal room; journal reading pane; month diary.
+- **Navigation:** three "rooms" in the top bar — **Front desk**, **Studio**, **House** — each revealing its sections underneath; `Ctrl K` quick-find and `Alt+number` shortcuts; on mobile a floating bottom tab bar plus a scrollable strip of every section.
+- **IA (plain language):** Front desk — Today · Live · Journal (calls) · Diary (calendar) · Insights. Studio — Voice & manner · Conversation map · Notebook (knowledge) · Rehearse (simulator). House — Connections · Team & activity · Plan & usage. The wizard is told in "chapters".
+- **Feature parity:** after review feedback, Atelier now includes **every capability from Command (A) and Flow (C)**, translated into owner language — see the parity table below.
+- **Signature interactions:** narrative dashboard; "Needs your eye" queue; "hear the difference" preview that re-runs the simulator as you move warmth/detail sliders; escalation rules written as sentences; phone-shaped rehearsal room whose conversation path lights up on an ivory conversation map; journal reading pane with replay; month / week / day-by-stylist diary.
 
 **Strengths**
 - Most approachable for the recommended market (independent UK salons); turns technical controls into owner language.
@@ -53,8 +54,8 @@ Every screen carries a visible "demo / simulated" label (an E2E check enforces t
 - Lower cognitive load; good on mobile, where owners actually work.
 
 **Weaknesses**
-- Hides detail operators sometimes need (tool arguments, latency, raw trace) — would need an "advanced" view for support/agencies.
-- Editorial spacing means more scrolling on data-heavy screens.
+- Now that it carries every A and C feature, it has the most sections (13), so the grouped navigation matters; some operator detail (tool arguments, timings) is one click deeper than in Command.
+- Editorial spacing means more scrolling on data-heavy screens (Insights, Diary).
 - Serif-heavy style is opinionated; may not suit every vertical (e.g. trades, agencies).
 
 ## C — VOXERA Flow
@@ -77,8 +78,27 @@ Every screen carries a visible "demo / simulated" label (an E2E check enforces t
 
 ---
 
-## A possible hybrid (for discussion, not a recommendation to expand scope)
-Atelier as the owner-facing default, with a Command-style "Operator" view for agencies/support, and Flow's path-highlighting reused inside the simulator. This would add roughly one design system's worth of work; choose a single primary design first.
+## Atelier feature parity with Command and Flow
+
+| Capability | From | Where it lives in Atelier |
+|---|---|---|
+| Live call monitor (3 lines, speaking indicator, last action, disabled listen-in/take-over/end) | A | Front desk → Live |
+| Analytics: 7/14/28-day range, period-on-period change, volume, outcomes with evidence links, latency vs 1 s target, intents, weekday×hour heatmap, latest calls | A | Front desk → Insights |
+| Gauges (answered, enquiries→booked, handed over) and intent→outcome routing chart | C | Front desk → Insights |
+| Call search, outcome / reason / answered filters, evidence view via URL, CSV export, totals | A | Front desk → Journal |
+| Transcript replay scrubber, expandable action arguments, call facts (latency, cost, edition, mood), compliance checks, PII hide, JSON export, delete | A, C | Journal → conversation |
+| Day-by-stylist lanes with working hours and "now" line, week view, AI-booked-only filter, booking stats (28-day, no-shows, today, next 7 days), by-channel chart, booking rules, link to source call | A, C | Front desk → Diary |
+| Language, speaking rate, voice preview, transfer permission, after-hours behaviour, transfer destination, bookable services, recording notice text, retention days, editions publish/rollback | A | Studio → Voice & manner |
+| Node-based conversation map with inspector (persona & voice, permissions, locked safety steps, action contracts) and publishing | C | Studio → Conversation map |
+| Document import with prompt-injection set-aside, source list | A, C | Studio → Notebook |
+| Live path highlighting, state panel, action & house-rule trace with arguments and timings, turn timing table | A, C | Studio → Rehearse |
+| Wizard with live "conversation map so far" preview | C | Set up a new receptionist |
+| Integration detail (auth, access, key storage), webhook delivery log, registry of every action with on/off controls | A, C | House → Connections |
+| Team members, role changes, invites, permission matrix, activity (audit) log | A | House → Team & activity |
+| Cumulative minutes vs allowance, per-minute cost breakdown, plan margins | A, C | House → Plan & usage |
+| Quick-find (`Ctrl K`), keyboard shortcuts, SSO option on sign-in (planned) | A | Everywhere |
+
+Command and Flow have **not** been given Atelier-only features (narrative summary, "Needs your eye", sentence-style rules, "hear the difference"); that can be done if you want all three to be exact equals.
 
 ---
 
@@ -91,12 +111,12 @@ Run on the production build (`next build` + `next start`):
 | Unit tests (Vitest) — metrics, scheduling, simulator behaviour, retrieval/injection/conflicts | **33 / 33 passed** |
 | TypeScript `tsc --noEmit` | clean |
 | ESLint (`next/core-web-vitals`, `next/typescript`) | clean |
-| Browser E2E (Playwright): every route on desktop 1440×900 and mobile 390×844 — HTTP status, zero console/page errors, no horizontal overflow on mobile, visible demo label | **78 / 78 passed** (39 routes × 2 viewports) |
+| Browser E2E (Playwright): every route on desktop 1440×900 and mobile 390×844 — HTTP status, zero console/page errors, no horizontal overflow on mobile, visible demo label | **88 / 88 passed** (44 routes × 2 viewports) |
 | Simulator: booking created **only after** explicit confirmation (each design) | 3 / 3 passed |
 | Simulator: prompt-injection attempt blocked (each design) | 3 / 3 passed |
 | Simulator: barge-in interrupts the agent and the new question is answered (each design) | 3 / 3 passed |
 | Wizard: greeting without AI disclosure blocks progress (each design) | 3 / 3 passed |
-| **Total browser checks** | **90 / 90 passed** |
+| **Total browser checks** | **100 / 100 passed** |
 
 Not verified: real voice quality, real latency, telephony, screen-reader walkthroughs (only basic ARIA roles/labels and focus styles are in place), and performance on low-end devices.
 
@@ -117,5 +137,5 @@ Bug found and fixed during verification: the simulator never cleared its speech 
 | Appointment calendar | `/command/appointments` | `/atelier/studio/diary` | `/flow/app/calendar` |
 | Integrations | `/command/integrations` | `/atelier/studio/connections` | `/flow/app/integrations` |
 | Usage & billing | `/command/billing` | `/atelier/studio/plan` | `/flow/app/usage` |
-| Extra | Live monitor, Team & audit | — | Node canvas |
+| Extra | Live monitor, Team & audit | Live, Insights, Conversation map, Team & activity (full A + C parity) | Node canvas |
 | Mobile | drawer nav | bottom tab bar + section strip | floating dock |

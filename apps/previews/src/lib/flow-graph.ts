@@ -65,3 +65,12 @@ export const KIND_COLOR: Record<FlowKind, string> = {
   handoff: "190 242 100",
   end: "150 146 180",
 };
+
+/** Argument contracts shown in the canvas inspectors (validated server-side from Phase 5). */
+export const TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
+  check_availability: { service_id: "string (enum: enabled services)", from_date: "YYYY-MM-DD", days: "1–14", after: "minutes?", before: "minutes?" },
+  create_booking: { service_id: "string", staff_id: "string", date: "YYYY-MM-DD", start: "HH:MM", customer_name: "string", confirmed_by_caller: "true (required)", idempotency_key: "string" },
+  search_knowledge: { query: "string", min_score: 0.35, status: "verified only" },
+  transfer_call: { destination: "configured target", summary_for_staff: "string" },
+  take_message: { topic: "string", callback: "caller number" },
+};

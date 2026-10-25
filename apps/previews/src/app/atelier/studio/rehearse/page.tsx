@@ -3,8 +3,10 @@
 import { clsx } from "clsx";
 import { motion } from "framer-motion";
 import { Mic, PhoneCall, PhoneOff, Volume2, VolumeX } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Button, Card, DemoNote, Eyebrow, Switch, Title } from "@/components/atelier/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FlowCanvas } from "@/components/flow/canvas";
+import { Button, Card, DemoNote, Eyebrow, H2, Pill, Switch, Title } from "@/components/atelier/ui";
+import { serviceById } from "@/lib/demo-data";
 import { usePreview } from "@/lib/store";
 import { useSimulator } from "@/lib/use-simulator";
 
@@ -20,8 +22,21 @@ export default function Rehearse() {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [sim.messages]);
   const live = sim.messages.length > 0;
+  // Path through the conversation map, lit up as the rehearsal moves (from Design C).
+  const [visited, setVisited] = useState<string[]>([]);
+  useEffect(() => {
+    if (!sim.messages.length) { setVisited([]); return; }
+    setVisited((v) => {
+      const base = v.length ? [...v] : ["persona", "greet"];
+      if (sim.state.node !== "greet" && !base.includes("intent")) base.push("intent");
+      return base.includes(sim.state.node) ? base : [...base, sim.state.node];
+    });
+  }, [sim.state.node, sim.messages.length]);
+  const trace = useMemo(() => sim.messages.filter((m) => m.event.kind === "tool" || m.event.kind === "guardrail" || m.event.kind === "citation"), [sim.messages]);
+  const STAGE: Record<string, string> = { open: "Listening", need_service: "Asking which service", need_time: "Asking for a time", offered: "Offering times", need_name: "Taking a name", confirming: "Waiting for a yes", booked: "Booked", transferred: "Handed to the team", ended: "Finished" };
 
   return (
+    <div className="space-y-12">
     <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_420px]">
       <div>
         <Eyebrow>Rehearsal room</Eyebrow>
@@ -76,6 +91,51 @@ export default function Rehearse() {
         </div>
         <p className="mt-3 text-center text-xs text-atl-soft">Simulated call · interrupt at any time by typing</p>
       </div>
+    </div>
+
+    <section className="grid grid-cols-1 gap-8 xl:grid-cols-[1.2fr_1fr]">
+      <div>
+        <H2>The path this conversation is taking</H2>
+        <p className="mt-1 text-sm text-atl-soft">Each step lights up as {agent} reaches it. The highlighted step is where it is now.</p>
+        <div className="mt-5"><FlowCanvas look="ivory" active={live ? sim.state.node : undefined} visited={visited} height={620} /></div>
+      </div>
+      <div className="space-y-6">
+        <Card className="p-6">
+          <div className="font-serif text-xl">Where things stand</div>
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            {[["Stage", STAGE[sim.state.stage] ?? sim.state.stage], ["Service", sim.state.serviceId ? serviceById(sim.state.serviceId).name : "—"], ["Times offered", String(sim.state.offered.length)], ["Caller", sim.state.customerName ?? "—"], ["Bookings made", String(sim.state.bookings.length)], ["Frustration", ["calm", "a little", "high"][Math.min(2, sim.state.frustration)]], ["Current step", sim.state.node]].map(([k, v]) => (
+              <div key={k}><dt className="text-xs uppercase tracking-[0.16em] text-atl-soft">{k}</dt><dd className="mt-0.5">{v}</dd></div>
+            ))}
+          </dl>
+        </Card>
+        <Card className="p-6">
+          <div className="flex items-center justify-between"><div className="font-serif text-xl">What {agent} did</div><Pill>{trace.length} actions</Pill></div>
+          <ol className="mt-4 max-h-72 space-y-3 overflow-y-auto">
+            {trace.length ? trace.map((m) => {
+              const e = m.event;
+              if (e.kind === "tool") return (
+                <li key={m.id} className={clsx("rounded-2xl p-3 ring-1", e.ok ? "bg-atl-bg/60 ring-atl-line" : "bg-atl-rose/5 ring-atl-rose/40")}>
+                  <div className="flex items-center justify-between text-sm"><span className={e.ok ? "font-medium" : "font-medium text-atl-rose"}>{e.name.replaceAll("_", " ")}</span><span className="text-xs text-atl-soft">{e.latencyMs} ms</span></div>
+                  <div className="mt-1 text-xs text-atl-soft">{Object.entries(e.args).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>
+                  <div className="mt-1 text-sm">{e.result}</div>
+                </li>
+              );
+              if (e.kind === "guardrail") return <li key={m.id} className="rounded-2xl bg-atl-champ/10 p-3 text-sm text-atl-champdeep"><span className="font-medium">House rule — {e.rule.replaceAll("_", " ")}</span><div className="text-xs">{e.text}</div></li>;
+              if (e.kind === "citation") return <li key={m.id} className="text-xs text-atl-soft">Quoted from your Notebook: “{e.title}” (edition {e.version})</li>;
+              return null;
+            }) : <li className="text-sm text-atl-soft">Actions and house rules will appear here as you talk.</li>}
+          </ol>
+        </Card>
+        <Card className="p-6">
+          <div className="font-serif text-xl">Pace of each reply</div>
+          <table className="mt-3 w-full text-sm">
+            <thead><tr className="text-left text-xs uppercase tracking-[0.16em] text-atl-soft"><th className="pb-2 font-normal">Turn</th><th className="pb-2 text-right font-normal">Speaking</th><th className="pb-2 text-right font-normal">Checking</th></tr></thead>
+            <tbody>{sim.timings.slice(-6).map((t) => <tr key={t.turn} className="border-t border-atl-line"><td className="py-1.5">{t.turn}</td><td className="text-right">{t.agentMs} ms</td><td className="text-right">{t.toolMs} ms</td></tr>)}</tbody>
+          </table>
+          <p className="mt-2 text-xs italic text-atl-soft">Animation timings for the rehearsal, not measurements. Real response times are measured from Phase 3.</p>
+        </Card>
+      </div>
+    </section>
     </div>
   );
 }

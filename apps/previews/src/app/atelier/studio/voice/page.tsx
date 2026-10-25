@@ -4,8 +4,8 @@ import { clsx } from "clsx";
 import { Play } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, Card, DemoNote, Eyebrow, field, H2, Label, Pill, Range, Switch, Title } from "@/components/atelier/ui";
-import { APPOINTMENTS } from "@/lib/demo-data";
-import { initialState, respond, VOICES } from "@/lib/simulator";
+import { APPOINTMENTS, SERVICES } from "@/lib/demo-data";
+import { initialState, LANGUAGES, respond, VOICES } from "@/lib/simulator";
 import { usePreview } from "@/lib/store";
 
 const SAMPLES = ["How much is balayage?", "Where can I park?", "What's your cancellation policy?"];
@@ -73,6 +73,43 @@ export default function Voice() {
         </div>
       </section>
 
+      <section className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <Card className="space-y-6 p-8">
+          <H2>Language & hours</H2>
+          <div><Label htmlFor="lang">Language</Label><select id="lang" className={field} value={s.draft.language} onChange={(e) => s.setDraft({ language: e.target.value })}>{LANGUAGES.map((l) => <option key={l} disabled={l.includes("planned")}>{l}</option>)}</select></div>
+          <div><Label>When the studio is closed, {p.agentName} should…</Label>
+            <div className="space-y-2">{([["answer_and_book", "Answer and book future appointments"], ["take_message", "Answer and take a message"], ["voicemail", "Let calls go to voicemail"]] as const).map(([k, l]) => (
+              <label key={k} className="flex items-center gap-3 rounded-2xl border border-atl-line px-4 py-3 text-sm"><input type="radio" name="after" className="accent-[rgb(var(--atl-champdeep))]" checked={s.draft.afterHours === k} onChange={() => s.setDraft({ afterHours: k })} />{l}</label>
+            ))}</div>
+          </div>
+          <div><Label htmlFor="who">Who takes handed-over calls</Label><input id="who" className={field} value={p.transferTarget} onChange={(e) => s.setPersona({ transferTarget: e.target.value })} /></div>
+        </Card>
+        <Card className="space-y-6 p-8">
+          <H2>Recording & privacy</H2>
+          <div className="flex items-center justify-between gap-4"><div>Mention recording at the start</div><Switch label="Recording notice on" on={p.recordingDisclosure} onChange={(b) => s.setPersona({ recordingDisclosure: b })} /></div>
+          <div><Label htmlFor="rt" hint="Spoken straight after the greeting.">What callers hear about recording</Label><textarea id="rt" rows={2} className={field} value={p.recordingText} onChange={(e) => s.setPersona({ recordingText: e.target.value })} /></div>
+          <div><Label htmlFor="ret" hint="Recordings and transcripts are deleted automatically after this.">Keep conversations for (days)</Label><input id="ret" type="number" min={7} max={365} className={field} value={s.draft.retentionDays} onChange={(e) => s.setDraft({ retentionDays: Number(e.target.value) })} /></div>
+        </Card>
+      </section>
+
+      <section>
+        <H2>What {p.agentName} may book</H2>
+        <p className="mt-2 text-atl-soft">Greyed services are arranged by your team; {p.agentName} takes a message instead.</p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {SERVICES.map((svc) => {
+            const on = s.draft.enabledServiceIds.includes(svc.id) && svc.bookableByAgent;
+            return (
+              <button key={svc.id} type="button" disabled={!svc.bookableByAgent} aria-pressed={on}
+                onClick={() => s.setDraft({ enabledServiceIds: on ? s.draft.enabledServiceIds.filter((x) => x !== svc.id) : [...s.draft.enabledServiceIds, svc.id] })}
+                className={clsx("rounded-2xl border p-4 text-left transition", on ? "border-atl-ink bg-atl-paper" : "border-atl-line bg-atl-bg/50 hover:border-atl-champ", !svc.bookableByAgent && "opacity-50")}>
+                <div className="flex items-baseline justify-between gap-2"><span className="font-serif text-lg">{svc.name}</span><span className="text-sm text-atl-soft">£{svc.priceFromGBP}</span></div>
+                <div className="mt-1 text-xs text-atl-soft">{svc.durationMin} min{svc.requiresPatchTest ? " · patch test" : ""}{!svc.bookableByAgent ? " · team only" : on ? " · bookable" : " · not offered"}</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <section>
         <H2>House rules</H2>
         <p className="mt-2 text-atl-soft">Plain-language rules for when {p.agentName} steps aside.</p>
@@ -89,6 +126,7 @@ export default function Voice() {
           ))}
           <div className="flex items-center justify-between gap-4 p-5"><div>Mention call recording at the start</div><Switch label="Recording notice" on={p.recordingDisclosure} onChange={(b) => s.setPersona({ recordingDisclosure: b })} /></div>
           <div className="flex items-center justify-between gap-4 p-5"><div>Book, move and cancel appointments</div><Switch label="Allow booking" on={p.allowBooking} onChange={(b) => s.setPersona({ allowBooking: b })} /></div>
+          <div className="flex items-center justify-between gap-4 p-5"><div>Pass calls to the team when needed</div><Switch label="Allow transfers" on={p.allowTransfer} onChange={(b) => s.setPersona({ allowTransfer: b })} /></div>
         </Card>
       </section>
 

@@ -34,7 +34,7 @@ export default function Team() {
         <Panel title="Members" dense>
           <ul>{team.map((m) => (
             <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-cmd-line px-4 py-3 first:border-0">
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-cmd-raised font-mono text-[11px]">{m.name.split(" ").map((x) => x[0]).join("").slice(0, 2)}</span>
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-cmd-raised font-mono text-[11px]">{m.name.split(" ").filter((x) => /^[A-Za-z]/.test(x)).map((x) => x[0]).join("").slice(0, 2)}</span>
               <div className="min-w-0 flex-1"><div className="text-sm font-medium">{m.name}</div><div className="truncate font-mono text-[11px] text-cmd-mute">{m.email}</div></div>
               <select aria-label={`Role for ${m.name}`} disabled={m.role === "Owner"} className={inputCls + " w-auto"} value={m.role} onChange={(e) => setTeam(team.map((x) => x.id === m.id ? { ...x, role: e.target.value as TeamMember["role"] } : x))}>
                 {["Owner", "Admin", "Manager", "Viewer"].map((r) => <option key={r}>{r}</option>)}

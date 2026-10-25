@@ -5,17 +5,10 @@ import Link from "next/link";
 import { useState } from "react";
 import { FlowCanvas } from "@/components/flow/canvas";
 import { Chip, FBtn, finput, FSwitch, Glass, GHead } from "@/components/flow/ui";
-import { FLOW_NODES } from "@/lib/flow-graph";
+import { FLOW_NODES, TOOL_SCHEMAS } from "@/lib/flow-graph";
 import { LANGUAGES, VOICES } from "@/lib/simulator";
 import { usePreview } from "@/lib/store";
 
-const TOOL_SCHEMAS: Record<string, object> = {
-  check_availability: { service_id: "string (enum: enabled services)", from_date: "YYYY-MM-DD", days: "1–14", after: "minutes?", before: "minutes?" },
-  create_booking: { service_id: "string", staff_id: "string", date: "YYYY-MM-DD", start: "HH:MM", customer_name: "string", confirmed_by_caller: "true (required)", idempotency_key: "string" },
-  search_knowledge: { query: "string", min_score: 0.35, status: "verified only" },
-  transfer_call: { destination: "configured target", summary_for_staff: "string" },
-  take_message: { topic: "string", callback: "caller number" },
-};
 
 const BOOKING_NODES = ["book", "slots", "details", "confirm", "booked"];
 

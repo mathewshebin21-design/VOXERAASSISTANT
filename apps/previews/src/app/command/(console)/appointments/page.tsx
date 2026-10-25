@@ -73,7 +73,7 @@ export default function Appointments() {
                         </>}
                         {dayAppts.filter((a) => a.staffId === s.id).map((a) => (
                           <button key={a.id} onClick={() => setSel(a)}
-                            className={clsx("absolute inset-x-1 overflow-hidden rounded border px-1.5 py-1 text-left text-[11px] transition hover:z-10 hover:brightness-125",
+                            className={clsx("absolute inset-x-1 flex flex-col justify-start overflow-hidden rounded border px-1.5 py-1 text-left text-[11px] transition hover:z-10 hover:brightness-125",
                               a.bookedVia === "voice_agent" ? "border-cmd-violet/60 bg-cmd-violet/20" : "border-cmd-line bg-cmd-raised",
                               a.status === "no_show" && "border-cmd-bad/60 bg-cmd-bad/10", sel?.id === a.id && "ring-1 ring-cmd-cyan")}
                             style={{ top: 32 + (a.startMin - START) * PX, height: a.durationMin * PX - 2 }}>
