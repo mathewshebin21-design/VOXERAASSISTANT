@@ -34,9 +34,9 @@ export default function Live() {
                 <div className="mt-3"><Waveform level={l.done ? 0 : speaking === "agent" ? 0.85 : speaking === "caller" ? 0.55 : 0.12} color={speaking === "caller" ? "140 140 158" : "139 92 246"} height={40} bars={48} /></div>
                 <div className="mt-1 flex justify-between font-mono text-[10px] text-cmd-mute"><span>{speaking === "agent" ? "AGENT SPEAKING" : speaking === "caller" ? "CALLER SPEAKING" : speaking === "tool" ? "TOOL RUNNING" : "—"}</span><span>VAD · turn detect (sim)</span></div>
               </div>
-              <div className="h-64 space-y-2 overflow-y-auto px-4 py-3 scroll-thin" aria-live="polite">
+              <div className="flex h-64 flex-col justify-end gap-2 overflow-hidden px-4 py-3" aria-live="polite">
                 <AnimatePresence initial={false}>
-                  {l.visible.slice(-8).map((t) => (
+                  {l.visible.slice(-5).map((t) => (
                     <motion.div key={t.at + t.speaker} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[13px]">
                       {t.speaker === "tool" ? (
                         <div className="flex items-start gap-2 rounded border border-cmd-cyan/30 bg-cmd-cyan/5 px-2 py-1.5 font-mono text-[11px] text-cmd-cyan"><Wrench size={12} className="mt-0.5 shrink-0" /><span>{t.tool?.name} → {t.tool?.result}</span></div>

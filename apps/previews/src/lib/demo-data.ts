@@ -95,7 +95,6 @@ function generate() {
     const date = addDays(DEMO_TODAY, -back);
     const wd = dow(date);
     const open = BUSINESS.hours[wd];
-    const isPast = back > 0 || back === 0;
 
     // Front-desk / online bookings fill the diary so availability is realistic.
     if (open) {

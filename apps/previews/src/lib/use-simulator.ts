@@ -79,7 +79,7 @@ export function useSimulator() {
   // Drain the event queue one item at a time, streaming agent text word by word.
   const pump = useCallback(() => {
     const next = queue.current.shift();
-    if (!next) { setSpeaking(false); setThinking(false); setLevel(0); return; }
+    if (!next) { timer.current = null; setSpeaking(false); setThinking(false); setLevel(0); return; }
     if (next.kind === "agent") {
       setThinking(true);
       timer.current = setTimeout(() => {
@@ -151,21 +151,36 @@ export function useSimulator() {
     enqueue(evs);
   }, [opts, enqueue, addSimBookings, ttsSupported]);
 
+  /** Runs `fn` once the agent has been silent for a moment (no queued speech or tools). */
+  const afterIdle = useCallback((fn: () => void) => {
+    let idleSince = 0;
+    const tick = () => {
+      const busy = timer.current !== null || queue.current.length > 0;
+      if (busy) idleSince = 0;
+      else if (!idleSince) idleSince = Date.now();
+      if (!busy && Date.now() - idleSince > 900) return fn();
+      scenarioTimers.current.push(setTimeout(tick, 200));
+    };
+    scenarioTimers.current.push(setTimeout(tick, 600));
+  }, []);
+
   const runScenario = useCallback((id: string) => {
     const sc = SCENARIOS.find((s) => s.id === id);
     if (!sc) return;
     start();
-    // Space caller lines so each reply can finish streaming before the next.
-    scenarioTimers.current = sc.lines.map((line, i) => setTimeout(() => send(line), 2600 + i * 5200));
-  }, [start, send]);
+    // Each scripted caller line waits until the agent has finished speaking,
+    // so scenarios demonstrate normal turn-taking rather than constant barge-in.
+    const next = (i: number) => { if (i < sc.lines.length) afterIdle(() => { send(sc.lines[i]); next(i + 1); }); };
+    next(0);
+  }, [start, send, afterIdle]);
 
   /** Send as the caller, starting a call first (and letting the greeting finish) if none is active. */
   const submit = useCallback((text: string) => {
     if (!text.trim()) return;
     if (messages.length) return send(text);
     start();
-    scenarioTimers.current.push(setTimeout(() => send(text), 2400));
-  }, [messages.length, start, send]);
+    afterIdle(() => send(text));
+  }, [messages.length, start, send, afterIdle]);
 
   const listen = useCallback(() => {
     if (!sttSupported) return;

@@ -38,7 +38,7 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
       </aside>
       <header className="relative z-30 flex items-center gap-3 px-5 py-4 md:pl-24">
         <span className="font-display text-sm font-semibold tracking-wide">VOXERA <span className="bg-gradient-to-r from-flw-violet to-flw-cyan bg-clip-text text-transparent">FLOW</span></span>
-        <span className="text-flw-mute">/</span><span className="truncate text-sm text-flw-mute">Halden &amp; Rye · {agent}</span>
+        <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline">Halden &amp; Rye · {agent}</span>
         <span className="ml-auto rounded-full border border-flw-amber/30 bg-flw-amber/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-flw-amber">Demo · simulated</span>
       </header>
       <main className={clsx("relative z-10 min-w-0 pb-28 md:pb-10 md:pl-24", canvas ? "px-3 md:pr-4" : "mx-auto max-w-[1400px] px-5")}>{children}</main>

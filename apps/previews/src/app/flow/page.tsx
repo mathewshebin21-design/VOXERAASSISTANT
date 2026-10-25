@@ -35,7 +35,7 @@ export default function Landing() {
         <div className="hidden lg:block"><Orb level={i % 2 ? 0.9 : 0.3} size={220} /></div>
       </section>
       <section className="relative z-10 mx-auto mt-14 max-w-7xl px-6 pb-16">
-        <FlowCanvas active={PATH[step]} visited={PATH.slice(0, step + 1)} height={420} interactive={false} />
+        <FlowCanvas active={PATH[step]} visited={PATH.slice(0, step + 1)} height={640} interactive={false} />
         <p className="mt-3 text-center font-mono text-[11px] text-flw-mute">Animated walkthrough of a booking path. Not a live call.</p>
       </section>
     </div>

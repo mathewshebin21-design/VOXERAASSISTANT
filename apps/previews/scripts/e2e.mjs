@@ -82,6 +82,28 @@ for (const [design, route] of Object.entries(SIMS)) {
   await ctx.close();
 }
 
+// Barge-in: typing while the agent is mid-sentence must stop and mark the reply as interrupted.
+const STARTS = { command: [SIMS.command, "Start call"], atelier: [SIMS.atelier, "Ring the studio"], flow: [SIMS.flow, "Start simulation"] };
+for (const [design, [route, label]] of Object.entries(STARTS)) {
+  if (ONLY && ONLY !== design) continue;
+  const ctx = await browser.newContext({ viewport: viewports.desktop });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(BASE + route, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.waitForTimeout(1300); // greeting is streaming now
+    const input = page.getByLabel("Caller message");
+    await input.fill("Sorry to interrupt — what time do you close on Thursday?");
+    await input.press("Enter");
+    await page.waitForTimeout(3500);
+    const text = await page.evaluate(() => [...document.querySelectorAll('[aria-live="polite"]')].map((e) => e.innerText).join("\n"));
+    record(`sim     ${design}: barge-in interrupts agent`, /interrupted/i.test(text) && /barge-in/i.test(text) && /20:00|8pm|until 8/i.test(text));
+  } catch (e) {
+    record(`sim     ${design}: barge-in`, false, String(e).slice(0, 200));
+  }
+  await ctx.close();
+}
+
 // Wizard validation: the AI-disclosure rule must block progress.
 const WIZ = { command: "/command/agents/new", atelier: "/atelier/studio/create", flow: "/flow/app/new" };
 for (const [design, route] of Object.entries(WIZ)) {

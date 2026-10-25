@@ -15,21 +15,21 @@ export interface FlowNodeDef {
 }
 
 export const FLOW_NODES: FlowNodeDef[] = [
-  { id: "persona", kind: "persona", label: "Persona & voice", detail: "Name, greeting, warmth, voice, pace", x: -340, y: 0 },
-  { id: "greet", kind: "entry", label: "Greeting", detail: "AI disclosure + recording notice", x: 0, y: 0 },
-  { id: "guard", kind: "guard", label: "Integrity guard", detail: "Blocks instruction override attempts", x: 0, y: -180 },
-  { id: "intent", kind: "router", label: "Understand intent", detail: "book · move · cancel · ask · person", x: 300, y: 0 },
-  { id: "book", kind: "step", label: "Choose service", detail: "Only agent-bookable services", x: 600, y: -150 },
-  { id: "slots", kind: "tool", label: "Find times", detail: "check_availability", tool: "check_availability", x: 900, y: -150 },
-  { id: "details", kind: "step", label: "Caller details", detail: "Name (and number from caller ID)", x: 1200, y: -150 },
-  { id: "confirm", kind: "step", label: "Explicit confirmation", detail: "Read back service, time, stylist", x: 1500, y: -150 },
-  { id: "booked", kind: "tool", label: "Create booking", detail: "create_booking · idempotent", tool: "create_booking", x: 1800, y: -150 },
-  { id: "kb", kind: "tool", label: "Answer from knowledge", detail: "search_knowledge · verified only", tool: "search_knowledge", x: 600, y: 40 },
-  { id: "fallback", kind: "guard", label: "Don't know", detail: "Decline to guess · offer message", x: 900, y: 40 },
-  { id: "escalate", kind: "handoff", label: "Urgent safety", detail: "999 / NHS 111 script + alert owner", x: 600, y: 220 },
-  { id: "transfer", kind: "handoff", label: "Warm transfer", detail: "transfer_call with summary", tool: "transfer_call", x: 900, y: 220 },
-  { id: "message", kind: "handoff", label: "Take message", detail: "take_message · team notified", tool: "take_message", x: 1200, y: 220 },
-  { id: "end", kind: "end", label: "Wrap up", detail: "Summary, outcome, analytics", x: 1500, y: 100 },
+  { id: "persona", kind: "persona", label: "Persona & voice", detail: "Name, greeting, warmth, voice, pace", x: 0, y: 0 },
+  { id: "greet", kind: "entry", label: "Greeting", detail: "AI disclosure + recording notice", x: 300, y: 0 },
+  { id: "guard", kind: "guard", label: "Integrity guard", detail: "Blocks instruction override attempts", x: 600, y: 0 },
+  { id: "intent", kind: "router", label: "Understand intent", detail: "book · move · cancel · ask · person", x: 300, y: 160 },
+  { id: "book", kind: "step", label: "Choose service", detail: "Only agent-bookable services", x: 0, y: 330 },
+  { id: "slots", kind: "tool", label: "Find times", detail: "check_availability", tool: "check_availability", x: 0, y: 470 },
+  { id: "details", kind: "step", label: "Caller details", detail: "Name (and number from caller ID)", x: 0, y: 610 },
+  { id: "confirm", kind: "step", label: "Explicit confirmation", detail: "Read back service, time, stylist", x: 0, y: 750 },
+  { id: "booked", kind: "tool", label: "Create booking", detail: "create_booking · idempotent", tool: "create_booking", x: 0, y: 890 },
+  { id: "kb", kind: "tool", label: "Answer from knowledge", detail: "search_knowledge · verified only", tool: "search_knowledge", x: 300, y: 330 },
+  { id: "fallback", kind: "guard", label: "Don't know", detail: "Decline to guess · offer message", x: 300, y: 470 },
+  { id: "escalate", kind: "handoff", label: "Urgent safety", detail: "999 / NHS 111 script + alert owner", x: 600, y: 330 },
+  { id: "transfer", kind: "handoff", label: "Warm transfer", detail: "transfer_call with summary", tool: "transfer_call", x: 600, y: 470 },
+  { id: "message", kind: "handoff", label: "Take message", detail: "take_message · team notified", tool: "take_message", x: 600, y: 610 },
+  { id: "end", kind: "end", label: "Wrap up", detail: "Summary, outcome, analytics", x: 300, y: 890 },
 ];
 
 export const FLOW_EDGES: { from: string; to: string; label?: string }[] = [

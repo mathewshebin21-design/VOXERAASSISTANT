@@ -23,7 +23,7 @@ function FlowNode({ data }: NodeProps<Node<NData>>) {
         boxShadow: active ? `0 0 0 1px rgb(${c}), 0 0 36px -2px rgb(${c} / .75)` : visited ? `0 0 22px -10px rgb(${c} / .8)` : undefined,
       }}
     >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0" style={{ background: `rgb(${c})` }} />
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-0" style={{ background: `rgb(${c})` }} />
       <div className="flex items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg" style={{ background: `rgb(${c} / .14)`, color: `rgb(${c})` }}><Icon size={14} /></span>
         <div className="min-w-0">
@@ -33,7 +33,7 @@ function FlowNode({ data }: NodeProps<Node<NData>>) {
         {active && <span className="ml-auto h-2 w-2 animate-ping rounded-full" style={{ background: `rgb(${c})` }} />}
       </div>
       <div className="mt-2 line-clamp-2 text-[11px] leading-snug text-[rgb(150_146_180)]">{def.detail}</div>
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0" style={{ background: `rgb(${c})` }} />
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-0" style={{ background: `rgb(${c})` }} />
     </div>
   );
 }
@@ -61,7 +61,7 @@ export function FlowCanvas({ active, visited = [], selected, onSelect, disabled 
   return (
     <div style={{ height }} className="w-full overflow-hidden rounded-2xl border border-flw-line/70 bg-flw-bg/60">
       <ReactFlow
-        nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.15 }}
+        nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.08 }}
         minZoom={0.2} maxZoom={1.5} proOptions={{ hideAttribution: false }}
         nodesDraggable={interactive} nodesConnectable={false} elementsSelectable={interactive}
         panOnDrag={interactive} zoomOnScroll={interactive}

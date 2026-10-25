@@ -64,7 +64,7 @@ export default function Simulate() {
       </Glass>
 
       <div className="min-w-0 space-y-4">
-        <FlowCanvas active={live ? sim.state.node : undefined} visited={visited} height={380} />
+        <FlowCanvas active={live ? sim.state.node : undefined} visited={visited} height={540} />
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Glass>
             <GHead title="Tool execution" right={<div className="flex items-center gap-2 text-xs text-flw-mute">fail tools <FSwitch label="Simulate provider failures" on={sim.failTools} onChange={sim.setFailTools} /></div>} />

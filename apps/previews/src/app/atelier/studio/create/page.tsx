@@ -39,7 +39,7 @@ export default function Create() {
           <div className="mt-10 space-y-6">
             {id === "business" && <>
               <div><Label htmlFor="bn">Studio name</Label><input id="bn" className={field} value={d.businessName} onChange={(e) => set({ businessName: e.target.value })} /></div>
-              <div><Label htmlFor="an" hint="Callers will hear this name.">Your receptionist's name</Label><input id="an" className={field} value={d.agentName} onChange={(e) => set({ agentName: e.target.value })} /></div>
+              <div><Label htmlFor="an" hint="Callers will hear this name.">Your receptionist&apos;s name</Label><input id="an" className={field} value={d.agentName} onChange={(e) => set({ agentName: e.target.value })} /></div>
               <div><Label>What kind of business?</Label>
                 <div className="flex flex-wrap gap-2">{["Hair & beauty", "Aesthetics clinic", "Wellness & spa", "Agency"].map((x) => <button key={x} type="button" onClick={() => set({ sector: x })} className={clsx("rounded-full px-4 py-2 text-sm ring-1", d.sector === x ? "bg-atl-ink text-atl-paper ring-atl-ink" : "ring-atl-line hover:ring-atl-champ")}>{x}</button>)}</div>
               </div>
@@ -56,7 +56,7 @@ export default function Create() {
             </div>}
             {id === "hours" && <>
               <Card className="p-5"><HoursEditor hours={d.hours} onChange={(h) => set({ hours: h })} theme="atl" /></Card>
-              <div><Label>When you're closed, your receptionist should…</Label>
+              <div><Label>When you&apos;re closed, your receptionist should…</Label>
                 <div className="space-y-2">{([["answer_and_book", "Answer and book future appointments"], ["take_message", "Answer and take a message"], ["voicemail", "Let calls go to voicemail"]] as const).map(([k, l]) => (
                   <label key={k} className="flex items-center gap-3 rounded-2xl border border-atl-line px-4 py-3"><input type="radio" className="accent-[rgb(var(--atl-champdeep))]" checked={d.afterHours === k} onChange={() => set({ afterHours: k })} />{l}</label>
                 ))}</div>
