@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { Chip, Glass, GHead, Heading, Orb } from "@/components/flow/ui";
 import { CALLS } from "@/lib/demo-data";
+import { usePreview } from "@/lib/store";
 import { computeMetrics, dailySeries, inRange, INTENT_LABEL, OUTCOME_LABEL } from "@/lib/metrics";
 import { DEMO_TODAY, addDays, dayShort, gbp } from "@/lib/time";
 import type { CallOutcome, Intent } from "@/lib/types";
@@ -36,6 +37,14 @@ export default function Pulse() {
   const m = useMemo(() => computeMetrics(calls), [calls]);
   const series = useMemo(() => dailySeries(CALLS, addDays(DEMO_TODAY, -(days - 1)), DEMO_TODAY).map((d) => ({ ...d, label: dayShort(d.date) })), [days]);
   const [lane] = useReplay(1, 1.4);
+  const agent = usePreview((st) => st.draft.persona.agentName);
+  const knowledge = usePreview((st) => st.knowledge);
+  const prev = useMemo(() => computeMetrics(inRange(CALLS, addDays(DEMO_TODAY, -(2 * days - 1)), addDays(DEMO_TODAY, -days))), [days]);
+  // Items that need a human decision: messages, failed calls and unverified knowledge.
+  const attention = [
+    ...CALLS.filter((c) => c.date >= addDays(DEMO_TODAY, -2) && (c.outcome === "message_taken" || c.outcome === "failed")).slice(0, 4).map((c) => ({ key: c.id, href: `/flow/app/calls/${c.id}`, title: c.outcome === "failed" ? `Unfinished call · ${c.callerName}` : `Callback requested · ${c.callerName}`, sub: c.summary, tone: c.outcome === "failed" ? "pink" : "lime" } as const)),
+    ...knowledge.filter((k) => k.status !== "verified").map((k) => ({ key: k.id, href: "/flow/app/knowledge", title: k.status === "conflict" ? `Conflicting fact · ${k.title}` : `Unverified fact · ${k.title}`, sub: k.conflictNote ?? "Not spoken by the agent until verified.", tone: "amber" } as const)),
+  ];
   // Intent → outcome routing table: where conversations actually ended up.
   const routes = useMemo(() => {
     const map = new Map<string, number>();
@@ -69,6 +78,27 @@ export default function Pulse() {
           <Glass className="p-4"><div className="text-xs text-flw-mute">Hand-offs</div><div className="font-display text-3xl font-semibold text-flw-lime">{m.transferred + m.messages}</div><div className="text-xs text-flw-mute">{m.transferred} transfers · {m.messages} messages</div></Glass>
           <Glass className="p-4"><div className="text-xs text-flw-mute">Cost per booking (est.)</div><div className="font-display text-3xl font-semibold">{gbp(m.costPerBookingGBP)}</div><div className="text-xs text-flw-mute">p50 latency {m.latencyP50Ms}ms (simulated)</div></Glass>
         </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_1fr]">
+        <Glass className="p-6">
+          <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-flw-cyan">Summary · last {days} days</div>
+          <p className="mt-3 font-display text-2xl leading-snug">
+            {agent} answered <span className="text-flw-cyan">{m.answered} calls</span> and booked <span className="text-flw-violet">{m.booked} appointments</span> — {Math.abs(m.booked - prev.booked)} {m.booked >= prev.booked ? "more" : "fewer"} than the previous {days} days. {m.transferred} callers were handed to the team.
+          </p>
+          <p className="mt-3 text-xs text-flw-mute">Calculated from demo call records, not live calls.</p>
+        </Glass>
+        <Glass>
+          <GHead title="Needs your attention" right={<Chip tone="amber">{attention.length}</Chip>} />
+          <ul className="max-h-64 overflow-y-auto">
+            {attention.map((a) => (
+              <li key={a.key}><Link href={a.href} className="flex items-start gap-3 border-t border-flw-line/60 px-4 py-3 first:border-0 hover:bg-flw-surface/60">
+                <span className={clsx("mt-1.5 h-2 w-2 shrink-0 rounded-full", a.tone === "pink" ? "bg-flw-pink" : a.tone === "lime" ? "bg-flw-lime" : "bg-flw-amber")} />
+                <div className="min-w-0"><div className="text-sm">{a.title}</div><div className="line-clamp-1 text-xs text-flw-mute">{a.sub}</div></div>
+              </Link></li>
+            ))}
+          </ul>
+        </Glass>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">

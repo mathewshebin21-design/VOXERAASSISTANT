@@ -50,7 +50,9 @@ export default function Usage() {
           <Glass key={p.id} glow={p.id === plan.id ? "violet" : undefined} className="p-5">
             <div className="flex items-center justify-between"><span className="font-display text-lg">{p.name}</span>{p.id === plan.id && <Chip tone="violet">current</Chip>}</div>
             <div className="mt-2 font-display text-3xl font-semibold">{gbp(p.monthlyGBP, 0)}<span className="text-sm text-flw-mute">/mo</span></div>
-            <div className="text-xs text-flw-mute">{p.includedMinutes} min · {gbp(p.overagePerMinGBP)}/min after</div>
+            <div className="text-xs text-flw-mute">{p.includedMinutes} min · {gbp(p.overagePerMinGBP)}/min after · setup {p.setupFeeGBP ? gbp(p.setupFeeGBP, 0) : "free"}</div>
+            <ul className="mt-3 space-y-1 text-sm text-flw-mute">{p.features.map((f) => <li key={f}>· {f}</li>)}</ul>
+            <div className="mt-3 text-[11px] text-flw-mute">Est. gross margin at allowance: {(((p.monthlyGBP - p.includedMinutes * GBP_PER_MIN) / p.monthlyGBP) * 100).toFixed(0)}% (provider cost only)</div>
           </Glass>
         ))}
       </div>

@@ -17,6 +17,7 @@ export default function Enter() {
           <input aria-label="Email" className={finput} defaultValue="ada@halden-rye.example" />
           <input aria-label="Password" type="password" className={finput} defaultValue="demo-only" />
           <button className="w-full rounded-xl bg-gradient-to-r from-flw-violet to-flw-cyan py-2.5 font-medium text-flw-bg">Continue</button>
+          <button type="button" onClick={() => router.push("/flow/app")} className="w-full rounded-xl border border-flw-line py-2.5 text-sm text-flw-mute hover:border-flw-cyan">SSO (planned)</button>
         </form>
         <p className="mt-5 text-center text-xs text-flw-mute"><Link href="/flow">← back</Link></p>
       </Glass>

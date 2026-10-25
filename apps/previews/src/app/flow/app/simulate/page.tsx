@@ -90,6 +90,24 @@ export default function Simulate() {
             </div>
           </Glass>
         </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Glass>
+            <GHead title="State inspector" />
+            <dl className="space-y-1 p-4 font-mono text-[11px]">
+              {[["stage", sim.state.stage], ["service", sim.state.serviceId ?? "—"], ["offered", sim.state.offered.length], ["customer", sim.state.customerName ?? "—"], ["bookings", sim.state.bookings.length], ["frustration", sim.state.frustration], ["flow node", sim.state.node]].map(([k, v]) => (
+                <div key={String(k)} className="flex justify-between"><dt className="text-flw-mute">{k}</dt><dd>{String(v)}</dd></div>
+              ))}
+            </dl>
+          </Glass>
+          <Glass>
+            <GHead title="Turn timing (simulated)" />
+            <div className="p-4">
+              <table className="w-full font-mono text-[11px]"><thead className="text-flw-mute"><tr><th className="text-left font-normal">turn</th><th className="text-right font-normal">agent</th><th className="text-right font-normal">tools</th></tr></thead>
+                <tbody>{sim.timings.slice(-6).map((t) => <tr key={t.turn}><td>{t.turn}</td><td className="text-right">{t.agentMs}ms</td><td className="text-right">{t.toolMs}ms</td></tr>)}</tbody></table>
+              <p className="mt-2 text-[11px] text-flw-mute">Animation timings only; real STT/LLM/TTS latency is measured in Phase 3.</p>
+            </div>
+          </Glass>
+        </div>
       </div>
     </div>
   );
