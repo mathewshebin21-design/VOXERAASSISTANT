@@ -30,7 +30,7 @@ export default function Billing() {
         <Stat label="Projected month end" value={projected.toFixed(0)} sub={over ? `≈ ${gbp(over * plan.overagePerMinGBP)} overage` : "within allowance"} tone={over ? "warn" : "ok"} />
         <Stat label="Est. provider cost · Oct" value={gbp(mtd.totalCostGBP)} sub={`${gbp(GBP_PER_MIN, 3)}/min assumption`} />
       </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
         <Panel title="Cumulative minutes · October">
           <div className="h-64"><ResponsiveContainer>
             <BarChart data={series} margin={{ left: -16, right: 8, top: 8 }}>
@@ -51,7 +51,7 @@ export default function Billing() {
           <p className="border-t border-cmd-line px-4 py-2 text-[11px] text-cmd-mute">Planning estimates from public list prices (Phase 0). To be replaced by metered provider costs.</p>
         </Panel>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         {PLANS.map((p) => (
           <div key={p.id} className={clsx("rounded-lg border p-5", p.id === plan.id ? "border-cmd-violet bg-cmd-violet/5" : "border-cmd-line bg-cmd-panel")}>
             <div className="flex items-center justify-between"><span className="font-medium">{p.name}</span>{p.id === plan.id && <Tag tone="violet">current</Tag>}</div>

@@ -43,7 +43,7 @@ export default function Knowledge() {
           <div><span className="font-medium text-cmd-warn">Conflict detected:</span> {conflicts.map((c) => `“${c.topic}” has different amounts (${c.amounts.join(" vs ")})`).join("; ")}. The agent will not quote these figures until resolved.</div>
         </div>
       )}
-      <div className="grid gap-4 xl:grid-cols-[320px_1fr_360px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr_360px]">
         <Panel dense title={`${knowledge.length} entries`}>
           <ul className="max-h-[560px] overflow-y-auto scroll-thin">
             {CATS.map((cat) => {

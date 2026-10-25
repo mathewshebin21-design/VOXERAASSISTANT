@@ -30,7 +30,7 @@ export default function Team() {
   return (
     <>
       <PageHead kicker="Admin · access" title="Team & audit log" />
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Panel title="Members" dense>
           <ul>{team.map((m) => (
             <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-cmd-line px-4 py-3 first:border-0">

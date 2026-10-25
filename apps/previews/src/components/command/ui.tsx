@@ -6,7 +6,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export function Panel({ title, action, children, className, dense }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; dense?: boolean }) {
   return (
-    <section className={clsx("rounded-lg border border-cmd-line bg-cmd-panel", className)}>
+    <section className={clsx("min-w-0 rounded-lg border border-cmd-line bg-cmd-panel", className)}>
       {title && (
         <header className="flex items-center justify-between gap-3 border-b border-cmd-line px-4 py-2.5">
           <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-cmd-mute">{title}</h2>

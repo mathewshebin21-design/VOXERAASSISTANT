@@ -18,7 +18,7 @@ export default function Integrations() {
   return (
     <>
       <PageHead kicker="Admin · connections" title="Integrations"><Tag tone="warn">No real connections in preview</Tag></PageHead>
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
         <div className="space-y-4">
           {groups.map((g) => (
             <Panel key={g} title={g} dense>

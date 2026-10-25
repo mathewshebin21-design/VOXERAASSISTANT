@@ -16,7 +16,7 @@ export default function Wizard() {
   return (
     <>
       <PageHead kicker={`Build · new agent · step ${w.step + 1}/${w.steps.length}`} title="Agent creation wizard" />
-      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
         <ol className="flex gap-1 overflow-x-auto no-scrollbar lg:flex-col">
           {w.steps.map((s, i) => (
             <li key={s.id}>
@@ -50,7 +50,7 @@ export default function Wizard() {
             {w.current.id === "voice" && <>
               <Field label="Voice"><select className={inputCls} value={d.voiceId} onChange={(e) => set({ voiceId: e.target.value })}>{VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}</select></Field>
               <Field label="Greeting" hint="Must disclose AI identity."><textarea rows={3} className={inputCls} value={d.greeting} onChange={(e) => set({ greeting: e.target.value })} /></Field>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label={`Warmth · ${d.warmth}`}><Slider label="Warmth" value={d.warmth} onChange={(n) => set({ warmth: n })} /></Field>
                 <Field label={`Detail · ${d.verbosity}`}><Slider label="Detail" value={d.verbosity} onChange={(n) => set({ verbosity: n })} /></Field>
               </div>

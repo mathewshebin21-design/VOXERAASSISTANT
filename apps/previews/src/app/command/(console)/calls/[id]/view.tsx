@@ -44,7 +44,7 @@ export function TranscriptView({ id }: { id: string }) {
         <Btn onClick={download}><Download size={14} /> JSON</Btn>
         <Btn variant="danger" onClick={() => { if (confirm("Delete this transcript? (Preview: only hides it in this browser session.)")) setDeleted(true); }}><Trash2 size={14} /> Delete</Btn>
       </PageHead>
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_340px]">
         <Panel dense title="Conversation" action={<Tag tone="warn">demo transcript</Tag>}>
           {deleted ? (
             <div className="p-8 text-center text-sm text-cmd-mute">Transcript deleted. In production this writes an audit entry and purges the recording and transcript from storage.</div>
@@ -61,7 +61,7 @@ export function TranscriptView({ id }: { id: string }) {
                   const future = turn.at > t;
                   const text = masked ? redact(turn.text, names) : turn.text;
                   return (
-                    <li key={i} className={clsx("grid grid-cols-[44px_1fr] gap-3 transition", future && "opacity-25")}>
+                    <li key={i} className={clsx("grid grid-cols-[44px_minmax(0,1fr)] gap-3 transition", future && "opacity-25")}>
                       <span className="pt-0.5 font-mono text-[11px] text-cmd-mute">{fmtDuration(turn.at)}</span>
                       {turn.speaker === "tool" && turn.tool ? (
                         <div className={clsx("rounded-md border px-3 py-2", turn.tool.ok ? "border-cmd-cyan/30 bg-cmd-cyan/5" : "border-cmd-bad/40 bg-cmd-bad/5")}>

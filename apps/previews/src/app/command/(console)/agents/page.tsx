@@ -39,7 +39,7 @@ export default function Agents() {
       </div>
 
       {tab === "Persona & voice" && (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Panel title="Identity">
             <div className="space-y-4">
               <Field label="Agent name"><input className={inputCls} value={p.agentName} onChange={(e) => s.setPersona({ agentName: e.target.value })} /></Field>
@@ -73,7 +73,7 @@ export default function Agents() {
       )}
 
       {tab === "Behaviour" && (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Panel title="Tool permissions">
             {[["Book, move & cancel appointments", "allowBooking"], ["Transfer calls to staff", "allowTransfer"]].map(([label, key]) => (
               <div key={key} className="flex items-center justify-between border-b border-cmd-line py-2.5 last:border-0">
@@ -105,7 +105,7 @@ export default function Agents() {
             <p className="mt-2 text-xs text-cmd-mute">Greyed services must be arranged by staff — the agent takes a message.</p>
           </Panel>
           <Panel title="Recording & retention" className="lg:col-span-2">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="flex items-center justify-between"><span className="text-sm">Play recording notice</span><Toggle label="Recording notice" on={p.recordingDisclosure} onChange={(b) => s.setPersona({ recordingDisclosure: b })} /></div>
               <Field label="Retention (days)"><input type="number" min={7} max={365} className={inputCls} value={s.draft.retentionDays} onChange={(e) => s.setDraft({ retentionDays: Number(e.target.value) })} /></Field>
               <Field label="Recording notice text"><input className={inputCls} value={p.recordingText} onChange={(e) => s.setPersona({ recordingText: e.target.value })} /></Field>

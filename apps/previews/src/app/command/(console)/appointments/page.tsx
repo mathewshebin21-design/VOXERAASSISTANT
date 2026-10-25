@@ -42,7 +42,7 @@ export default function Appointments() {
         <Stat label="Upcoming 7d" value={all.filter((a) => a.date > DEMO_TODAY && a.date <= addDays(DEMO_TODAY, 7) && a.status === "confirmed").length} tone="cyan" sub="confirmed" />
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_320px]">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
         <Panel dense title={<span>{fmtDate(day)} · staff lanes</span>} action={
           <div className="flex items-center gap-1">
             <Btn onClick={() => setDay(addDays(day, -1))} aria-label="Previous day"><ChevronLeft size={14} /></Btn>

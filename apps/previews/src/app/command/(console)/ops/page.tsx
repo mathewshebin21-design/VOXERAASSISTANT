@@ -48,7 +48,7 @@ export default function Ops() {
         <Stat label="Cost / booking" value={gbp(m.costPerBookingGBP)} sub={`${gbp(m.costPerMinuteGBP, 3)}/min · assumption-based`} />
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel title="Call volume & bookings" className="xl:col-span-2" action={<span className="font-mono text-[10px] text-cmd-mute">daily</span>}>
           <div className="h-64">
             <ResponsiveContainer>
@@ -83,7 +83,7 @@ export default function Ops() {
         </Panel>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Panel title="Voice latency p50 (simulated)">
           <div className="h-48">
             <ResponsiveContainer>

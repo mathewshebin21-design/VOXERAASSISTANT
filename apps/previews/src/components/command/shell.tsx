@@ -116,12 +116,12 @@ export function CommandShell({ children }: { children: React.ReactNode }) {
             <Search size={14} /> <span className="truncate">Jump to…</span> <kbd className="ml-auto hidden font-mono text-[10px] sm:inline">Ctrl K</kbd>
           </button>
           <div className="ml-auto flex items-center gap-3 font-mono text-[11px] text-cmd-mute">
-            <span className="hidden items-center gap-1.5 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-cmd-ok cmd-blink" />SIM</span>
+            <span className="flex items-center gap-1.5 text-cmd-warn" title="Simulation mode: synthetic demo data"><span className="h-1.5 w-1.5 rounded-full bg-cmd-warn cmd-blink" />DEMO · SIM</span>
             <span className="hidden sm:inline">{fmtDate(DEMO_TODAY)} · {fmtTime(DEMO_NOW_MIN)} BST</span>
             <span className="grid h-7 w-7 place-items-center rounded-full bg-cmd-raised text-[11px] text-cmd-text">AO</span>
           </div>
         </header>
-        <main className="mx-auto max-w-[1400px] p-4 sm:p-6">{children}</main>
+        <main className="mx-auto min-w-0 max-w-[1400px] p-4 sm:p-6">{children}</main>
       </div>
       <AnimatePresence>
         {palette && (

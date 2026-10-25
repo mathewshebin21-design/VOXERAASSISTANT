@@ -20,7 +20,7 @@ export default function Simulator() {
       <PageHead kicker="Build · test" title="Conversation simulator">
         <Tag tone="warn">Text simulation · rule-based stand-in for the LLM</Tag>
       </PageHead>
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
         <Panel dense title={<span className="flex items-center gap-2">session <span className={clsx("h-1.5 w-1.5 rounded-full", started ? "bg-cmd-ok cmd-blink" : "bg-cmd-mute")} /> {sim.state.stage}</span>}
           action={<div className="flex items-center gap-2">
             <span className="hidden font-mono text-[10px] text-cmd-mute sm:inline">fail tools</span>

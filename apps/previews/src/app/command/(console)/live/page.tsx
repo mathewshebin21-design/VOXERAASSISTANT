@@ -22,7 +22,7 @@ export default function Live() {
           <div key={k as string} className="rounded-lg border border-cmd-line bg-cmd-panel px-3 py-2"><div className="text-[10px] uppercase tracking-[0.18em] text-cmd-mute">{k}</div><div className="mt-1 text-sm text-cmd-text">{v}</div></div>
         ))}
       </div>
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {lanes.map((l, i) => {
           const speaking = l.current?.speaker;
           const toolTurn = [...l.visible].reverse().find((t) => t.tool);
