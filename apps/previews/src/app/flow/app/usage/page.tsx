@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { LiveUsage } from "@/components/flow/live-usage";
 import { Chip, Glass, GHead, Heading } from "@/components/flow/ui";
 import { CALLS } from "@/lib/demo-data";
 import { computeMetrics, dailySeries } from "@/lib/metrics";
@@ -16,6 +17,7 @@ export default function Usage() {
   return (
     <>
       <Heading kicker="Usage" title="Minutes, cost and plan"><Chip tone="amber">estimates · nothing billed</Chip></Heading>
+      <LiveUsage />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[["Minutes · Oct", m.totalMinutes.toFixed(0), `of ${plan.includedMinutes} on ${plan.name}`], ["Calls answered", m.answered, `${m.missed} missed`], ["Est. provider cost", gbp(m.totalCostGBP), `${gbp(GBP_PER_MIN, 3)}/min`], ["Est. cost / booking", gbp(m.costPerBookingGBP), `${m.booked} bookings`]].map(([k, v, s]) => (
           <Glass key={String(k)} className="p-4"><div className="text-xs text-flw-mute">{k}</div><div className="mt-1 font-display text-3xl font-semibold">{v}</div><div className="text-xs text-flw-mute">{s}</div></Glass>

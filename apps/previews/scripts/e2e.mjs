@@ -16,7 +16,7 @@ if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
 export const ROUTES = {
   command: ["/command", "/command/login", "/command/ops", "/command/live", "/command/calls", "/command/calls?outcome=booked", "/command/calls/call-0005", "/command/appointments", "/command/agents", "/command/agents/new", "/command/knowledge", "/command/simulator", "/command/integrations", "/command/team", "/command/billing"],
   atelier: ["/atelier", "/atelier/sign-in", "/atelier/studio", "/atelier/studio/create", "/atelier/studio/voice", "/atelier/studio/knowledge", "/atelier/studio/rehearse", "/atelier/studio/calls", "/atelier/studio/calls/call-0005", "/atelier/studio/diary", "/atelier/studio/connections", "/atelier/studio/plan", "/atelier/studio/live", "/atelier/studio/insights", "/atelier/studio/flow", "/atelier/studio/team", "/atelier/studio/calls?outcome=booked"],
-  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked"],
+  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked", "/flow/app/workspace", "/flow/invite?token=demo"],
 };
 
 const results = [];

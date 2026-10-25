@@ -4,7 +4,8 @@ import { clsx } from "clsx";
 import { GitCommit, Play, RotateCcw, Upload } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Chip, FBtn, finput, FSwitch, Glass, GHead, Heading } from "@/components/flow/ui";
+import { LiveAgents } from "@/components/flow/live-agents";
+import { Chip, FBtn, finput, finputAuto, FSwitch, Glass, GHead, Heading } from "@/components/flow/ui";
 import { APPOINTMENTS, SERVICES } from "@/lib/demo-data";
 import { initialState, LANGUAGES, respond, VOICES } from "@/lib/simulator";
 import { usePreview } from "@/lib/store";
@@ -36,12 +37,13 @@ export default function Agent() {
         <Link href="/flow/app/new"><FBtn>New agent wizard</FBtn></Link>
         <Link href="/flow/app/simulate"><FBtn><Play size={14} /> Simulate</FBtn></Link>
       </Heading>
+      <LiveAgents />
       <Glass className="mb-4 flex flex-wrap items-center gap-3 p-4">
         <Chip tone="lime">live v{live.version}</Chip>
         <span className="text-sm text-flw-mute">published {live.publishedAt} · {live.note}</span>
         {dirty ? <Chip tone="amber">unpublished changes</Chip> : <Chip>draft = live</Chip>}
         <div className="flex w-full gap-2 sm:ml-auto sm:w-auto">
-          <input aria-label="Change note" className={finput + " sm:w-64"} placeholder="Change note (required)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <input aria-label="Change note" className={finputAuto + " w-full sm:w-64"} placeholder="Change note (required)" value={note} onChange={(e) => setNote(e.target.value)} />
           <FBtn variant="glow" disabled={!dirty || !note.trim()} onClick={() => { s.publish(note); setNote(""); }}><Upload size={14} /> Publish</FBtn>
         </div>
       </Glass>
@@ -133,7 +135,7 @@ export default function Agent() {
           <ul>{s.draft.escalation.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center gap-3 border-t border-flw-line/60 px-4 py-3 text-sm first:border-0">
               <span className="min-w-0 flex-1">When {r.when.toLowerCase()} →</span>
-              <select aria-label={`Action for ${r.when}`} className={finput + " w-auto"} value={r.action} onChange={(e) => s.setDraft({ escalation: s.draft.escalation.map((x) => x.id === r.id ? { ...x, action: e.target.value as typeof r.action } : x) })}>
+              <select aria-label={`Action for ${r.when}`} className={finputAuto} value={r.action} onChange={(e) => s.setDraft({ escalation: s.draft.escalation.map((x) => x.id === r.id ? { ...x, action: e.target.value as typeof r.action } : x) })}>
                 <option value="transfer">Warm transfer</option><option value="message">Take message</option><option value="urgent_alert">Safety script + urgent alert</option>
               </select>
               <FSwitch label={r.when} on={r.enabled} onChange={(b) => s.setDraft({ escalation: s.draft.escalation.map((x) => x.id === r.id ? { ...x, enabled: b } : x) })} />

@@ -9,11 +9,16 @@ import { Chip, FBtn, finput, FSwitch, Glass, GHead, Heading } from "@/components
 import { SERVICES } from "@/lib/demo-data";
 import { VOICES } from "@/lib/simulator";
 import { useWizard } from "@/lib/wizard";
+import { api, ApiError, PERMS } from "@/lib/live/api";
+import { useActiveOrg } from "@/lib/live/session";
+import { useState } from "react";
 
 // Which flow nodes each wizard step "generates" in the live preview.
 const UNLOCK = [["persona", "greet"], ["intent", "book"], ["slots", "details", "confirm", "booked"], ["guard"], ["kb", "fallback"], ["escalate", "transfer", "message"], ["end"]];
 
 export default function NewAgent() {
+  const active = useActiveOrg();
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const w = useWizard();
   const router = useRouter();
   const { d, set } = w;
@@ -65,11 +70,22 @@ export default function NewAgent() {
               {[["agent", d.agentName], ["business", d.businessName], ["services", d.serviceIds.length], ["voice", d.voiceId], ["after_hours", d.afterHours], ["recording_notice", String(d.recordingDisclosure)], ["nodes", unlocked.length]].map(([k, v]) => <li key={String(k)} className="flex justify-between border-b border-flw-line/60 py-1"><span className="text-flw-mute">{k}</span><span>{v}</span></li>)}
             </ul>}
             {w.errors[id] && <p role="alert" className="text-sm text-flw-pink">{w.errors[id]}</p>}
+            {saveErr && <p role="alert" className="text-sm text-flw-pink">{saveErr}</p>}
+            {active && id === "review" && <p className="text-xs text-flw-mute">Signed in: finishing saves this agent to <span className="text-flw-text">{active.organization.name}</span>.</p>}
           </div>
           <div className="flex justify-between border-t border-flw-line/70 p-4">
             <FBtn onClick={w.back} disabled={w.step === 0}><ArrowLeft size={14} /> Back</FBtn>
             {w.step < w.steps.length - 1 ? <FBtn variant="glow" onClick={w.next} disabled={!w.canNext}>Next <ArrowRight size={14} /></FBtn>
-              : <FBtn variant="glow" onClick={() => { w.finish(); router.push("/flow/app/simulate"); }}>Save & simulate</FBtn>}
+              : <FBtn variant="glow" onClick={async () => {
+                  w.finish();
+                  // Signed in: also save the agent to the workspace (the API re-validates AI disclosure).
+                  if (active && PERMS[active.role].write) {
+                    try {
+                      await api(`/orgs/${active.organization.id}/agents`, { method: "POST", body: { name: d.agentName, greeting: d.greeting.replace("{business}", d.businessName).replace("{agent}", d.agentName), voice_id: d.voiceId, language: "en-GB" } });
+                    } catch (e) { setSaveErr(e instanceof ApiError ? e.detail : "Could not save the agent"); return; }
+                  }
+                  router.push(active ? "/flow/app/agent" : "/flow/app/simulate");
+                }}>{active ? "Save to workspace" : "Save & simulate"}</FBtn>}
           </div>
         </Glass>
         <Glass>

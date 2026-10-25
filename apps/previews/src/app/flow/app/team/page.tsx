@@ -1,8 +1,10 @@
 "use client";
 
 import { Check, Minus, UserPlus } from "lucide-react";
+import { LiveTeam } from "./live";
+import { useActiveOrg, useSession } from "@/lib/live/session";
 import { useState } from "react";
-import { Chip, FBtn, finput, Glass, GHead, Heading } from "@/components/flow/ui";
+import { Chip, FBtn, finput, finputAuto, Glass, GHead, Heading } from "@/components/flow/ui";
 import { TEAM } from "@/lib/demo-data";
 import type { TeamMember } from "@/lib/types";
 
@@ -24,7 +26,7 @@ const AUDIT = [
   ["09:30", "Mia Castell", "auth.login", "new device · Bristol, UK", "mute"],
 ] as const;
 
-export default function Team() {
+function DemoTeam() {
   const [team, setTeam] = useState(TEAM);
   const [email, setEmail] = useState("");
   return (
@@ -37,7 +39,7 @@ export default function Team() {
             <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-flw-line/60 px-4 py-3 first:border-0">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-flw-violet/40 to-flw-cyan/40 text-xs font-semibold">{m.name.split(" ").filter((x) => /^[A-Za-z]/.test(x)).map((x) => x[0]).join("").slice(0, 2)}</span>
               <div className="min-w-0 flex-1"><div className="text-sm font-medium">{m.name}</div><div className="truncate font-mono text-[11px] text-flw-mute">{m.email} · {m.lastActive}</div></div>
-              <select aria-label={`Role for ${m.name}`} disabled={m.role === "Owner"} className={finput + " w-auto"} value={m.role} onChange={(e) => setTeam(team.map((x) => x.id === m.id ? { ...x, role: e.target.value as TeamMember["role"] } : x))}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+              <select aria-label={`Role for ${m.name}`} disabled={m.role === "Owner"} className={finputAuto} value={m.role} onChange={(e) => setTeam(team.map((x) => x.id === m.id ? { ...x, role: e.target.value as TeamMember["role"] } : x))}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
             </li>
           ))}</ul>
           <form className="flex gap-2 border-t border-flw-line/60 p-3" onSubmit={(e) => { e.preventDefault(); if (!/.+@.+\..+/.test(email)) return; setTeam([...team, { id: email, name: email.split("@")[0], email, role: "Viewer", lastActive: "Invited" }]); setEmail(""); }}>
@@ -65,4 +67,11 @@ export default function Team() {
       </div>
     </>
   );
+}
+
+export default function Team() {
+  const status = useSession((s) => s.status);
+  const active = useActiveOrg();
+  if (status === "loading") return <Heading kicker="Team" title="Loading…" />;
+  return active ? <LiveTeam /> : <><DemoTeam /><p className="mt-4 text-xs text-flw-mute">Demo team. <a href="/flow/enter" className="text-flw-cyan underline">Sign in</a> to manage a real workspace.</p></>;
 }

@@ -5,7 +5,7 @@ import { ChevronDown, Download, EyeOff, FileSpreadsheet, Pause, Play, Search, Sh
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Chip, FBtn, finput, Glass, GHead, Heading } from "@/components/flow/ui";
+import { Chip, FBtn, finput, finputAuto, Glass, GHead, Heading } from "@/components/flow/ui";
 import { APPOINTMENTS, CALLS, callById, serviceById, staffById, transcriptFor } from "@/lib/demo-data";
 import { computeMetrics, INTENT_LABEL, OUTCOME_LABEL } from "@/lib/metrics";
 import { usePreview } from "@/lib/store";
@@ -40,9 +40,9 @@ export function CallsView({ id }: { id?: string }) {
       <Heading kicker="Calls" title="Conversation traces"><FBtn onClick={exportCsv}><FileSpreadsheet size={14} /> Export CSV</FBtn><Chip tone="amber">demo records</Chip></Heading>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-flw-mute" /><input aria-label="Search calls" className={finput + " pl-8"} placeholder="Search caller, summary, ID…" value={q} onChange={(e) => { setQ(e.target.value); setN(40); }} /></div>
-        <select aria-label="Outcome" className={finput + " w-auto"} value={outcome} onChange={(e) => setParam("outcome", e.target.value)}><option value="">All outcomes</option>{Object.entries(OUTCOME_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        <select aria-label="Intent" className={finput + " w-auto"} value={intent} onChange={(e) => setParam("intent", e.target.value)}><option value="">All intents</option>{Object.entries(INTENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        <select aria-label="Status" className={finput + " w-auto"} value={status} onChange={(e) => setParam("status", e.target.value)}><option value="">Any status</option><option value="answered">Answered</option><option value="missed">Missed</option><option value="voicemail">Voicemail</option></select>
+        <select aria-label="Outcome" className={finputAuto} value={outcome} onChange={(e) => setParam("outcome", e.target.value)}><option value="">All outcomes</option>{Object.entries(OUTCOME_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+        <select aria-label="Intent" className={finputAuto} value={intent} onChange={(e) => setParam("intent", e.target.value)}><option value="">All intents</option>{Object.entries(INTENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+        <select aria-label="Status" className={finputAuto} value={status} onChange={(e) => setParam("status", e.target.value)}><option value="">Any status</option><option value="answered">Answered</option><option value="missed">Missed</option><option value="voicemail">Voicemail</option></select>
       </div>
       <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-flw-mute">
         <span>{rows.length} calls</span><span>{m.totalMinutes.toFixed(0)} min</span><span>avg {fmtDuration(m.avgDurationSec)}</span><span>est. cost {gbp(m.totalCostGBP)}</span>

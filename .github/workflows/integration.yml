@@ -1,0 +1,59 @@
+name: integration
+
+# Flow front end ↔ Next.js session proxy ↔ VOXERA API ↔ PostgreSQL, driven by a real browser.
+on:
+  push:
+    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+  pull_request:
+    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  live-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres-ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres-ci-only
+      VOXERA_JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-1234
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - name: Database roles and migrations
+        working-directory: services/api
+        run: |
+          psql -h localhost -U postgres -f deploy/init-roles.sql
+          uv sync --frozen
+          uv run alembic upgrade head
+      - name: Start API
+        working-directory: services/api
+        run: nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+      - name: Build and start web
+        working-directory: apps/previews
+        run: |
+          npm ci
+          npm run build
+          VOXERA_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > web.log 2>&1 &
+          npx wait-on -t 60000 http://localhost:3000 http://127.0.0.1:8000/healthz
+      - name: Live end-to-end
+        working-directory: apps/previews
+        run: |
+          npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
+          BASE_URL=http://localhost:3000 node scripts/e2e-live.mjs
+      - if: failure()
+        run: tail -n 100 services/api/api.log apps/previews/web.log

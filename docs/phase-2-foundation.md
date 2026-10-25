@@ -1,6 +1,6 @@
 # Phase 2 — Multi-tenant SaaS foundation
 
-_Status: implemented and tested locally against PostgreSQL 16. Not deployed. Not connected to the Flow front end yet (next step)._
+_Status: implemented and tested locally against PostgreSQL 16, and connected to the Flow front end. Not deployed._
 
 Code: [`services/api`](../services/api) · Decisions: [ADR-0002](decisions/ADR-0002-tenancy-and-auth.md)
 
@@ -35,8 +35,25 @@ Code: [`services/api`](../services/api) · Decisions: [ADR-0002](decisions/ADR-0
 
 Not verified here: the Docker image build (no Docker daemon in this environment — CI builds it), load, and penetration testing.
 
+## Front-end integration (Flow)
+
+The approved Flow design now uses the API for everything Phase 2 covers ([ADR-0003](decisions/ADR-0003-web-session-bff.md)):
+
+| Flow screen | Backed by |
+|---|---|
+| `/flow/enter` — sign in / create workspace | `/api/session/*` → auth endpoints; httpOnly cookies |
+| Workspace switcher, new workspace, sign out (header) | `/me/organizations`, `POST /orgs`, logout |
+| `/flow/app/workspace` — Profile, Opening hours, Services, Settings, Data & privacy | business profile, office hours, services, settings, export, workspace and account deletion |
+| `/flow/app/team` — members, roles, invitations, audit log | members, invitations, audit logs (permission-aware UI) |
+| `/flow/invite?token=…` | invitation acceptance |
+| `/flow/app/agent` — saved agents; `/flow/app/new` wizard saves to workspace | agents |
+| `/flow/app/usage` — metered usage; simulator sessions recorded as simulated minutes | usage summary and usage events |
+
+Signed out, every page still works in demo mode. Signed in, pages that have no real data yet (calls, live, insights, calendar, knowledge, simulator, canvas) show a "still shows demo data" notice.
+
+**Verification:** `scripts/e2e-live.mjs` — **21/21 checks** driving a real browser against Next.js + API + PostgreSQL: sign-up, httpOnly cookies, CSRF rejection, profile save + persistence, API validation errors surfaced, opening hours (valid + rejected), services (add + duplicate rejected), settings, agent save, invitation link, audit log entries, simulated usage separated from billable, demo notice, export without secrets, colleague accepts invitation as manager, read-only UI for manager, single-use invitation, outsider gets 404 through the proxy, sign out/in, workspace deletion revokes colleague access, account deletion. The 114-check demo-mode suite still passes.
+
 ## Known limitations / next steps
-- The Flow UI still runs on browser-local demo data; wiring it to this API (sign-in, workspace switcher, business settings, services, team, audit, usage) is the next step.
 - Invitation and password-reset **emails** are not sent yet (Phase 8 messaging); in development the invite token is returned by the API.
 - No MFA/SSO yet. Login limiter is single-instance.
 - Calls, transcripts, knowledge and appointments tables arrive with Phases 3–7, each with RLS policies and tests in the same pattern.

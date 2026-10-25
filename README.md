@@ -2,7 +2,7 @@
 
 Multi-tenant AI voice receptionist and appointment automation platform — **work in progress**.
 
-> **Current stage: Phase 2 (multi-tenant foundation) implemented.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. There is **no telephony and no live AI model** yet, and the front end is not yet connected to the API. Nothing here should be described as production-ready.
+> **Current stage: Phase 2 (multi-tenant foundation) implemented.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. The Flow front end is connected to the API for accounts, workspaces, team, business data, agents and usage. There is **no telephony and no live AI model** yet. Nothing here should be described as production-ready.
 
 ## Contents
 
@@ -49,6 +49,8 @@ BASE_URL=http://localhost:3000 npm run e2e      # browser E2E (needs Playwright 
 ## Run the API
 
 See [`services/api/README.md`](services/api/README.md), or run everything with `docker compose up`.
+
+To use real workspaces in the Flow UI, start the API on port 8000 and the web app with `VOXERA_API_URL=http://127.0.0.1:8000`, then open http://localhost:3000/flow/enter. Without the API, Flow runs in demo mode.
 
 ## Roadmap
 

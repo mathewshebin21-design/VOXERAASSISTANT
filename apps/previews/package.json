@@ -2,7 +2,7 @@
   "name": "@voxera/previews",
   "version": "0.1.0",
   "private": true,
-  "description": "VOXERA AI \u2014 Phase 1 interactive design previews (A Command, B Atelier, C Flow). Demo data only.",
+  "description": "VOXERA AI — Phase 1 interactive design previews (A Command, B Atelier, C Flow). Demo data only.",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -21,6 +21,7 @@
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "recharts": "2.15.4",
+    "server-only": "0.0.1",
     "zustand": "5.0.8"
   },
   "devDependencies": {

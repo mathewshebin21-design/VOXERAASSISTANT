@@ -21,6 +21,9 @@ export function FBtn({ variant = "ghost", className, ...p }: ButtonHTMLAttribute
 
 export const finput = "w-full rounded-xl border border-flw-line bg-flw-bg/70 px-3 py-2 text-sm text-flw-text placeholder:text-flw-mute/60 focus:border-flw-cyan focus:outline-none";
 
+/** Same look as finput, sized to content (for inline selects and flexible inputs). */
+export const finputAuto = finput.replace("w-full ", "");
+
 export function Chip({ children, tone = "mute" }: { children: ReactNode; tone?: "mute" | "violet" | "cyan" | "pink" | "lime" | "amber" }) {
   return <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", {
     mute: "bg-flw-line/50 text-flw-mute", violet: "bg-flw-violet/15 text-flw-violet", cyan: "bg-flw-cyan/15 text-flw-cyan", pink: "bg-flw-pink/15 text-flw-pink", lime: "bg-flw-lime/15 text-flw-lime", amber: "bg-flw-amber/15 text-flw-amber",

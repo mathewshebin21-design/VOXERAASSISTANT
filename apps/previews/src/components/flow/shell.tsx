@@ -2,11 +2,13 @@
 
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, BarChart3, Bot, BookOpen, CalendarRange, Gauge, LineChart, MessagesSquare, Plug, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
+import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, LineChart, LogOut, MessagesSquare, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { usePreview } from "@/lib/store";
+import { api } from "@/lib/live/api";
+import { useActiveOrg, useSession } from "@/lib/live/session";
 
 export const FLOW_NAV = [
   { href: "/flow/app", label: "Pulse", icon: Gauge, exact: true, key: "1" },
@@ -19,9 +21,64 @@ export const FLOW_NAV = [
   { href: "/flow/app/simulate", label: "Simulate", icon: Sparkles, key: "8" },
   { href: "/flow/app/knowledge", label: "Knowledge", icon: BookOpen, key: "9" },
   { href: "/flow/app/integrations", label: "Tools", icon: Plug, key: "" },
+  { href: "/flow/app/workspace", label: "Workspace", icon: Building2, key: "" },
   { href: "/flow/app/team", label: "Team", icon: Users, key: "" },
   { href: "/flow/app/usage", label: "Usage", icon: BarChart3, key: "0" },
 ];
+
+// Pages whose records only exist as demo data until later phases add the tables.
+const DEMO_BACKED = ["/flow/app/live", "/flow/app/insights", "/flow/app/calls", "/flow/app/calendar", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/canvas"];
+
+function WorkspaceMenu() {
+  const router = useRouter();
+  const { status, user, orgs, switchOrg, signOut, reloadOrgs } = useSession();
+  const active = useActiveOrg();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  if (status === "loading") return <span className="h-8 w-32 animate-pulse rounded-xl bg-flw-surface/60" />;
+  if (status === "anonymous") {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="rounded-full border border-flw-amber/30 bg-flw-amber/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-flw-amber">Demo · simulated</span>
+        <Link href="/flow/enter" className="rounded-xl border border-flw-line px-3 py-1.5 text-xs hover:border-flw-cyan">Sign in</Link>
+      </div>
+    );
+  }
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} aria-label="Workspace menu" className="flex items-center gap-2 rounded-xl border border-flw-line bg-flw-surface/70 px-3 py-1.5 text-sm hover:border-flw-violet/60">
+        <span className="grid h-5 w-5 place-items-center rounded-md bg-gradient-to-br from-flw-violet to-flw-cyan text-[10px] font-bold text-flw-bg">{active?.organization.name[0] ?? "?"}</span>
+        <span className="max-w-[160px] truncate">{active?.organization.name ?? "No workspace"}</span>
+        <span className="hidden font-mono text-[10px] text-flw-mute sm:inline">{active?.role}</span>
+        <ChevronDown size={14} className="text-flw-mute" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-flw-line bg-flw-glass shadow-2xl backdrop-blur-xl">
+          <div className="border-b border-flw-line/70 px-4 py-3 text-xs text-flw-mute">Signed in as <span className="text-flw-text">{user?.email}</span></div>
+          <ul className="max-h-60 overflow-y-auto p-1">
+            {orgs.map((o) => (
+              <li key={o.organization.id}>
+                <button role="menuitem" onClick={() => { switchOrg(o.organization.id); setOpen(false); router.refresh(); }} className={clsx("flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm hover:bg-flw-surface", o.organization.id === active?.organization.id && "text-flw-cyan")}>
+                  <span className="truncate">{o.organization.name}</span><span className="font-mono text-[10px] text-flw-mute">{o.role}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {creating ? (
+            <form className="flex gap-2 border-t border-flw-line/70 p-2" onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; const org = await api<{ id: string }>("/orgs", { method: "POST", body: { name } }); await reloadOrgs(); switchOrg(org.id); setName(""); setCreating(false); setOpen(false); router.push("/flow/app/workspace"); }}>
+              <input autoFocus aria-label="New workspace name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workspace name" className="min-w-0 flex-1 rounded-lg border border-flw-line bg-flw-bg px-2 py-1.5 text-sm outline-none focus:border-flw-cyan" />
+              <button className="rounded-lg bg-flw-violet/30 px-3 text-sm">Create</button>
+            </form>
+          ) : (
+            <button role="menuitem" onClick={() => setCreating(true)} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-text"><Plus size={14} /> New workspace</button>
+          )}
+          <button role="menuitem" onClick={async () => { await signOut(); setOpen(false); router.push("/flow/enter"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-pink"><LogOut size={14} /> Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function FlowShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -31,6 +88,7 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
   const [q, setQ] = useState("");
   const on = (h: string, exact?: boolean) => (exact ? path === h : path === h || path.startsWith(h + "/"));
   const canvas = path.startsWith("/flow/app/canvas");
+  const signedIn = useSession((st) => st.status === "signed_in");
   const results = useMemo(() => [...FLOW_NAV, { href: "/flow/app/new", label: "New agent wizard", icon: Wand2, key: "" }].filter((n) => n.label.toLowerCase().includes(q.toLowerCase())), [q]);
 
   useEffect(() => {
@@ -65,8 +123,13 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
         <span className="font-display text-sm font-semibold tracking-wide">VOXERA <span className="bg-gradient-to-r from-flw-violet to-flw-cyan bg-clip-text text-transparent">FLOW</span></span>
         <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline">Halden &amp; Rye · {agent}</span>
         <button onClick={() => setPalette(true)} className="ml-auto hidden items-center gap-2 rounded-xl border border-flw-line bg-flw-surface/60 px-3 py-1.5 text-xs text-flw-mute hover:border-flw-violet/60 sm:flex" aria-label="Jump to a page"><Search size={13} /> Jump to… <kbd>Ctrl K</kbd></button>
-        <span className="ml-auto rounded-full border border-flw-amber/30 bg-flw-amber/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-flw-amber sm:ml-0">Demo · simulated</span>
+        <div className="ml-auto sm:ml-0"><WorkspaceMenu /></div>
       </header>
+      {signedIn && DEMO_BACKED.some((d) => path.startsWith(d)) && (
+        <div className="relative z-20 mx-5 mb-3 rounded-xl border border-flw-amber/30 bg-flw-amber/5 px-4 py-2 text-xs text-flw-amber md:ml-24">
+          Signed in to a real workspace — but this page still shows <b>demo data</b>. Calls, knowledge and appointments are stored for real from Phases 3–7.
+        </div>
+      )}
       <main className={clsx("relative z-10 min-w-0 pb-28 md:pb-10 md:pl-24", canvas ? "px-3 md:pr-4" : "mx-auto max-w-[1400px] px-5")}>{children}</main>
       <nav className="no-scrollbar fixed inset-x-3 bottom-3 z-40 flex gap-1 overflow-x-auto rounded-2xl border border-flw-line bg-flw-surface/90 p-1.5 backdrop-blur-xl md:hidden" aria-label="Flow navigation (mobile)">
         {FLOW_NAV.map((n) => (

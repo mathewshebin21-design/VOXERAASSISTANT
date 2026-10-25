@@ -5,11 +5,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Mic, Play, RotateCcw, Send, ShieldAlert, Volume2, VolumeX, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FlowCanvas } from "@/components/flow/canvas";
+import { useRecordSimulatedUsage } from "@/components/flow/live-usage";
 import { Chip, FBtn, FSwitch, Glass, GHead, Orb } from "@/components/flow/ui";
 import { useSimulator } from "@/lib/use-simulator";
 
 export default function Simulate() {
   const sim = useSimulator();
+  useRecordSimulatedUsage(sim.messages.length);
   const [text, setText] = useState("");
   const [visited, setVisited] = useState<string[]>([]);
   const end = useRef<HTMLDivElement>(null);
