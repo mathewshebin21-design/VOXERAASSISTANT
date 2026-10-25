@@ -10,7 +10,7 @@ from sqlalchemy import text
 from .config import get_settings
 from .db import SessionLocal
 from .logging_setup import configure_logging, request_id_var
-from .routers import agents, auth, business, orgs, records
+from .routers import agents, auth, business, orgs, records, voice
 
 log = logging.getLogger("voxera.api")
 
@@ -76,7 +76,7 @@ def create_app() -> FastAPI:
             log.exception("readiness check failed")
             return JSONResponse({"status": "unavailable"}, status_code=503)
 
-    for r in (auth.router, orgs.router, business.router, agents.router, records.router):
+    for r in (auth.router, orgs.router, business.router, agents.router, records.router, voice.router):
         app.include_router(r)
     return app
 

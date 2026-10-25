@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, time
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
@@ -322,3 +322,57 @@ class UsageSummary(BaseModel):
     live: dict[str, Decimal]
     simulated: dict[str, Decimal]
     event_count: int
+
+
+# ---- voice lab ----
+
+Ms = Annotated[int, Field(ge=0, le=600_000)]
+Stage = Literal["stt", "brain", "tts"]
+
+
+class VoiceTurnIn(Strict):
+    turn: int = Field(ge=0, le=1000)
+    input: Literal["greeting", "voice", "typed", "prompt"]
+    sttMs: Ms | None
+    brainFirstMs: Ms | None
+    brainTotalMs: Ms | None
+    ttsFirstMs: Ms | None
+    e2eMs: Ms | None
+    interrupted: bool
+    bargeInRecoveryMs: Ms | None
+    failures: list[Stage] = Field(max_length=10)
+    fallbacks: list[Annotated[str, StringConstraints(max_length=60, pattern=r"^[\w →\-().]+$")]] = Field(max_length=10)
+
+
+class VoiceSessionIn(Strict):
+    client_session_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    started_at: datetime
+    duration_ms: Ms
+    stt_provider: str = Field(min_length=1, max_length=80)
+    brain_provider: str = Field(min_length=1, max_length=80)
+    tts_provider: str = Field(min_length=1, max_length=80)
+    turns: list[VoiceTurnIn] = Field(min_length=1, max_length=300)
+
+    @field_validator("started_at")
+    @classmethod
+    def _aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("started_at must include a time-zone offset")
+        return v
+
+
+class VoiceSessionOut(Out):
+    id: uuid.UUID
+    client_session_id: str
+    created_by: uuid.UUID | None
+    started_at: datetime
+    duration_ms: int
+    stt_provider: str
+    brain_provider: str
+    tts_provider: str
+    summary: dict
+    created_at: datetime
+
+
+class VoiceSessionDetail(VoiceSessionOut):
+    turns: list[dict]

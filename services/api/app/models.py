@@ -289,3 +289,28 @@ class DeletionReceipt(Base):
     deleted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class VoiceTestSession(Base):
+    """Measured metrics from a Voice lab test call. Contains no audio and no transcript text."""
+
+    __tablename__ = "voice_test_sessions"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    client_session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    stt_provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    brain_provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    tts_provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    turns: Mapped[list] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
+    summary: Mapped[dict] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        UniqueConstraint("organization_id", "client_session_id", name="uq_voice_session_client_id"),
+        CheckConstraint("duration_ms >= 0", name="ck_voice_duration"),
+        Index("ix_voice_sessions_org_time", "organization_id", "started_at"),
+    )

@@ -16,7 +16,7 @@ if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
 export const ROUTES = {
   command: ["/command", "/command/login", "/command/ops", "/command/live", "/command/calls", "/command/calls?outcome=booked", "/command/calls/call-0005", "/command/appointments", "/command/agents", "/command/agents/new", "/command/knowledge", "/command/simulator", "/command/integrations", "/command/team", "/command/billing"],
   atelier: ["/atelier", "/atelier/sign-in", "/atelier/studio", "/atelier/studio/create", "/atelier/studio/voice", "/atelier/studio/knowledge", "/atelier/studio/rehearse", "/atelier/studio/calls", "/atelier/studio/calls/call-0005", "/atelier/studio/diary", "/atelier/studio/connections", "/atelier/studio/plan", "/atelier/studio/live", "/atelier/studio/insights", "/atelier/studio/flow", "/atelier/studio/team", "/atelier/studio/calls?outcome=booked"],
-  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked", "/flow/app/workspace", "/flow/invite?token=demo"],
+  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/voice", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked", "/flow/app/workspace", "/flow/invite?token=demo"],
 };
 
 const results = [];
@@ -123,6 +123,57 @@ for (const [design, route] of Object.entries(WIZ)) {
   } catch (e) {
     record(`wizard  ${design}: validation`, false, String(e).slice(0, 200));
   }
+  await ctx.close();
+}
+
+// Voice lab: the real-time engine end to end (typed caller input; headless has no speech engines,
+// which also exercises the synthesis watchdog and text-only fallback).
+if (!ONLY || ONLY === "flow") {
+  const ctx = await browser.newContext({ viewport: viewports.desktop });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const v = (name, fn) => fn().then((ok) => record(`voice   ${name}`, ok !== false), (e) => record(`voice   ${name}`, false, String(e).split("\n")[0].slice(0, 200)));
+  const log = () => page.evaluate(() => [...document.querySelectorAll('[aria-live="polite"]')].map((e) => e.innerText).join("\n"));
+  const phase = () => page.getByTestId("voice-phase").innerText();
+  const waitPhase = (re, ms = 15000) => page.waitForFunction((src) => new RegExp(src).test(document.querySelector('[data-testid="voice-phase"]')?.textContent ?? ""), re, { timeout: ms });
+  const input = page.getByLabel("Type as the caller");
+  const say = async (t) => { await input.fill(t); await input.press("Enter"); };
+  await page.goto(BASE + "/flow/app/voice", { waitUntil: "networkidle" });
+  const mic = page.getByRole("switch", { name: "Use microphone" });
+  if ((await mic.getAttribute("aria-checked")) === "true") await mic.click();
+  await v("call starts, greets and measures time to first audio", async () => {
+    await page.getByRole("button", { name: "Start call" }).click();
+    await page.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid="ttfa"]')?.textContent ?? ""), null, { timeout: 15000 });
+    return /AI receptionist|Halden/i.test(await log());
+  });
+  await v("streams a reply with a tool call during the turn", async () => {
+    await waitPhase("Listening");
+    await say("Can I book a gloss on Friday afternoon?");
+    await page.waitForFunction(() => /check_availability/.test(document.body.innerText), null, { timeout: 15000 });
+    await waitPhase("Listening", 30000);
+    return (await page.getByTestId("turn-table").locator("tbody tr").count()) >= 2;
+  });
+  await v("barge-in stops the agent mid-reply", async () => {
+    await say("What are your opening hours on Saturday and do you have parking nearby?");
+    await waitPhase("Agent speaking");
+    await say("Sorry, actually where are you?");
+    await page.waitForFunction(() => /interrupted/.test(document.body.innerText) && /Barge-in/.test(document.body.innerText), null, { timeout: 8000 });
+    await waitPhase("Listening", 30000);
+  });
+  await v("brain failure is recovered with the recovery line", async () => {
+    await page.getByLabel("Brain fault").selectOption("error");
+    await say("Do you do balayage?");
+    await page.waitForFunction(() => /having a problem on my side/.test(document.body.innerText), null, { timeout: 15000 });
+    await page.getByLabel("Brain fault").selectOption("ok");
+    await waitPhase("Listening", 30000);
+    return /brain failed/.test(await page.getByTestId("turn-table").innerText());
+  });
+  await v("ending the call stops the pipeline", async () => {
+    await page.getByRole("button", { name: "End call" }).click();
+    await waitPhase("Call ended");
+    return (await phase()) === "Call ended" && errors.length === 0;
+  });
   await ctx.close();
 }
 

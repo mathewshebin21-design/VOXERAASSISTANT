@@ -26,6 +26,7 @@ from ..models import (
     Service,
     UsageEvent,
     User,
+    VoiceTestSession,
     WorkspaceSettings,
 )
 from ..permissions import Perm, has_perm
@@ -219,6 +220,7 @@ def export_org(ctx: Annotated[OrgContext, Depends(require(Perm.data_export))], d
             {k: v for k, v in r.items() if k != "token_hash"} for r in rows(Invitation, Invitation.created_at)
         ],
         "usage_events": rows(UsageEvent, UsageEvent.occurred_at),
+        "voice_test_sessions": rows(VoiceTestSession, VoiceTestSession.started_at),
         "audit_logs": rows(AuditLog, AuditLog.created_at),
     }
     audit.record(db, oid, ctx.user.id, "organization.exported", "organization", oid, None, client_meta(request))

@@ -118,6 +118,18 @@ await step("agent draft saves to the workspace", async () => {
   await p.getByText(/saved \d/).first().waitFor({ timeout: 8000 });
 });
 
+await step("voice lab test call saves measured metrics to the workspace", async () => {
+  await p.goto(`${BASE}/flow/app/voice`, { waitUntil: "networkidle" });
+  const mic = p.getByRole("switch", { name: "Use microphone" });
+  if ((await mic.getAttribute("aria-checked")) === "true") await mic.click();
+  await p.getByRole("button", { name: "Start call" }).click();
+  await p.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid="ttfa"]')?.textContent ?? ""), null, { timeout: 15000 });
+  await p.getByRole("button", { name: "End call" }).click();
+  await p.getByRole("button", { name: "Save" }).click();
+  await status(p, "Saved to workspace");
+  await p.getByTestId("voice-history").locator("tbody tr").first().waitFor({ timeout: 8000 });
+});
+
 let inviteLink = "";
 await step("invite a colleague (development link shown)", async () => {
   await p.goto(`${BASE}/flow/app/team`, { waitUntil: "networkidle" });
@@ -131,7 +143,7 @@ await step("invite a colleague (development link shown)", async () => {
 await step("audit log shows the owner's actions", async () => {
   await p.reload({ waitUntil: "networkidle" });
   const text = await p.locator("table").last().innerText();
-  return ["organization.created", "business_profile.updated", "office_hours.replaced", "service.created", "settings.updated", "agent.created", "invitation.created"].every((a) => text.includes(a));
+  return ["organization.created", "business_profile.updated", "office_hours.replaced", "service.created", "settings.updated", "agent.created", "voice_session.saved", "invitation.created"].every((a) => text.includes(a));
 });
 
 await step("usage: simulated minute recorded separately from billable", async () => {

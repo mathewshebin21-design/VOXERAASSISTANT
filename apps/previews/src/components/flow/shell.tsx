@@ -2,7 +2,7 @@
 
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, LineChart, LogOut, MessagesSquare, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
+import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, LineChart, LogOut, MessagesSquare, Mic, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +19,7 @@ export const FLOW_NAV = [
   { href: "/flow/app/canvas", label: "Canvas", icon: Waypoints, key: "6" },
   { href: "/flow/app/agent", label: "Agent", icon: Bot, key: "7" },
   { href: "/flow/app/simulate", label: "Simulate", icon: Sparkles, key: "8" },
+  { href: "/flow/app/voice", label: "Voice lab", icon: Mic, key: "" },
   { href: "/flow/app/knowledge", label: "Knowledge", icon: BookOpen, key: "9" },
   { href: "/flow/app/integrations", label: "Tools", icon: Plug, key: "" },
   { href: "/flow/app/workspace", label: "Workspace", icon: Building2, key: "" },
