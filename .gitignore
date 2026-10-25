@@ -1,0 +1,6 @@
+node_modules
+.next
+.DS_Store
+*.log
+apps/previews/screenshots
+apps/previews/e2e-results.json

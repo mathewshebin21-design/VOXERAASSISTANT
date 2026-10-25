@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens. Each preview scopes its palette under a class on its root. */
+:root {
+  /* A — Command: charcoal/black, electric violet, restrained cyan */
+  --cmd-bg: 9 9 12; --cmd-panel: 17 17 22; --cmd-raised: 26 26 33; --cmd-line: 42 42 52;
+  --cmd-text: 232 232 240; --cmd-mute: 140 140 158; --cmd-violet: 139 92 246; --cmd-cyan: 34 211 238;
+  --cmd-ok: 52 211 153; --cmd-warn: 251 191 36; --cmd-bad: 248 113 113;
+  /* B — Atelier: ivory, graphite, champagne */
+  --atl-bg: 250 247 241; --atl-paper: 255 253 249; --atl-line: 228 221 208; --atl-ink: 38 37 35;
+  --atl-soft: 112 106 97; --atl-champ: 201 170 120; --atl-champdeep: 150 118 70; --atl-sage: 120 140 112; --atl-rose: 176 104 92;
+  /* C — Flow: near-black, luminous violet/cyan */
+  --flw-bg: 5 5 10; --flw-surface: 13 12 22; --flw-glass: 22 20 38; --flw-line: 44 40 70;
+  --flw-text: 236 234 255; --flw-mute: 150 146 180; --flw-violet: 167 139 250; --flw-cyan: 103 232 249;
+  --flw-pink: 244 114 182; --flw-lime: 190 242 100; --flw-amber: 252 211 77;
+}
+
+html, body { min-height: 100%; }
+body { background: #0b0b0f; color: #e8e8f0; -webkit-font-smoothing: antialiased; }
+
+/* Focus visibility for keyboard users across all designs. */
+:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+.scroll-thin { scrollbar-width: thin; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* A — Command */
+.theme-cmd { background: rgb(var(--cmd-bg)); color: rgb(var(--cmd-text)); }
+.theme-cmd .grid-bg {
+  background-image: linear-gradient(rgb(var(--cmd-line) / .35) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--cmd-line) / .35) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+@keyframes cmd-scan { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.cmd-scan::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(var(--cmd-violet) / .15), transparent); animation: cmd-scan 2.8s linear infinite; }
+@keyframes cmd-blink { 50% { opacity: .25; } }
+.cmd-blink { animation: cmd-blink 1.2s steps(2) infinite; }
+
+/* B — Atelier */
+.theme-atl { background: rgb(var(--atl-bg)); color: rgb(var(--atl-ink)); }
+.theme-atl ::selection { background: rgb(var(--atl-champ) / .35); }
+.atl-rule { background: linear-gradient(90deg, transparent, rgb(var(--atl-champ)), transparent); height: 1px; }
+.atl-grain { background-image: radial-gradient(rgb(var(--atl-champ) / .08) 1px, transparent 1px); background-size: 3px 3px; }
+
+/* C — Flow */
+.theme-flw { background: rgb(var(--flw-bg)); color: rgb(var(--flw-text)); }
+.flw-glow { box-shadow: 0 0 0 1px rgb(var(--flw-violet) / .35), 0 0 32px -6px rgb(var(--flw-violet) / .55); }
+.flw-glow-cyan { box-shadow: 0 0 0 1px rgb(var(--flw-cyan) / .4), 0 0 32px -6px rgb(var(--flw-cyan) / .6); }
+.flw-aurora {
+  background: radial-gradient(60% 50% at 20% 10%, rgb(var(--flw-violet) / .22), transparent 70%),
+              radial-gradient(50% 40% at 85% 30%, rgb(var(--flw-cyan) / .14), transparent 70%),
+              radial-gradient(40% 40% at 50% 100%, rgb(var(--flw-pink) / .10), transparent 70%);
+}
+@keyframes flw-dash { to { stroke-dashoffset: -24; } }
+.flw-dash { stroke-dasharray: 6 6; animation: flw-dash 1s linear infinite; }
+.theme-flw .react-flow__attribution { background: transparent; color: rgb(var(--flw-mute)); }
+.theme-flw .react-flow__attribution a { color: rgb(var(--flw-mute)); }
+.theme-flw .react-flow__controls button { background: rgb(var(--flw-glass)); border-color: rgb(var(--flw-line)); fill: rgb(var(--flw-text)); }
