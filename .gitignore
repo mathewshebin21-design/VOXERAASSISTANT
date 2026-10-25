@@ -4,3 +4,8 @@ node_modules
 *.log
 apps/previews/screenshots
 apps/previews/e2e-results.json
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+.env

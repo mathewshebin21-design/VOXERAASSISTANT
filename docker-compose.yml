@@ -1,0 +1,43 @@
+# Local development stack. Credentials here are development placeholders only.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres-dev-only
+    volumes:
+      - ./services/api/deploy/init-roles.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  migrate:
+    build: ./services/api
+    command: ["/srv/.venv/bin/alembic", "upgrade", "head"]
+    environment:
+      VOXERA_MIGRATION_DATABASE_URL: postgresql+psycopg://voxera_owner:owner-dev-only@db:5432/voxera
+      VOXERA_DATABASE_URL: postgresql+psycopg://voxera_app:app-dev-only@db:5432/voxera
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: ./services/api
+    environment:
+      VOXERA_ENV: development
+      VOXERA_DATABASE_URL: postgresql+psycopg://voxera_app:app-dev-only@db:5432/voxera
+      VOXERA_JWT_SECRET: ${VOXERA_JWT_SECRET:-dev-only-change-me-dev-only-change-me}
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- -H 0.0.0.0"
+    volumes: ["./apps/previews:/app"]
+    ports: ["3000:3000"]
+
+volumes:
+  pgdata:

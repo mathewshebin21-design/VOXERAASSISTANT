@@ -2,7 +2,7 @@
 
 Multi-tenant AI voice receptionist and appointment automation platform — **work in progress**.
 
-> **Current stage: Phase 1 design approval gate.** The repository contains competitive research and three interactive design previews running on synthetic data. There is **no production backend, no telephony and no live AI model** yet. Nothing here should be described as production-ready.
+> **Current stage: Phase 2 (multi-tenant foundation) implemented.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. There is **no telephony and no live AI model** yet, and the front end is not yet connected to the API. Nothing here should be described as production-ready.
 
 ## Contents
 
@@ -11,7 +11,9 @@ Multi-tenant AI voice receptionist and appointment automation platform — **wor
 | [`docs/research/phase-0-competitive-research.md`](docs/research/phase-0-competitive-research.md) | Competitive and technical research, UK regulatory notes, recommended initial market, MVP definition |
 | [`docs/design/phase-1-design-previews.md`](docs/design/phase-1-design-previews.md) | The three design directions, strengths and weaknesses, what's real vs simulated, verification results |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records |
-| [`apps/previews`](apps/previews) | Runnable Next.js app with Design A (Command), B (Atelier) and C (Flow) |
+| [`apps/previews`](apps/previews) | Runnable Next.js app with Design A (Command), B (Atelier) and **C (Flow — approved)** |
+| [`services/api`](services/api) | FastAPI + PostgreSQL multi-tenant API (auth, workspaces, roles, RLS isolation, business data, audit, usage, export/deletion) |
+| [`docs/phase-2-foundation.md`](docs/phase-2-foundation.md) | Phase 2 scope, verification and limitations |
 
 ## Run the previews
 
@@ -44,6 +46,10 @@ npm run lint && npm run typecheck && npm test   # unit tests (Vitest)
 BASE_URL=http://localhost:3000 npm run e2e      # browser E2E (needs Playwright + Chromium available)
 ```
 
+## Run the API
+
+See [`services/api/README.md`](services/api/README.md), or run everything with `docker compose up`.
+
 ## Roadmap
 
-Phases 2–14 (multi-tenant foundation, real-time voice engine, telephony, receptionist intelligence, knowledge engine, scheduling, integrations, agent studio, analytics, privacy and security, testing, deployment, commercial readiness) begin only after a design is approved.
+Phases 3–14 (multi-tenant foundation, real-time voice engine, telephony, receptionist intelligence, knowledge engine, scheduling, integrations, agent studio, analytics, privacy and security, testing, deployment, commercial readiness) follow, one at a time.

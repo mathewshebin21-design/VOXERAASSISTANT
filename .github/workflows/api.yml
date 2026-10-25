@@ -1,0 +1,44 @@
+name: api
+
+on:
+  push:
+    paths: ["services/api/**", ".github/workflows/api.yml"]
+  pull_request:
+    paths: ["services/api/**", ".github/workflows/api.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres-ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Create database roles
+        run: psql -h localhost -U postgres -f deploy/init-roles.sql
+      - run: uv sync --frozen
+      - run: uv run ruff check app tests migrations
+      - run: uv run ruff format --check app tests migrations
+      - run: uv run pytest -q
+      - name: Migrations round-trip
+        env:
+          VOXERA_MIGRATION_DATABASE_URL: postgresql+psycopg://voxera_owner:owner-dev-only@localhost:5432/voxera
+        run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
+      - name: Docker image builds
+        run: docker build -t voxera-api:ci .

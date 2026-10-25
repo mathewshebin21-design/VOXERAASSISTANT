@@ -1,0 +1,48 @@
+[project]
+name = "voxera-api"
+version = "0.1.0"
+description = "VOXERA AI — multi-tenant API (Phase 2 foundation)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.115.12",
+  "uvicorn[standard]==0.34.2",
+  "sqlalchemy==2.0.41",
+  "psycopg[binary]==3.2.9",
+  "alembic==1.16.1",
+  "pydantic==2.11.5",
+  "pydantic-settings==2.9.1",
+  "email-validator==2.2.0",
+  "argon2-cffi==23.1.0",
+  "pyjwt==2.10.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.3.5",
+  "httpx==0.28.1",
+  "ruff==0.11.12",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and migrations build SQL from fixed, local table-name lists (no user input).
+"tests/**" = ["S105", "S106", "S107", "S608", "E501", "E741"]
+"migrations/**" = ["S608", "E501", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
