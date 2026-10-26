@@ -177,6 +177,40 @@ if (!ONLY || ONLY === "flow") {
   await ctx.close();
 }
 
+// Kokoro on-device voice: picker, preview, and a call spoken through the Web Worker.
+// The vendored bundle is swapped for a tiny stand-in, so this tests our wiring, not the model.
+if (!ONLY || ONLY === "flow") {
+  const ctx = await browser.newContext({ viewport: viewports.desktop });
+  await ctx.route("**/vendor/kokoro-js-1.2.1/kokoro.web.js", (r) => r.fulfill({ contentType: "text/javascript", body: fs.readFileSync(new URL("./fixtures/fake-kokoro.js", import.meta.url)) }));
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const k = (name, fn) => fn().then((ok) => record(`kokoro  ${name}`, ok !== false), (e) => record(`kokoro  ${name}`, false, String(e).split("\n")[0].slice(0, 200)));
+  await page.goto(BASE + "/flow/app/voice", { waitUntil: "networkidle" });
+  const mic = page.getByRole("switch", { name: "Use microphone" });
+  if ((await mic.getAttribute("aria-checked")) === "true") await mic.click();
+  await k("voice picker lists British voices and previews one", async () => {
+    await page.getByRole("radio", { name: "Kokoro · free, on device" }).click();
+    await page.getByLabel("George, British male").check();
+    await page.getByRole("button", { name: "Preview George" }).click();
+    await page.getByTestId("kokoro-status").filter({ hasText: /last sample generated in \d+ ms/ }).waitFor({ timeout: 15000 });
+    return (await page.getByRole("list", { name: "Kokoro voices" }).locator("li").count()) === 10;
+  });
+  await k("a call speaks through the on-device voice", async () => {
+    await page.getByRole("button", { name: "Start call" }).click();
+    await page.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid="ttfa"]')?.textContent ?? ""), null, { timeout: 15000 });
+    const tts = await page.getByTestId("provider-Text-to-speech").innerText();
+    await page.getByTestId("voice-phase").filter({ hasText: "Listening" }).waitFor({ timeout: 20000 });
+    await page.getByLabel("Type as the caller").fill("Where are you based?");
+    await page.getByLabel("Type as the caller").press("Enter");
+    await page.getByTestId("voice-phase").filter({ hasText: "Listening" }).waitFor({ timeout: 20000 });
+    const log = await page.evaluate(() => document.querySelector('[aria-live="polite"]')?.textContent ?? "");
+    await page.getByRole("button", { name: "End call" }).click();
+    return /Kokoro · George/.test(tts) && !/Switched to|failed/.test(log) && errors.length === 0;
+  });
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

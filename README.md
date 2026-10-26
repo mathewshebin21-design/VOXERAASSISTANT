@@ -16,6 +16,7 @@ Multi-tenant AI voice receptionist and appointment automation platform — **wor
 | [`docs/phase-2-foundation.md`](docs/phase-2-foundation.md) | Phase 2 scope, verification and limitations |
 | [`docs/phase-3-voice-engine.md`](docs/phase-3-voice-engine.md) | Phase 3 voice engine: what's built, how it's measured, verification, what needs approval |
 | [`docs/phase-3-live-providers.md`](docs/phase-3-live-providers.md) | Connecting a real AI brain (Claude) and voice (ElevenLabs): keys, monthly caps, costs, verification |
+| [`docs/voices.md`](docs/voices.md) | Free on-device Kokoro voices, custom-voice options and licences |
 | [`docs/decisions/ADR-0004-voice-engine.md`](docs/decisions/ADR-0004-voice-engine.md) | Voice framework and provider evaluation (LiveKit Agents, Pipecat, realtime models, open source) |
 
 ## Run the previews

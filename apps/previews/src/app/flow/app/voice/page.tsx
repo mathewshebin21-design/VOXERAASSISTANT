@@ -5,6 +5,7 @@ import { Download, Mic, PhoneOff, Play, Send, ShieldAlert, Wrench } from "lucide
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LiveProviderPicker, SaveVoiceSession, VoiceHistory, type LiveChoice } from "@/components/flow/live-voice";
 import { Chip, FBtn, FSwitch, Glass, GHead, Heading, Orb, finputAuto } from "@/components/flow/ui";
+import { VoicePicker, type VoiceChoice } from "@/components/flow/voice-picker";
 import type { LatencyStat } from "@/lib/voice/summary";
 import { useVoiceLab } from "@/lib/voice/use-voice-lab";
 
@@ -29,6 +30,7 @@ export default function VoiceLab() {
   const [audio, setAudio] = useState(true);
   const [text, setText] = useState("");
   const [live, setLive] = useState<LiveChoice>(undefined);
+  const [voice, setVoice] = useState<VoiceChoice>({ engine: "browser" });
   const onLive = useCallback((c: LiveChoice) => setLive(c), []);
   useEffect(() => { if (lab.ended) window.dispatchEvent(new Event("voxera:voice-ended")); }, [lab.ended]);
   const end = useRef<HTMLDivElement>(null);
@@ -63,12 +65,13 @@ export default function VoiceLab() {
             </div>
             {lab.active
               ? <FBtn onClick={lab.end} aria-label="End call" className="border-flw-pink/60 text-flw-pink"><PhoneOff size={15} /></FBtn>
-              : <FBtn variant="glow" onClick={() => void lab.start({ mic: useMic, audio, live })}><Play size={14} /> Start call</FBtn>}
+              : <FBtn variant="glow" onClick={() => void lab.start({ mic: useMic, audio, live, voice })}><Play size={14} /> Start call</FBtn>}
           </div>
           {!lab.active && (
-            <div className="space-y-2 border-b border-flw-line/70 p-4 text-sm">
+            <div className="max-h-[55%] shrink-0 space-y-2 overflow-y-auto border-b border-flw-line/70 p-4 text-sm">
               <label className="flex items-center justify-between gap-3"><span className="flex items-center gap-2"><Mic size={14} /> Use microphone {!lab.support.stt && <span className="text-xs text-flw-mute">(not supported here — use Chrome or Edge)</span>}</span><FSwitch label="Use microphone" on={useMic && lab.support.stt} onChange={setUseMic} /></label>
-              <label className="flex items-center justify-between gap-3"><span>Speak replies aloud {!lab.support.tts && <span className="text-xs text-flw-mute">(not supported)</span>}</span><FSwitch label="Speak replies aloud" on={audio && lab.support.tts} onChange={setAudio} /></label>
+              <label className="flex items-center justify-between gap-3"><span>Speak replies aloud</span><FSwitch label="Speak replies aloud" on={audio} onChange={setAudio} /></label>
+              {audio && !live?.voice && <VoicePicker value={voice} onChange={setVoice} />}
               <LiveProviderPicker onChange={onLive} disabled={lab.active} />
               <p className="text-xs leading-relaxed text-flw-mute">{live ? "Your words are sent to VOXERA’s API and on to the live providers you switched on; transcripts are not stored, only usage counts." : "Nothing is sent to VOXERA and nothing is recorded."} With the microphone on, your browser’s own speech recogniser is used — in Chrome that sends your audio to Google’s servers to transcribe; other browsers may process it on the device or remotely. Use headphones so the agent’s voice isn’t mistaken for yours.</p>
             </div>

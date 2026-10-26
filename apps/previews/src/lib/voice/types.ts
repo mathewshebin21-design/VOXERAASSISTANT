@@ -47,6 +47,8 @@ export interface BrainAdapter extends ProviderInfo {
 export interface TtsAdapter extends ProviderInfo {
   /** Resolves when playback finishes; calls onStart when the first audio plays. Rejects with ProviderError on failure. */
   speak(text: string, signal: AbortSignal, onStart: () => void): Promise<void>;
+  /** Optional: start synthesising a queued sentence early, so it is ready when its turn comes. */
+  prepare?(text: string): void;
   cancel(): void;
 }
 

@@ -24,6 +24,7 @@ export function faultyTts(inner: TtsAdapter, faults: () => Faults): TtsAdapter {
     name: inner.name,
     costPerMinGbp: inner.costPerMinGbp,
     cancel: () => inner.cancel(),
+    prepare: inner.prepare ? (text) => { if (!faults().tts) inner.prepare?.(text); } : undefined,
     speak: (text, signal, onStart) => faults().tts ? Promise.reject(new ProviderError("tts", "injected synthesis failure")) : inner.speak(text, signal, onStart),
   };
 }

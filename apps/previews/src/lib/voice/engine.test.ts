@@ -84,6 +84,18 @@ describe("VoiceSession", () => {
     expect(s.phase).toBe("listening");
   });
 
+  it("asks the voice to prepare each sentence as soon as it is queued", async () => {
+    const tts = new FakeTts();
+    const prepared: string[] = [];
+    (tts as TtsAdapter).prepare = (t: string) => { prepared.push(t); };
+    const { s } = setup({ tts });
+    s.start(); await run(500);
+    s.typed("hi");
+    await run(250); // brain (200 ms) has replied; its first sentence has not started playing yet
+    expect(prepared).toEqual(["Hello, Halden and Rye.", "First sentence here.", "Second sentence follows."]);
+    expect(tts.spoken).not.toContain("Second sentence follows.");
+  });
+
   it("emits tool calls during the turn and keeps speaking", async () => {
     const { s, events, tts } = setup({ brain: scripted(50, undefined, true) });
     s.start(); await run(500);

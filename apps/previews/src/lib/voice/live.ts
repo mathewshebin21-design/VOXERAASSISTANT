@@ -2,6 +2,7 @@
 // through the same-origin proxy; provider keys never reach the browser, and the
 // API enforces per-workspace and global monthly caps before every call.
 
+import { playBlob, type Player } from "./audio";
 import { ProviderError, type BrainAdapter, type BrainChunk, type TtsAdapter } from "./types";
 
 const headers = { "content-type": "application/json", "x-voxera-csrf": "1" };
@@ -66,8 +67,7 @@ export class ApiBrain implements BrainAdapter {
 /** One MP3 per sentence from the server-side TTS provider, played with an <audio> element. */
 export class ServerTts implements TtsAdapter {
   readonly costPerMinGbp = null;
-  private audio: HTMLAudioElement | null = null;
-  private stop: (() => void) | null = null;
+  private player: Player = { stop: null, audio: null };
   constructor(private orgId: string, readonly name: string) {}
 
   async speak(text: string, signal: AbortSignal, onStart: () => void): Promise<void> {
@@ -76,26 +76,8 @@ export class ServerTts implements TtsAdapter {
     }).catch((e) => { if (signal.aborted) return null; throw new ProviderError("tts", e instanceof Error ? e.message : "network error"); });
     if (!r) return;
     if (!r.ok) throw await failure("tts", r);
-    const url = URL.createObjectURL(await r.blob());
-    if (signal.aborted) { URL.revokeObjectURL(url); return; }
-    const audio = new Audio(url);
-    this.audio = audio;
-    await new Promise<void>((resolve, reject) => {
-      const finish = (err?: ProviderError) => {
-        URL.revokeObjectURL(url);
-        this.stop = null;
-        signal.removeEventListener("abort", onAbort);
-        if (err) reject(err); else resolve();
-      };
-      const onAbort = () => { audio.pause(); finish(); };
-      this.stop = onAbort;
-      signal.addEventListener("abort", onAbort, { once: true });
-      audio.onplaying = () => onStart();
-      audio.onended = () => finish();
-      audio.onerror = () => finish(new ProviderError("tts", "audio could not be played"));
-      audio.play().catch((e) => finish(new ProviderError("tts", e instanceof Error ? e.message : "playback blocked")));
-    });
+    await playBlob(await r.blob(), signal, onStart, this.player);
   }
 
-  cancel() { this.stop?.(); this.audio?.pause(); }
+  cancel() { this.player.stop?.(); this.player.audio?.pause(); }
 }

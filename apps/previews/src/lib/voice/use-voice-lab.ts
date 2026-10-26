@@ -9,6 +9,7 @@ import type { SimState } from "../simulator";
 import { usePreview } from "../store";
 import { MessageTakerBrain, SimulatorBrain } from "./brains";
 import { MicVad, SpeechSynthesisTts, TextPacedTts, WebSpeechStt, speechSynthesisSupported, webSpeechSupported } from "./browser";
+import { KokoroTts, kokoroSupported } from "./kokoro";
 import { ApiBrain, ServerTts } from "./live";
 import { VoiceSession } from "./engine";
 import { faultyBrain, faultyTts, type Faults } from "./faults";
@@ -27,6 +28,8 @@ export type LabLine =
 export interface LabOptions {
   mic: boolean;
   audio: boolean;
+  /** Which voice speaks when audio is on and no live voice is selected. */
+  voice?: { engine: "browser" } | { engine: "kokoro"; id: string };
   /** Use the live, metered providers through the API (signed-in workspaces only). */
   live?: { orgId: string; brain: string | null; voice: string | null };
 }
@@ -94,7 +97,9 @@ export function useVoiceLab() {
       : new SimulatorBrain(() => optsRef.current, (s) => { setSimState(s); if (s.bookings.length) addSimBookings(s.bookings); });
     const text = new TextPacedTts();
     const tts: TtsAdapter = o.live?.voice ? new ServerTts(o.live.orgId, o.live.voice)
-      : o.audio && speechSynthesisSupported() ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text;
+      : !o.audio ? text
+      : o.voice?.engine === "kokoro" && kokoroSupported() ? new KokoroTts(o.voice.id, () => rateRef.current)
+      : speechSynthesisSupported() ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text;
     setPriced([brain, tts]);
     const s = new VoiceSession({
       stt: o.mic && webSpeechSupported() ? new WebSpeechStt() : null,

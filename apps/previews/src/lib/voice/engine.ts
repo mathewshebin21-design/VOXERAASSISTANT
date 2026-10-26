@@ -225,7 +225,7 @@ export class VoiceSession {
     let buf = "";
     let endCall = false;
     let chain: Promise<void> = Promise.resolve();
-    const say = (sentence: string) => { chain = chain.then(() => this.speakSentence(sentence, ctl, m, t0)); };
+    const say = (sentence: string) => { this.tts.prepare?.(sentence); chain = chain.then(() => this.speakSentence(sentence, ctl, m, t0)); };
 
     try {
       await this.consume(source(ctl.signal), ctl, (c) => {
