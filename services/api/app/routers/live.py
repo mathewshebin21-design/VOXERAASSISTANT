@@ -32,6 +32,8 @@ router = APIRouter(prefix="/v1/orgs/{org_id}/live", tags=["live"])
 
 MAX_ROUNDS = 3  # model turns per caller turn (tool calls in between)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# Models that accept server-side refusal fallback; others (e.g. Claude Haiku 5.5) reject the parameter.
+FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 RequestId = Annotated[str, Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
@@ -144,6 +146,8 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
     if msgs[0]["role"] == "assistant":  # the conversation must open with a user turn
         msgs.insert(0, {"role": "user", "content": "(The call has just connected.)"})
 
+    fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.llm_model in FALLBACK_MODELS else {}
+
     def gen() -> Iterator[str]:
         used = 0
         partial_in = partial_chars = 0
@@ -157,8 +161,7 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
                     tools=TOOLS,
                     messages=msgs,
                     output_config={"effort": s.llm_effort},
-                    betas=[FALLBACK_BETA],
-                    fallbacks="default",
+                    **fallback,
                 ) as stream:
                     for event in stream:
                         if event.type == "message_start":

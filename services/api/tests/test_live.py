@@ -247,3 +247,13 @@ def test_greeting_uses_saved_agent_and_disclosure(make_account):
     a.post(a.o("/agents"), json={"name": "Rye", "greeting": "Hello, I'm Rye, the AI receptionist for the salon."})
     t = a.get(a.o("/live/greeting")).json()["text"]
     assert t.startswith("Hello, I'm Rye, the AI receptionist") and "recorded" in t
+
+
+def test_cheaper_model_without_fallback_support(make_account, live, monkeypatch):
+    monkeypatch.setattr(get_settings(), "llm_model", "claude-haiku-5-5")
+    a = make_account("ada@example.com")
+    live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 10, 2))]
+    assert [e["type"] for e in events(a.post(a.o("/live/brain"), json=BRAIN))] == ["text", "done"]
+    body = json.loads(live["llm_requests"][0].content)
+    assert body["model"] == "claude-haiku-5-5" and "fallbacks" not in body
+    assert "server-side-fallback" not in live["llm_requests"][0].headers.get("anthropic-beta", "")

@@ -43,7 +43,7 @@ Speech recognition stays in the browser for now. Server-side STT arrives with te
 
 **What a cap costs at most, from Anthropic's list prices** (per million tokens; snapshot of 2026-10-06, so check current pricing):
 - The model defaults to `claude-opus-5-5` ($4 input / $20 output). A 200,000-token monthly cap can't cost more than 200,000 × $20 / 1,000,000 = **$4.00**, even if every token were output. Most tokens are input, so the real cost is lower.
-- `VOXERA_LLM_MODEL=claude-haiku-5-5` ($0.10 / $0.50) is faster and much cheaper, but less capable. Which model to use is your decision.
+- `VOXERA_LLM_MODEL=claude-haiku-5-5` ($0.10 / $0.50) is faster and much cheaper, but less capable. The same cap then costs at most **$0.10**. Haiku 5.5 has no server-side refusal fallback, so VOXERA leaves that parameter off for it. `claude-sonnet-5-5` ($2 / $10) sits in between, at most $2.00. Which model to use is your decision.
 - I haven't checked ElevenLabs prices. Work out the cost from your plan's price per character × the character cap.
 
 ## Hosting
