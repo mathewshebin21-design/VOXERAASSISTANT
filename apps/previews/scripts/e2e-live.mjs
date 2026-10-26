@@ -130,6 +130,31 @@ await step("voice lab test call saves measured metrics to the workspace", async 
   await p.getByTestId("voice-history").locator("tbody tr").first().waitFor({ timeout: 8000 });
 });
 
+// Live providers, against local fakes of Anthropic and ElevenLabs (services/api/scripts/fake_providers.py).
+if (process.env.LIVE_FAKES === "1") {
+  await step("voice lab uses the live brain and voice through the API, and meters them", async () => {
+    await p.goto(`${BASE}/flow/app/voice`, { waitUntil: "networkidle" });
+    const mic = p.getByRole("switch", { name: "Use microphone" });
+    if ((await mic.getAttribute("aria-checked")) === "true") await mic.click();
+    await p.getByTestId("live-llm_tokens").filter({ hasText: "left this month" }).waitFor({ timeout: 8000 });
+    await p.getByRole("switch", { name: "Claude as the brain" }).click();
+    await p.getByRole("switch", { name: "ElevenLabs voice" }).click();
+    await p.getByRole("button", { name: "Start call" }).click();
+    await p.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid="ttfa"]')?.textContent ?? ""), null, { timeout: 15000 });
+    await p.getByTestId("voice-phase").filter({ hasText: "Listening" }).waitFor({ timeout: 15000 });
+    await p.getByLabel("Type as the caller").fill("What services do you offer?");
+    await p.getByLabel("Type as the caller").press("Enter");
+    await p.getByText(/We offer Balayage/).first().waitFor({ timeout: 15000 });
+    const log = await p.evaluate(() => document.querySelector('[aria-live="polite"]')?.textContent ?? "");
+    const brain = await p.getByTestId("provider-Brain").innerText();
+    await p.getByRole("button", { name: "End call" }).click();
+    await p.goto(`${BASE}/flow/app/usage`, { waitUntil: "networkidle" });
+    const tokens = Number((await p.getByTestId("live-llm_tokens").innerText()).replace(/,/g, ""));
+    const chars = Number((await p.getByTestId("live-tts_characters").innerText()).replace(/,/g, ""));
+    return /list_services/.test(log) && /Claude/.test(brain) && tokens > 0 && chars > 0;
+  });
+}
+
 let inviteLink = "";
 await step("invite a colleague (development link shown)", async () => {
   await p.goto(`${BASE}/flow/app/team`, { waitUntil: "networkidle" });

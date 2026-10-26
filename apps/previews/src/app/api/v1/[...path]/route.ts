@@ -25,6 +25,8 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
       },
       body,
       cache: "no-store",
+      // A caller barge-in aborts the browser request; pass that on so the API stops the provider call.
+      signal: req.signal,
     });
 
   let fresh: Tokens | null = null;
@@ -36,9 +38,12 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
       if (fresh) r = await call(fresh.access_token);
     }
   }
-  const res = new NextResponse(r.status === 204 ? null : await r.arrayBuffer(), {
+  const type = r.headers.get("content-type") ?? "application/json";
+  // Server-sent events and audio are streamed through untouched; everything else is buffered.
+  const stream = r.ok && (type.startsWith("text/event-stream") || type.startsWith("audio/"));
+  const res = new NextResponse(r.status === 204 ? null : stream ? r.body : await r.arrayBuffer(), {
     status: r.status,
-    headers: { "content-type": r.headers.get("content-type") ?? "application/json", "x-request-id": r.headers.get("x-request-id") ?? "" },
+    headers: { "content-type": type, "x-request-id": r.headers.get("x-request-id") ?? "", ...(stream ? { "cache-control": "no-store", "x-accel-buffering": "no" } : {}) },
   });
   if (fresh) setSessionCookies(res, fresh);
   if (r.status === 401) clearSessionCookies(res);

@@ -2,8 +2,8 @@
 
 import { clsx } from "clsx";
 import { Download, Mic, PhoneOff, Play, Send, ShieldAlert, Wrench } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { SaveVoiceSession, VoiceHistory } from "@/components/flow/live-voice";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LiveProviderPicker, SaveVoiceSession, VoiceHistory, type LiveChoice } from "@/components/flow/live-voice";
 import { Chip, FBtn, FSwitch, Glass, GHead, Heading, Orb, finputAuto } from "@/components/flow/ui";
 import type { LatencyStat } from "@/lib/voice/summary";
 import { useVoiceLab } from "@/lib/voice/use-voice-lab";
@@ -28,6 +28,9 @@ export default function VoiceLab() {
   const [useMic, setUseMic] = useState(false);
   const [audio, setAudio] = useState(true);
   const [text, setText] = useState("");
+  const [live, setLive] = useState<LiveChoice>(undefined);
+  const onLive = useCallback((c: LiveChoice) => setLive(c), []);
+  useEffect(() => { if (lab.ended) window.dispatchEvent(new Event("voxera:voice-ended")); }, [lab.ended]);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [lab.lines, lab.partial]);
   useEffect(() => { if (lab.support.stt && lab.support.mic) setUseMic(true); }, [lab.support.stt, lab.support.mic]);
@@ -48,7 +51,7 @@ export default function VoiceLab() {
   return (
     <>
       <Heading kicker="Voice lab · real-time engine" title="Talk to your receptionist">
-        <Chip tone="amber">browser engines · rule-based brain</Chip>
+        <Chip tone={live ? "pink" : "amber"}>{live ? "live providers · metered" : "browser engines · rule-based brain"}</Chip>
       </Heading>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[440px_1fr]">
         <Glass glow="violet" className="flex h-[calc(100vh-170px)] min-h-[600px] flex-col">
@@ -60,13 +63,14 @@ export default function VoiceLab() {
             </div>
             {lab.active
               ? <FBtn onClick={lab.end} aria-label="End call" className="border-flw-pink/60 text-flw-pink"><PhoneOff size={15} /></FBtn>
-              : <FBtn variant="glow" onClick={() => void lab.start({ mic: useMic, audio })}><Play size={14} /> Start call</FBtn>}
+              : <FBtn variant="glow" onClick={() => void lab.start({ mic: useMic, audio, live })}><Play size={14} /> Start call</FBtn>}
           </div>
           {!lab.active && (
             <div className="space-y-2 border-b border-flw-line/70 p-4 text-sm">
               <label className="flex items-center justify-between gap-3"><span className="flex items-center gap-2"><Mic size={14} /> Use microphone {!lab.support.stt && <span className="text-xs text-flw-mute">(not supported here — use Chrome or Edge)</span>}</span><FSwitch label="Use microphone" on={useMic && lab.support.stt} onChange={setUseMic} /></label>
               <label className="flex items-center justify-between gap-3"><span>Speak replies aloud {!lab.support.tts && <span className="text-xs text-flw-mute">(not supported)</span>}</span><FSwitch label="Speak replies aloud" on={audio && lab.support.tts} onChange={setAudio} /></label>
-              <p className="text-xs leading-relaxed text-flw-mute">Nothing is sent to VOXERA and nothing is recorded. With the microphone on, your browser’s own speech recogniser is used — in Chrome that sends your audio to Google’s servers to transcribe; other browsers may process it on the device or remotely. Use headphones so the agent’s voice isn’t mistaken for yours.</p>
+              <LiveProviderPicker onChange={onLive} disabled={lab.active} />
+              <p className="text-xs leading-relaxed text-flw-mute">{live ? "Your words are sent to VOXERA’s API and on to the live providers you switched on; transcripts are not stored, only usage counts." : "Nothing is sent to VOXERA and nothing is recorded."} With the microphone on, your browser’s own speech recogniser is used — in Chrome that sends your audio to Google’s servers to transcribe; other browsers may process it on the device or remotely. Use headphones so the agent’s voice isn’t mistaken for yours.</p>
             </div>
           )}
           <div className="flex-1 space-y-2.5 overflow-y-auto p-4" aria-live="polite">
@@ -99,7 +103,7 @@ export default function VoiceLab() {
               <Stat label="Synthesis start" s={s.ttsFirstMs} hint="Sentence handed to TTS → audio starts" />
               <Stat label="Barge-in recovery" s={s.bargeInRecoveryMs} hint="Caller starts speaking → agent audio stops" />
               <div className="rounded-xl border border-flw-line/70 bg-flw-surface/50 p-3"><div className="text-[11px] text-flw-mute">Failures (stt / brain / tts)</div><div className="mt-0.5 font-mono text-lg">{pct(s.failureRate.stt)} / {pct(s.failureRate.brain)} / {pct(s.failureRate.tts)}</div><div className="font-mono text-[10px] text-flw-mute">{s.turns} turns · {s.bargeIns} barge-ins · {s.fallbacks} fallbacks</div></div>
-              <div className="rounded-xl border border-flw-line/70 bg-flw-surface/50 p-3"><div className="text-[11px] text-flw-mute">Cost per call minute</div><div className="mt-0.5 font-mono text-lg">£{(s.costPerMinGbp ?? 0).toFixed(3)}</div><div className="font-mono text-[10px] text-flw-mute">browser engines are free</div></div>
+              <div className="rounded-xl border border-flw-line/70 bg-flw-surface/50 p-3"><div className="text-[11px] text-flw-mute">Cost per call minute</div><div className="mt-0.5 font-mono text-lg">{s.costPerMinGbp === null ? "metered" : `£${s.costPerMinGbp.toFixed(3)}`}</div><div className="font-mono text-[10px] text-flw-mute">{s.costPerMinGbp === null ? "live usage counted on the Usage page" : "browser engines are free"}</div></div>
             </div>
             <div className="overflow-x-auto px-4 pb-4">
               <table className="w-full font-mono text-[11px]" data-testid="turn-table">

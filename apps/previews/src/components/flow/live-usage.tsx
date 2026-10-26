@@ -19,8 +19,8 @@ export function LiveUsage() {
   const record = async () => {
     try {
       await api(`/orgs/${active.organization.id}/usage-events`, { method: "POST", body: { kind: "call_minutes", source: "simulated", quantity: "1", occurred_at: new Date().toISOString(), idempotency_key: `ui-test-${crypto.randomUUID()}`, reference: "usage page test" } });
-      setMsg({ kind: "ok", text: "Recorded 1 simulated minute — it never counts towards billing." });
       await sum.reload();
+      setMsg({ kind: "ok", text: "Recorded 1 simulated minute — it never counts towards billing." });
     } catch (e) { setMsg({ kind: "error", text: e instanceof ApiError ? e.detail : "Failed" }); }
   };
   return (

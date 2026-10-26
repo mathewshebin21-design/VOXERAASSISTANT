@@ -40,9 +40,22 @@ jobs:
           psql -h localhost -U postgres -f deploy/init-roles.sql
           uv sync --frozen
           uv run alembic upgrade head
-      - name: Start API
+      - name: Start fake providers and API
         working-directory: services/api
-        run: nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+        # Local stand-ins for Anthropic and ElevenLabs: exercises the live path with no keys and no cost.
+        env:
+          ANTHROPIC_BASE_URL: http://127.0.0.1:8090
+          VOXERA_ANTHROPIC_API_KEY: fake-ci-key
+          VOXERA_ELEVENLABS_API_KEY: fake-ci-key
+          VOXERA_ELEVENLABS_VOICE_ID: fakevoice
+          VOXERA_ELEVENLABS_BASE_URL: http://127.0.0.1:8090
+          VOXERA_LIVE_LLM_TOKENS_PER_ORG_MONTH: "200000"
+          VOXERA_LIVE_LLM_TOKENS_GLOBAL_MONTH: "1000000"
+          VOXERA_LIVE_TTS_CHARS_PER_ORG_MONTH: "20000"
+          VOXERA_LIVE_TTS_CHARS_GLOBAL_MONTH: "100000"
+        run: |
+          nohup uv run python scripts/fake_providers.py 8090 ../../apps/previews/scripts/fixtures/beep.mp3 > fake.log 2>&1 &
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
       - name: Build and start web
         working-directory: apps/previews
         run: |
@@ -54,6 +67,6 @@ jobs:
         working-directory: apps/previews
         run: |
           npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
-          BASE_URL=http://localhost:3000 node scripts/e2e-live.mjs
+          LIVE_FAKES=1 BASE_URL=http://localhost:3000 node scripts/e2e-live.mjs
       - if: failure()
         run: tail -n 100 services/api/api.log apps/previews/web.log

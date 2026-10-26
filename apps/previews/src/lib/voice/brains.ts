@@ -40,7 +40,7 @@ export class MessageTakerBrain implements BrainAdapter {
   readonly costPerMinGbp = 0;
   private asked = false;
   reset() { this.asked = false; }
-  async *greet(): AsyncIterable<BrainChunk> { yield { type: "text", text: "Hello, you've reached the salon. I can take a message for the team." }; }
+  async *greet(): AsyncIterable<BrainChunk> { yield { type: "text", text: "Hello, I'm the AI receptionist. I can take a message for the team." }; }
   async *respond(text: string): AsyncIterable<BrainChunk> {
     if (!this.asked) { this.asked = true; yield { type: "text", text: "I can't check bookings right now, but I'll pass your message on. What's your name and the best number to call you back?" }; return; }
     yield { type: "tool", name: "take_message", args: { message: text.slice(0, 200) }, ok: true, result: "Message saved for the team (simulated)" };

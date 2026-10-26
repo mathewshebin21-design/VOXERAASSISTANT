@@ -3,7 +3,7 @@
 import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fmtWhen } from "./live-ui";
-import { Chip, FBtn, Glass, GHead } from "./ui";
+import { Chip, FBtn, FSwitch, Glass, GHead } from "./ui";
 import { api, ApiError, PERMS } from "@/lib/live/api";
 import { useActiveOrg, useApi } from "@/lib/live/session";
 import type { VoiceLab } from "@/lib/voice/use-voice-lab";
@@ -74,5 +74,53 @@ export function VoiceHistory() {
         </div>
       )}
     </Glass>
+  );
+}
+
+interface ProviderStatus { available: boolean; configured: boolean; provider: string; model: string; unit: string; org_cap: number; org_used: number; remaining: number }
+export type LiveChoice = { orgId: string; brain: string | null; voice: string | null } | undefined;
+
+/**
+ * Lets an owner/admin switch the Voice lab to the live, metered providers when the
+ * server has them configured. Shows the remaining monthly allowance.
+ */
+export function LiveProviderPicker({ onChange, disabled }: { onChange: (c: LiveChoice) => void; disabled: boolean }) {
+  const active = useActiveOrg();
+  const can = !!active && PERMS[active.role].write;
+  const st = useApi<{ llm: ProviderStatus; tts: ProviderStatus }>(active && can ? `/orgs/${active.organization.id}/live/status` : null);
+  const [brain, setBrain] = useState(false);
+  const [voice, setVoice] = useState(false);
+  const { reload } = st;
+  useEffect(() => {
+    const on = () => void reload();
+    window.addEventListener("voxera:voice-ended", on);
+    return () => window.removeEventListener("voxera:voice-ended", on);
+  }, [reload]);
+  useEffect(() => {
+    if (!active || !st.data) return onChange(undefined);
+    const b = brain && st.data.llm.available ? `Claude (${st.data.llm.model}) · live` : null;
+    const v = voice && st.data.tts.available ? `ElevenLabs (${st.data.tts.model}) · live` : null;
+    onChange(b || v ? { orgId: active.organization.id, brain: b, voice: v } : undefined);
+  }, [active, st.data, brain, voice, onChange]);
+  if (!active || !can) return null;
+  const row = (label: string, p: ProviderStatus | undefined, on: boolean, set: (b: boolean) => void) => (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div>{label}</div>
+        <div className="text-[11px] text-flw-mute" data-testid={`live-${p?.unit ?? label}`}>
+          {!p ? "checking…" : !p.configured ? "not configured on the server" : !p.available ? "switched off — no monthly cap set" : `${p.remaining.toLocaleString("en-GB")} ${p.unit.replace("_", " ")} left this month`}
+        </div>
+      </div>
+      <FSwitch label={label} on={on && !!p?.available} onChange={(b) => p?.available && set(b)} />
+    </div>
+  );
+  return (
+    <div className={disabled ? "pointer-events-none space-y-2 opacity-50" : "space-y-2"}>
+      <div className="flex items-center gap-2 text-xs text-flw-mute"><Chip tone="pink">live · metered</Chip> paid providers, capped per month</div>
+      {row("Claude as the brain", st.data?.llm, brain, setBrain)}
+      {row("ElevenLabs voice", st.data?.tts, voice, setVoice)}
+      <p className="text-[11px] text-flw-mute">With these off, the free rule-based demo receptionist (Halden &amp; Rye data) and your browser’s voice are used.</p>
+      {st.data && !st.data.llm.configured && !st.data.tts.configured && <p className="text-[11px] text-flw-mute">Live providers need API keys and monthly caps in the API server’s environment — see docs/phase-3-live-providers.md.</p>}
+    </div>
   );
 }

@@ -9,10 +9,11 @@ import type { SimState } from "../simulator";
 import { usePreview } from "../store";
 import { MessageTakerBrain, SimulatorBrain } from "./brains";
 import { MicVad, SpeechSynthesisTts, TextPacedTts, WebSpeechStt, speechSynthesisSupported, webSpeechSupported } from "./browser";
+import { ApiBrain, ServerTts } from "./live";
 import { VoiceSession } from "./engine";
 import { faultyBrain, faultyTts, type Faults } from "./faults";
 import { summarise } from "./summary";
-import type { Phase, SessionEvent, TurnMetrics } from "./types";
+import type { BrainAdapter, Phase, ProviderInfo, SessionEvent, TtsAdapter, TurnMetrics } from "./types";
 import { DEFAULT_VAD, type VadConfig } from "./vad";
 
 export type LabLine =
@@ -23,7 +24,12 @@ export type LabLine =
   | { id: number; kind: "citation"; title: string; version: number }
   | { id: number; kind: "notice"; level: "info" | "warn" | "error"; text: string };
 
-export interface LabOptions { mic: boolean; audio: boolean }
+export interface LabOptions {
+  mic: boolean;
+  audio: boolean;
+  /** Use the live, metered providers through the API (signed-in workspaces only). */
+  live?: { orgId: string; brain: string | null; voice: string | null };
+}
 
 export function useVoiceLab() {
   const draft = usePreview((s) => s.draft);
@@ -49,6 +55,7 @@ export function useVoiceLab() {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [endedAt, setEndedAt] = useState<number | null>(null);
   const [sessionKey, setSessionKey] = useState("");
+  const [priced, setPriced] = useState<ProviderInfo[]>([]);
 
   const faultsRef = useRef(faults);
   faultsRef.current = faults;
@@ -82,9 +89,13 @@ export function useVoiceLab() {
     sessionRef.current?.end("restarted");
     micRef.current?.stop();
     setLines([]); setTurns([]); setEnded(null); setPartial(""); setSimState(null);
-    const brain = new SimulatorBrain(() => optsRef.current, (s) => { setSimState(s); if (s.bookings.length) addSimBookings(s.bookings); });
+    const brain: BrainAdapter = o.live?.brain
+      ? new ApiBrain(o.live.orgId, o.live.brain)
+      : new SimulatorBrain(() => optsRef.current, (s) => { setSimState(s); if (s.bookings.length) addSimBookings(s.bookings); });
     const text = new TextPacedTts();
-    const tts = o.audio && speechSynthesisSupported() ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text;
+    const tts: TtsAdapter = o.live?.voice ? new ServerTts(o.live.orgId, o.live.voice)
+      : o.audio && speechSynthesisSupported() ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text;
+    setPriced([brain, tts]);
     const s = new VoiceSession({
       stt: o.mic && webSpeechSupported() ? new WebSpeechStt() : null,
       brain: faultyBrain(brain, () => faultsRef.current),
@@ -115,7 +126,7 @@ export function useVoiceLab() {
 
   useEffect(() => () => { sessionRef.current?.end("left the page"); micRef.current?.stop(); }, []);
 
-  const summary = useMemo(() => summarise(turns, [{ name: "stt", costPerMinGbp: 0 }, { name: "brain", costPerMinGbp: 0 }, { name: "tts", costPerMinGbp: 0 }]), [turns]);
+  const summary = useMemo(() => summarise(turns, priced), [turns, priced]);
   const active = phase !== "idle" && phase !== "ended";
 
   return { support, phase, active, lines, partial, turns, summary, providers, ended, mic, simState, faults, setFaults, vadCfg, updateVad, start, end, type, startedAt, endedAt, sessionKey };

@@ -2,7 +2,7 @@
 
 Multi-tenant AI voice receptionist and appointment automation platform — **work in progress**.
 
-> **Current stage: Phase 3 (real-time voice engine) implemented with browser engines; Phase 2 (multi-tenant foundation) complete.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. The Flow front end is connected to the API for accounts, workspaces, team, business data, agents and usage. The Voice lab (`/flow/app/voice`) runs the real-time voice engine with your browser's speech engines and a rule-based brain. There is **no telephony and no paid AI or speech provider** connected yet. Nothing here should be described as production-ready.
+> **Current stage: Phase 3 (real-time voice engine) implemented with browser engines; Phase 2 (multi-tenant foundation) complete.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. The Flow front end is connected to the API for accounts, workspaces, team, business data, agents and usage. The Voice lab (`/flow/app/voice`) runs the real-time voice engine with your browser's speech engines and a rule-based brain. Live Claude and ElevenLabs adapters are built behind server-side keys and monthly caps, and stay off until you configure them. There is **no telephony** yet, and no paid provider has been called. Nothing here should be described as production-ready.
 
 ## Contents
 
@@ -15,6 +15,7 @@ Multi-tenant AI voice receptionist and appointment automation platform — **wor
 | [`services/api`](services/api) | FastAPI + PostgreSQL multi-tenant API (auth, workspaces, roles, RLS isolation, business data, audit, usage, export/deletion) |
 | [`docs/phase-2-foundation.md`](docs/phase-2-foundation.md) | Phase 2 scope, verification and limitations |
 | [`docs/phase-3-voice-engine.md`](docs/phase-3-voice-engine.md) | Phase 3 voice engine: what's built, how it's measured, verification, what needs approval |
+| [`docs/phase-3-live-providers.md`](docs/phase-3-live-providers.md) | Connecting a real AI brain (Claude) and voice (ElevenLabs): keys, monthly caps, costs, verification |
 | [`docs/decisions/ADR-0004-voice-engine.md`](docs/decisions/ADR-0004-voice-engine.md) | Voice framework and provider evaluation (LiveKit Agents, Pipecat, realtime models, open source) |
 
 ## Run the previews

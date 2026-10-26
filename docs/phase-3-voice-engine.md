@@ -49,6 +49,9 @@
 
 Try the voice lab in Chrome on a laptop or phone, with headphones.
 
+## Live providers
+The real AI brain (Claude) and voice (ElevenLabs) are now wired in behind server-side keys and monthly caps. See [`phase-3-live-providers.md`](phase-3-live-providers.md).
+
 ## What needs your approval next
 Connecting real providers costs money and needs accounts that only you can create. Proposed order:
 1. One STT, one TTS and one LLM provider (shortlist in ADR-0004), with a **monthly spending cap you set**. Keys go in server-side environment variables only.

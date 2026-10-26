@@ -28,6 +28,23 @@ class Settings(BaseSettings):
 
     login_attempts_per_minute: int = 5
 
+    # ---- live AI and speech providers (Phase 3) ----
+    # Nothing here is called unless BOTH a key and a non-zero monthly cap are set.
+    # Keys are read only on the server and never returned by any endpoint.
+    anthropic_api_key: SecretStr | None = None
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: str = Field("low", pattern="^(low|medium|high|xhigh|max)$")
+    llm_max_output_tokens: int = Field(400, ge=64, le=4000)
+    elevenlabs_api_key: SecretStr | None = None
+    elevenlabs_voice_id: str | None = None
+    elevenlabs_model: str = "eleven_flash_v2_5"
+    elevenlabs_base_url: str = "https://api.elevenlabs.io"
+    # Monthly caps (UTC calendar month). 0 disables that provider. Per workspace and across all workspaces.
+    live_llm_tokens_per_org_month: int = Field(0, ge=0)
+    live_llm_tokens_global_month: int = Field(0, ge=0)
+    live_tts_chars_per_org_month: int = Field(0, ge=0)
+    live_tts_chars_global_month: int = Field(0, ge=0)
+
     @field_validator("jwt_secret")
     @classmethod
     def _secret_strength(cls, v: SecretStr) -> SecretStr:

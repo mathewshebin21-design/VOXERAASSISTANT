@@ -28,6 +28,10 @@ services:
       VOXERA_ENV: development
       VOXERA_DATABASE_URL: postgresql+psycopg://voxera_app:app-dev-only@db:5432/voxera
       VOXERA_JWT_SECRET: ${VOXERA_JWT_SECRET:-dev-only-change-me-dev-only-change-me}
+    # Optional paid providers: read from services/api/.env (never committed). Off unless keys and caps are set.
+    env_file:
+      - path: ./services/api/.env
+        required: false
     ports: ["8000:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
