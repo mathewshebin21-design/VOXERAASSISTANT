@@ -5,6 +5,9 @@
 import { playBlob, type Player } from "./audio";
 import { ProviderError, type TtsAdapter } from "./types";
 
+/** Longest wait for one sentence once the model is loaded, before switching to the fallback voice. */
+const GEN_TIMEOUT_MS = 10_000;
+
 export interface KokoroVoice { id: string; name: string; accent: "British" | "American"; gender: "female" | "male"; grade: string }
 
 // Grades are the model card's own "overall grade" for each voice.
@@ -119,7 +122,10 @@ export class KokoroTts implements TtsAdapter {
     this.prepare(text);
     const job = this.cache.get(text)!;
     let wav: ArrayBuffer;
-    try { ({ wav } = await job); } finally { this.cache.delete(text); }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A device that can't keep up shouldn't leave the caller in silence: fail over to another voice.
+    const slow = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ProviderError("tts", `no audio after ${GEN_TIMEOUT_MS / 1000} s`)), GEN_TIMEOUT_MS); });
+    try { ({ wav } = await Promise.race([job, slow])); } finally { clearTimeout(timer); this.cache.delete(text); }
     if (signal.aborted) return;
     await playBlob(new Blob([wav], { type: "audio/wav" }), signal, onStart, this.player);
   }

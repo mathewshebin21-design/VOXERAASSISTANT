@@ -211,6 +211,26 @@ if (!ONLY || ONLY === "flow") {
   await ctx.close();
 }
 
+// Real-world regression: a microphone hearing noise (Chromium's fake device beeps continuously)
+// must not cut the agent off. Only recognised, non-echo speech may interrupt it.
+if (!ONLY || ONLY === "flow") {
+  const noisy = await chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
+  const ctx = await noisy.newContext({ viewport: viewports.desktop, permissions: ["microphone"] });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(BASE + "/flow/app/voice", { waitUntil: "networkidle" });
+    const mic = page.getByRole("switch", { name: "Use microphone" });
+    if ((await mic.getAttribute("aria-checked")) !== "true") await mic.click();
+    await page.getByRole("button", { name: "Start call" }).click();
+    await page.waitForTimeout(8000); // greeting plays while the mic hears beeps
+    const log = await page.evaluate(() => document.querySelector('[aria-live="polite"]')?.textContent ?? "");
+    record("voice   background noise on the mic does not interrupt the agent", /How can I help/.test(log) && !/interrupted|Barge-in/.test(log), log.slice(0, 160));
+  } catch (e) {
+    record("voice   background noise on the mic does not interrupt the agent", false, String(e).slice(0, 200));
+  }
+  await noisy.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

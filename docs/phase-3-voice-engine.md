@@ -49,6 +49,16 @@
 
 Try the voice lab in Chrome on a laptop or phone, with headphones.
 
+## Barge-in rules (revised after real-world testing, 2026-10-26)
+A first test on a MacBook showed every reply being cut off before it was heard. Room noise, and the agent's own voice coming from the speakers, counted as the caller interrupting, even while the agent was still preparing its reply. The rules are now:
+- While the agent is **preparing** a reply, only recognised words interrupt it. Noise never does.
+- While it is **speaking** and a speech recogniser is running, only recognised words of at least two words interrupt it, and only if they are not an **echo** of what the agent just said (70% word overlap means echo).
+- With **no** recogniser (typed input), sustained voice activity of 350 ms or more interrupts.
+- The on-device Kokoro voice loads **before** the call starts. If a sentence takes more than 10 s to generate, the call switches to the browser voice.
+- The recogniser's English variant is selectable (UK, India, US, Ireland, Australia, South Africa).
+
+These rules are covered by unit tests, plus a browser test with a noisy fake microphone.
+
 ## Live providers
 The real AI brain (Claude) and voice (ElevenLabs) are now wired in behind server-side keys and monthly caps. See [`phase-3-live-providers.md`](phase-3-live-providers.md).
 

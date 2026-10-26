@@ -28,6 +28,8 @@ export type LabLine =
 export interface LabOptions {
   mic: boolean;
   audio: boolean;
+  /** BCP-47 language for the browser speech recogniser, e.g. en-GB or en-IN. */
+  sttLang?: string;
   /** Which voice speaks when audio is on and no live voice is selected. */
   voice?: { engine: "browser" } | { engine: "kokoro"; id: string };
   /** Use the live, metered providers through the API (signed-in workspaces only). */
@@ -102,11 +104,12 @@ export function useVoiceLab() {
       : speechSynthesisSupported() ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text;
     setPriced([brain, tts]);
     const s = new VoiceSession({
-      stt: o.mic && webSpeechSupported() ? new WebSpeechStt() : null,
+      stt: o.mic && webSpeechSupported() ? new WebSpeechStt(o.sttLang ?? "en-GB") : null,
       brain: faultyBrain(brain, () => faultsRef.current),
       fallbackBrain: new MessageTakerBrain(),
       tts: faultyTts(tts, () => faultsRef.current),
-      fallbackTts: text,
+      // If the chosen voice fails, the browser's own voice takes over (or text, if audio is off).
+      fallbackTts: o.audio && speechSynthesisSupported() && !(tts instanceof SpeechSynthesisTts) ? new SpeechSynthesisTts(() => ({ rate: rateRef.current })) : text,
     });
     s.on(onEvent);
     sessionRef.current = s;

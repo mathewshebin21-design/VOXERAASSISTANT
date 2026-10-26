@@ -124,12 +124,66 @@ describe("VoiceSession", () => {
     expect(tts.spoken).not.toContain("And more.");
   });
 
-  it("VAD speech during playback is a barge-in too", async () => {
-    const { s, turns } = setup();
-    s.start(); await run(120);
+  it("without a recogniser, sustained VAD speech during playback is a barge-in", async () => {
+    const { s, turns } = setup({ stt: null, brain: scripted(10, "This is a fairly long sentence for the agent to say aloud.") });
+    s.start(); await run(1000);
+    s.typed("hi"); await run(150);
     expect(s.phase).toBe("speaking");
     s.vad({ type: "speech_start", atMs: Date.now() - 120 });
-    expect(turns()[0]).toMatchObject({ interrupted: true, bargeInRecoveryMs: 120 });
+    await run(349);
+    expect(s.phase).toBe("speaking");
+    await run(1);
+    expect(turns().at(-1)).toMatchObject({ interrupted: true, bargeInRecoveryMs: 470 });
+  });
+
+  it("with a recogniser running, voice activity alone never interrupts (noise, speaker echo)", async () => {
+    const { s, turns } = setup({ brain: scripted(10, "This is a fairly long sentence for the agent to say aloud.") });
+    s.start(); await run(1000);
+    s.typed("hi"); await run(150);
+    s.vad({ type: "speech_start", atMs: Date.now() });
+    await run(1000);
+    expect(turns().some((t) => t.interrupted)).toBe(false);
+  });
+
+  it("without a recogniser, a short noise blip during playback does not interrupt", async () => {
+    const { s, turns } = setup({ stt: null, brain: scripted(10, "This is a fairly long sentence for the agent to say aloud.") });
+    s.start(); await run(1000);
+    s.typed("hi"); await run(150);
+    expect(s.phase).toBe("speaking");
+    s.vad({ type: "speech_start", atMs: Date.now() });
+    await run(200);
+    s.vad({ type: "speech_end", atMs: Date.now(), durationMs: 200 });
+    await run(400);
+    expect(turns().some((t) => t.interrupted)).toBe(false);
+  });
+
+  it("noise while the agent is still preparing its reply does not cancel it", async () => {
+    const { s, tts, turns } = setup({ brain: scripted(2000) });
+    s.start(); await run(1000);
+    s.typed("hi"); await run(100);
+    expect(s.phase).toBe("thinking");
+    s.vad({ type: "speech_start", atMs: Date.now() });
+    await run(1000);
+    expect(s.phase).toBe("thinking");
+    s.vad({ type: "speech_end", atMs: Date.now(), durationMs: 1000 });
+    await run(3000);
+    expect(tts.spoken).toContain("First sentence here.");
+    expect(turns().some((t) => t.interrupted)).toBe(false);
+  });
+
+  it("ignores the recogniser hearing the agent's own voice (echo)", async () => {
+    const { s, stt, turns, events } = setup({ brain: scripted(10, "Our opening hours are nine till six. Anything else?") });
+    s.start(); await run(1000);
+    s.typed("hours?"); await run(150);
+    expect(s.phase).toBe("speaking");
+    stt.h!.onPartial("opening hours are nine");
+    stt.h!.onFinal("our opening hours are nine till six");
+    expect(s.phase).toBe("speaking");
+    await run(3000);
+    expect(turns().some((t) => t.interrupted)).toBe(false);
+    expect(events.filter((e) => e.type === "caller")).toHaveLength(1);
+    stt.h!.onPartial("actually what about Sunday");
+    expect(s.phase).not.toBe("speaking");
   });
 
   it("commits the last partial when the recogniser never sends a final", async () => {

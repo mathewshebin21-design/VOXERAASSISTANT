@@ -6,11 +6,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LiveProviderPicker, SaveVoiceSession, VoiceHistory, type LiveChoice } from "@/components/flow/live-voice";
 import { Chip, FBtn, FSwitch, Glass, GHead, Heading, Orb, finputAuto } from "@/components/flow/ui";
 import { VoicePicker, type VoiceChoice } from "@/components/flow/voice-picker";
+import { kokoro } from "@/lib/voice/kokoro";
 import type { LatencyStat } from "@/lib/voice/summary";
 import { useVoiceLab } from "@/lib/voice/use-voice-lab";
 
 const ms = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v} ms`);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+// Matching the recogniser to the caller's accent noticeably improves recognition.
+const STT_LANGS = [
+  { id: "en-GB", label: "English (UK)" }, { id: "en-IN", label: "English (India)" }, { id: "en-US", label: "English (US)" },
+  { id: "en-IE", label: "English (Ireland)" }, { id: "en-AU", label: "English (Australia)" }, { id: "en-ZA", label: "English (South Africa)" },
+];
 
 const PHASE_LABEL: Record<string, string> = { idle: "Not connected", listening: "Listening", user_speaking: "Caller speaking", thinking: "Thinking", speaking: "Agent speaking", ended: "Call ended" };
 
@@ -31,6 +38,26 @@ export default function VoiceLab() {
   const [text, setText] = useState("");
   const [live, setLive] = useState<LiveChoice>(undefined);
   const [voice, setVoice] = useState<VoiceChoice>({ engine: "browser" });
+  const [sttLang, setSttLang] = useState("en-GB");
+  const [preparing, setPreparing] = useState<string | null>(null);
+  const [prepError, setPrepError] = useState<string | null>(null);
+  useEffect(() => {
+    const l = navigator.language;
+    if (STT_LANGS.some((x) => x.id === l)) setSttLang(l);
+  }, []);
+  const useKokoro = audio && !live?.voice && voice.engine === "kokoro";
+  // Load the on-device voice before the call starts, so the first reply isn't stuck behind a download.
+  const startCall = async () => {
+    setPrepError(null);
+    if (useKokoro) {
+      const off = kokoro().onProgress((p) => setPreparing(p.total ? `Loading voice ${Math.round((p.loaded / p.total) * 100)}%` : "Loading voice…"));
+      try { await kokoro().load(); }
+      catch (e) { setPrepError(`The Kokoro voice couldn’t load (${e instanceof Error ? e.message : "error"}). Using the browser voice instead.`); setVoice({ engine: "browser" }); off(); setPreparing(null); return void lab.start({ mic: useMic, audio, live, voice: { engine: "browser" }, sttLang }); }
+      off();
+      setPreparing(null);
+    }
+    void lab.start({ mic: useMic, audio, live, voice, sttLang });
+  };
   const onLive = useCallback((c: LiveChoice) => setLive(c), []);
   useEffect(() => { if (lab.ended) window.dispatchEvent(new Event("voxera:voice-ended")); }, [lab.ended]);
   const end = useRef<HTMLDivElement>(null);
@@ -65,13 +92,21 @@ export default function VoiceLab() {
             </div>
             {lab.active
               ? <FBtn onClick={lab.end} aria-label="End call" className="border-flw-pink/60 text-flw-pink"><PhoneOff size={15} /></FBtn>
-              : <FBtn variant="glow" onClick={() => void lab.start({ mic: useMic, audio, live, voice })}><Play size={14} /> Start call</FBtn>}
+              : <FBtn variant="glow" disabled={!!preparing} onClick={() => void startCall()}><Play size={14} /> {preparing ?? "Start call"}</FBtn>}
           </div>
           {!lab.active && (
             <div className="max-h-[55%] shrink-0 space-y-2 overflow-y-auto border-b border-flw-line/70 p-4 text-sm">
               <label className="flex items-center justify-between gap-3"><span className="flex items-center gap-2"><Mic size={14} /> Use microphone {!lab.support.stt && <span className="text-xs text-flw-mute">(not supported here — use Chrome or Edge)</span>}</span><FSwitch label="Use microphone" on={useMic && lab.support.stt} onChange={setUseMic} /></label>
               <label className="flex items-center justify-between gap-3"><span>Speak replies aloud</span><FSwitch label="Speak replies aloud" on={audio} onChange={setAudio} /></label>
+              {useMic && lab.support.stt && (
+                <label className="flex items-center justify-between gap-3"><span>Your English</span>
+                  <select aria-label="Speech recognition language" value={sttLang} onChange={(e) => setSttLang(e.target.value)} className={finputAuto}>
+                    {STT_LANGS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  </select>
+                </label>
+              )}
               {audio && !live?.voice && <VoicePicker value={voice} onChange={setVoice} />}
+              {prepError && <p role="alert" className="text-xs text-flw-pink">{prepError}</p>}
               <LiveProviderPicker onChange={onLive} disabled={lab.active} />
               <p className="text-xs leading-relaxed text-flw-mute">{live ? "Your words are sent to VOXERA’s API and on to the live providers you switched on; transcripts are not stored, only usage counts." : "Nothing is sent to VOXERA and nothing is recorded."} With the microphone on, your browser’s own speech recogniser is used — in Chrome that sends your audio to Google’s servers to transcribe; other browsers may process it on the device or remotely. Use headphones so the agent’s voice isn’t mistaken for yours.</p>
             </div>

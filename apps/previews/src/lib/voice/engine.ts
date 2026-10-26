@@ -22,11 +22,13 @@ export interface SessionConfig {
   noInputMs: number;
   /** Minimum words in a partial transcript before it counts as a barge-in (guards against echo). */
   bargeInMinWords: number;
+  /** Voice activity must last this long while the agent is speaking before it counts as a barge-in. */
+  bargeInConfirmMs: number;
   /** Consecutive brain failures before switching to the fallback brain. */
   brainFailoverAfter: number;
 }
 
-export const DEFAULT_SESSION: SessionConfig = { sttFinalTimeoutMs: 1200, brainFirstChunkTimeoutMs: 6000, noInputMs: 12000, bargeInMinWords: 2, brainFailoverAfter: 2 };
+export const DEFAULT_SESSION: SessionConfig = { sttFinalTimeoutMs: 1200, brainFirstChunkTimeoutMs: 6000, noInputMs: 12000, bargeInMinWords: 2, bargeInConfirmMs: 350, brainFailoverAfter: 2 };
 
 export interface SessionDeps {
   stt: SttAdapter | null;
@@ -68,6 +70,10 @@ export class VoiceSession {
   private brainFailures = 0;
   private typedOnly = false;
   private generation = 0;
+  private vadSpeaking = false;
+  private bargeTimer: unknown = null;
+  /** What the agent said recently, to recognise the recogniser hearing the agent's own voice. */
+  private agentRecent: string[] = [];
   private pending: { failures: Stage[]; fallbacks: string[] } = { failures: [], fallbacks: [] };
 
   constructor(private deps: SessionDeps) {
@@ -113,10 +119,22 @@ export class VoiceSession {
   vad(e: VadEvent) {
     if (this.phase === "ended" || this.phase === "idle") return;
     if (e.type === "speech_start") {
+      this.vadSpeaking = true;
       this.clearSilence();
-      if (this.busy) this.bargeIn(e.atMs, "voice activity");
-      else this.setPhase("user_speaking");
+      // With a speech recogniser running, only recognised words that aren't the agent's own echo
+      // interrupt (see onPartial): loud noise, or the agent's voice from the speakers, must not.
+      // Without one, sustained voice activity over the agent's audio is the only signal available.
+      // While the agent is still preparing a reply, noise alone never cancels it.
+      if (this.phase === "speaking" && !this.stt) {
+        this.clearBarge();
+        this.bargeTimer = this.clock.setTimeout(() => {
+          this.bargeTimer = null;
+          if (this.vadSpeaking && this.phase === "speaking") this.bargeIn(e.atMs, "voice activity");
+        }, this.cfg.bargeInConfirmMs);
+      } else if (!this.busy) this.setPhase("user_speaking");
     } else {
+      this.vadSpeaking = false;
+      this.clearBarge();
       this.lastSpeechEnd = e.atMs;
       // Some recognisers never send a final result; commit what we heard.
       this.clearFinal();
@@ -151,11 +169,13 @@ export class VoiceSession {
         this.emit({ type: "partial", text });
         this.clearSilence();
         const words = text.trim().split(/\s+/).filter(Boolean).length;
+        if (this.busy && this.isEcho(text)) return; // the recogniser is hearing the agent's own voice
         if (this.busy && words >= this.cfg.bargeInMinWords) this.bargeIn(this.clock.now(), "speech recognised");
         else if (!this.busy && words) this.setPhase("user_speaking");
       },
       onFinal: (text) => {
         if (gen !== this.generation || this.phase === "ended") return;
+        if (this.isEcho(text)) { this.partial = ""; this.emit({ type: "partial", text: "" }); return; }
         this.commit(text, "voice");
       },
       onError: (err) => {
@@ -204,7 +224,7 @@ export class VoiceSession {
     const now = this.clock.now();
     if (this.busy) this.bargeIn(now, "speech recognised");
     // Only trust a VAD end that belongs to this utterance.
-    const vadEnd = input === "voice" && this.lastSpeechEnd !== null && now - this.lastSpeechEnd < 10000 ? this.lastSpeechEnd : null;
+    const vadEnd = input === "voice" && this.lastSpeechEnd !== null && now - this.lastSpeechEnd < 4000 ? this.lastSpeechEnd : null;
     const t0 = input === "typed" ? now : vadEnd ?? now;
     this.lastSpeechEnd = null;
     this.prompts = 0;
@@ -297,6 +317,7 @@ export class VoiceSession {
       this.setPhase("speaking");
     };
     this.curAgentId = id;
+    this.agentRecent = [...this.agentRecent.slice(-5), text];
     this.emit({ type: "agent", id, text });
     try {
       await this.tts.speak(text, ctl.signal, onStart);
@@ -329,9 +350,20 @@ export class VoiceSession {
     }, this.cfg.noInputMs);
   }
 
+  /** True when most words of a transcript match what the agent has just said (speaker echo). */
+  private isEcho(text: string): boolean {
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").split(/\s+/).filter((w) => w.length > 1);
+    const heard = norm(text);
+    if (heard.length < 2) return false;
+    const said = new Set(norm(this.agentRecent.join(" ")));
+    return heard.filter((w) => said.has(w)).length / heard.length >= 0.7;
+  }
+
+  private clearBarge() { if (this.bargeTimer !== null) { this.clock.clearTimeout(this.bargeTimer); this.bargeTimer = null; } }
+
   private clearSilence() { if (this.silenceTimer !== null) { this.clock.clearTimeout(this.silenceTimer); this.silenceTimer = null; } }
   private clearFinal() { if (this.finalTimer !== null) { this.clock.clearTimeout(this.finalTimer); this.finalTimer = null; } }
-  private clearTimers() { this.clearSilence(); this.clearFinal(); this.generation++; }
+  private clearTimers() { this.clearSilence(); this.clearFinal(); this.clearBarge(); this.generation++; }
 
   /** Records a failure or fallback against the current turn, or the next one if none is running. */
   private note(fallback: string, stage?: Stage) {
