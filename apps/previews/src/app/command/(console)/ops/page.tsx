@@ -4,7 +4,9 @@ import { clsx } from "clsx";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { LiveOps } from "@/components/command/live-ops";
 import { Panel, PageHead, Stat, Tag } from "@/components/command/ui";
+import { useDataMode } from "@/lib/live/data-mode";
 import { CALLS } from "@/lib/demo-data";
 import { computeMetrics, dailySeries, hourlyHeatmap, inRange, INTENT_LABEL, OUTCOME_LABEL } from "@/lib/metrics";
 import { DEMO_TODAY, addDays, dayNum, fmtDuration, fmtTime, gbp, monthShort } from "@/lib/time";
@@ -15,6 +17,13 @@ const tip = { contentStyle: { background: "rgb(17 17 22)", border: "1px solid rg
 const axis = { stroke: "rgb(140 140 158)", fontSize: 11, tickLine: false, axisLine: false } as const;
 
 export default function Ops() {
+  const dm = useDataMode();
+  if (dm.mode === "loading") return <div className="h-40 animate-pulse rounded-lg border border-cmd-line bg-cmd-panel" />;
+  if (dm.mode === "live") return <LiveOps orgId={dm.org!.organization.id} orgName={dm.org!.organization.name} />;
+  return <DemoOps />;
+}
+
+function DemoOps() {
   const [range, setRange] = useState<(typeof RANGES)[number]>(14);
   const from = addDays(DEMO_TODAY, -(range - 1));
   const calls = useMemo(() => inRange(CALLS, from, DEMO_TODAY), [from]);

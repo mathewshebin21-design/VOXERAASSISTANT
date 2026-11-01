@@ -3,6 +3,8 @@
 import { motion } from "framer-motion";
 import { ArrowRight, AudioLines, CalendarCheck, GitBranch, Headphones, ShieldCheck, Waypoints } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useDataMode } from "@/lib/live/data-mode";
 import { useEffect, useState } from "react";
 import { Waveform } from "@/components/command/waveform";
 import { DemoBadge } from "@/components/demo-badge";
@@ -27,6 +29,8 @@ const FEATURES = [
 ];
 
 export default function Landing() {
+  const router = useRouter();
+  const { exploreDemo } = useDataMode();
   const [n, setN] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setN((x) => (x + 1) % (LINES.length + 3)), 1400);
@@ -52,7 +56,8 @@ export default function Landing() {
             with every turn, tool call and outcome visible to operators.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/command/login" className="inline-flex items-center gap-2 rounded-md bg-cmd-violet px-5 py-2.5 font-medium text-white hover:bg-cmd-violet/85">Open console <ArrowRight size={16} /></Link>
+            <Link href="/command/login" className="inline-flex items-center gap-2 rounded-md bg-cmd-violet px-5 py-2.5 font-medium text-white hover:bg-cmd-violet/85">Sign in or create a workspace <ArrowRight size={16} /></Link>
+            <button onClick={() => { exploreDemo(); router.push("/command/ops"); }} className="inline-flex items-center gap-2 rounded-md border border-cmd-warn/60 px-5 py-2.5 text-cmd-warn hover:bg-cmd-warn/10">Explore with demo data</button>
             <Link href="/command/simulator" className="inline-flex items-center gap-2 rounded-md border border-cmd-line px-5 py-2.5 hover:border-cmd-cyan">Try the simulator</Link>
           </div>
           <p className="mt-6 text-xs text-cmd-mute">Preview only: there is no live phone line behind this page. Telephony arrives in Phase 4, after approval.</p>

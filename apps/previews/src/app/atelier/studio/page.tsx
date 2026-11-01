@@ -4,13 +4,22 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { LiveToday } from "@/components/atelier/live-today";
 import { Card, DemoNote, Eyebrow, H2, Pill, Title } from "@/components/atelier/ui";
+import { useDataMode } from "@/lib/live/data-mode";
 import { CALLS, serviceById, staffById } from "@/lib/demo-data";
 import { computeMetrics, dailySeries, inRange, OUTCOME_LABEL } from "@/lib/metrics";
 import { useAllAppointments, usePreview } from "@/lib/store";
 import { DEMO_NOW_MIN, DEMO_TODAY, addDays, dayShort, fmtDateLong, fmtTime, gbp } from "@/lib/time";
 
 export default function Today() {
+  const dm = useDataMode();
+  if (dm.mode === "loading") return <div className="h-40 animate-pulse rounded-[22px] bg-atl-line/40" />;
+  if (dm.mode === "live") return <LiveToday orgId={dm.org!.organization.id} orgName={dm.org!.organization.name} firstName={(dm.user?.full_name ?? "").split(" ")[0] || "there"} />;
+  return <DemoToday />;
+}
+
+function DemoToday() {
   const agent = usePreview((s) => s.draft.persona.agentName);
   const knowledge = usePreview((s) => s.knowledge);
   const appts = useAllAppointments();

@@ -251,6 +251,32 @@ if (!ONLY || ONLY === "flow") {
   await ctx.close();
 }
 
+// Command (A) and Atelier (B) sign-in: real forms in each design's look, and a separate,
+// clearly labelled "Explore with demo data" path into the demo dashboards.
+for (const [design, login, dash, demoText] of [["command", "/command/login", "/command/ops", "Simulated data"], ["atelier", "/atelier/sign-in", "/atelier/studio", "Demo studio"]]) {
+  if (ONLY && ONLY !== design) continue;
+  const ctx = await browser.newContext({ viewport: viewports.desktop });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(BASE + login, { waitUntil: "networkidle" });
+    await page.getByRole("tab", { name: "Create workspace" }).click();
+    const signupFields = (await page.getByLabel("Your name").count()) + (await page.getByLabel("Business name").count());
+    await page.getByRole("tab", { name: "Sign in" }).click();
+    await page.getByLabel("Email").fill("nobody@e2e.example");
+    await page.getByLabel("Password").fill("not the right password");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByRole("alert").waitFor({ timeout: 10000 }); // wrong password, or API unreachable — never a silent "success"
+    const stayed = page.url().includes(login);
+    await page.getByRole("button", { name: "Explore with demo data" }).click();
+    await page.waitForURL("**" + dash, { timeout: 10000 });
+    await page.getByText(demoText).first().waitFor({ timeout: 8000 });
+    record(`signin  ${design}: real form, errors shown, demo is a separate choice`, signupFields === 2 && stayed, `fields=${signupFields} stayed=${stayed}`);
+  } catch (e) {
+    record(`signin  ${design}: real form, errors shown, demo is a separate choice`, false, String(e).slice(0, 200));
+  }
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

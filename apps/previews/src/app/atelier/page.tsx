@@ -3,6 +3,8 @@
 import { motion } from "framer-motion";
 import { ArrowUpRight, Check } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useDataMode } from "@/lib/live/data-mode";
 
 const STEPS = [
   ["I", "Tell us about your studio", "Services, hours and the way you like things done."],
@@ -20,6 +22,8 @@ const PROMISES = [
 ];
 
 export default function Landing() {
+  const router = useRouter();
+  const { exploreDemo } = useDataMode();
   return (
     <div className="atl-grain min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -40,7 +44,8 @@ export default function Landing() {
             Atelier is the quiet studio where salon and clinic owners shape an AI receptionist — its voice, its knowledge, its judgement — without touching a line of configuration.
           </p>
           <div className="flex flex-wrap items-start gap-3">
-            <Link href="/atelier/sign-in" className="inline-flex items-center gap-2 rounded-full bg-atl-ink px-6 py-3 text-atl-paper hover:bg-atl-ink/85">Enter the studio <ArrowUpRight size={16} /></Link>
+            <Link href="/atelier/sign-in" className="inline-flex items-center gap-2 rounded-full bg-atl-ink px-6 py-3 text-atl-paper hover:bg-atl-ink/85">Sign in or open your studio <ArrowUpRight size={16} /></Link>
+            <button onClick={() => { exploreDemo(); router.push("/atelier/studio"); }} className="inline-flex items-center gap-2 rounded-full bg-atl-champ/15 px-6 py-3 text-atl-champdeep hover:bg-atl-champ/25">Explore with demo data</button>
             <Link href="/atelier/studio/rehearse" className="inline-flex items-center gap-2 rounded-full border border-atl-ink/20 px-6 py-3 hover:border-atl-champdeep">Hear a rehearsal</Link>
           </div>
         </div>

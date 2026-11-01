@@ -3,35 +3,20 @@
 import { clsx } from "clsx";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { finput, Glass, Orb } from "@/components/flow/ui";
-import { ApiError } from "@/lib/live/api";
-import { useSession } from "@/lib/live/session";
+import { useAuthForm } from "@/lib/live/auth-form";
 
 function Enter() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next");
   const safeNext = next && next.startsWith("/flow/") ? next : "/flow/app";
-  const { signIn, signUp } = useSession();
-  const [mode, setMode] = useState<"in" | "up">(sp.get("mode") === "signup" ? "up" : "in");
-  const [f, setF] = useState({ email: sp.get("email") ?? "", password: "", full_name: "", organization_name: "" });
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true); setErr(null);
-    try {
-      if (mode === "in") await signIn(f.email, f.password);
-      else await signUp(f);
-      router.push(safeNext);
-    } catch (x) {
-      setErr(x instanceof ApiError ? (x.status >= 500 || x.status === 0 ? "The VOXERA API isn't reachable. Is it running?" : x.detail) : "Something went wrong");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { mode, setMode, f, setF, err, busy, submit } = useAuthForm({
+    initialMode: sp.get("mode") === "signup" ? "up" : "in",
+    email: sp.get("email") ?? "",
+    onDone: () => router.push(safeNext),
+  });
 
   return (
     <div className="relative grid min-h-screen place-items-center px-4 py-10">
@@ -40,7 +25,7 @@ function Enter() {
         <div className="flex justify-center"><Orb level={0.4} size={84} /></div>
         <div className="mt-5 grid grid-cols-2 rounded-xl border border-flw-line p-1 text-sm" role="tablist">
           {(["in", "up"] as const).map((m) => (
-            <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setErr(null); }} className={clsx("rounded-lg py-1.5", mode === m ? "bg-flw-violet/25 text-flw-text" : "text-flw-mute")}>{m === "in" ? "Sign in" : "Create workspace"}</button>
+            <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={clsx("rounded-lg py-1.5", mode === m ? "bg-flw-violet/25 text-flw-text" : "text-flw-mute")}>{m === "in" ? "Sign in" : "Create workspace"}</button>
           ))}
         </div>
         <form className="mt-5 space-y-3" onSubmit={submit}>

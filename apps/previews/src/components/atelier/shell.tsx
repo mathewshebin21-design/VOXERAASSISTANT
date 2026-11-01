@@ -9,7 +9,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { BUSINESS } from "@/lib/demo-data";
+import { useDataMode } from "@/lib/live/data-mode";
+import { useSession } from "@/lib/live/session";
 import { usePreview } from "@/lib/store";
+
+/** Rooms that read the signed-in workspace's real data; the rest still use the demo studio. */
+const LIVE_ROOMS = ["/atelier/studio"];
+const initials = (name?: string | null) => (name ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
 
 // Three rooms of the studio. Every Command (A) and Flow (C) capability has a home here.
 export const ATL_GROUPS = [
@@ -42,6 +48,11 @@ export function AtelierShell({ children }: { children: React.ReactNode }) {
   const agent = usePreview((s) => s.draft.persona.agentName);
   const [finder, setFinder] = useState(false);
   const [q, setQ] = useState("");
+  const [account, setAccount] = useState(false);
+  const dm = useDataMode();
+  const signOut = useSession((s) => s.signOut);
+  const live = dm.mode === "live";
+  useEffect(() => setAccount(false), [path]);
   const isActive = (href: string, exact?: boolean) => (exact ? path === href : path === href || path.startsWith(href + "/"));
   const group = ATL_GROUPS.find((g) => g.items.some((i) => isActive(i.href, i.exact))) ?? ATL_GROUPS[0];
   const results = useMemo(() => ATL_NAV.filter((n) => n.label.toLowerCase().includes(q.toLowerCase())), [q]);
@@ -76,9 +87,24 @@ export function AtelierShell({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="ml-auto flex items-center gap-3 lg:ml-0">
             <button onClick={() => setFinder(true)} className="hidden items-center gap-2 rounded-full px-3 py-1.5 text-sm text-atl-soft ring-1 ring-atl-line hover:text-atl-ink sm:flex" aria-label="Find a page"><Search size={14} /> Find <kbd className="text-[10px]">Ctrl K</kbd></button>
-            <span className="rounded-full bg-atl-champ/15 px-2.5 py-1 text-[11px] font-medium text-atl-champdeep" title="Synthetic data, simulated calls">Demo studio</span>
-            <div className="hidden text-right text-xs xl:block"><div className="font-medium">{BUSINESS.name}</div><div className="text-atl-soft">with {agent}</div></div>
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-atl-ink font-serif text-sm text-atl-paper">AO</span>
+            {live
+              ? <span className="rounded-full bg-atl-sage/20 px-2.5 py-1 text-[11px] font-medium text-atl-ink" title="Your real workspace">Your studio</span>
+              : <span className="rounded-full bg-atl-champ/15 px-2.5 py-1 text-[11px] font-medium text-atl-champdeep" title="Synthetic data, simulated calls">Demo studio</span>}
+            <div className="hidden text-right text-xs xl:block"><div className="font-medium" data-testid="atl-workspace">{live ? dm.org!.organization.name : BUSINESS.name}</div><div className="text-atl-soft">{live ? dm.user?.full_name : `with ${agent}`}</div></div>
+            <div className="relative">
+              <button onClick={() => setAccount(!account)} aria-haspopup="menu" aria-expanded={account} aria-label="Account menu" className="grid h-9 w-9 place-items-center rounded-full bg-atl-ink font-serif text-sm text-atl-paper hover:ring-2 hover:ring-atl-champ">{dm.signedIn ? initials(dm.user?.full_name) : "AO"}</button>
+              {account && (
+                <div role="menu" className="absolute right-0 z-50 mt-3 w-64 rounded-3xl border border-atl-line bg-atl-paper p-2 text-sm shadow-2xl">
+                  {dm.signedIn ? <>
+                    <div className="px-4 py-2 text-xs text-atl-soft">Signed in as <span className="text-atl-ink">{dm.user?.email}</span></div>
+                    {dm.viewingDemo
+                      ? <button role="menuitem" onClick={() => { dm.backToWorkspace(); router.push("/atelier/studio"); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Back to {dm.org?.organization.name ?? "my studio"}</button>
+                      : <button role="menuitem" onClick={() => { dm.exploreDemo(); setAccount(false); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Explore with demo data</button>}
+                    <button role="menuitem" onClick={async () => { await signOut(); router.push("/atelier/sign-in"); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Sign out</button>
+                  </> : <Link role="menuitem" href="/atelier/sign-in" className="block rounded-2xl px-4 py-2 hover:bg-atl-bg">Sign in or create a workspace</Link>}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <nav className="mx-auto hidden max-w-7xl gap-1 px-5 pb-3 lg:flex" aria-label={`${group.name} sections`}>
@@ -95,9 +121,19 @@ export function AtelierShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
       </header>
-      <main className="mx-auto min-w-0 max-w-7xl px-5 py-8 sm:py-12">{children}</main>
+      <main className="mx-auto min-w-0 max-w-7xl px-5 py-8 sm:py-12">
+        {dm.viewingDemo && (
+          <p className="mb-8 rounded-full bg-atl-champ/15 px-5 py-2.5 text-sm text-atl-champdeep" role="status">You&apos;re exploring the demo studio. <button onClick={() => dm.backToWorkspace()} className="underline underline-offset-4">Back to {dm.org?.organization.name ?? "your studio"}</button></p>
+        )}
+        {live && !LIVE_ROOMS.includes(path) && (
+          <p className="mb-8 rounded-full border border-atl-line px-5 py-2.5 text-sm text-atl-soft" role="status" data-testid="atl-demo-room">
+            You&apos;re in <span className="text-atl-ink">{dm.org!.organization.name}</span>. This room still shows <span className="text-atl-champdeep">demo data</span> — <Link href="/atelier/studio" className="underline underline-offset-4">Today</Link> shows your real studio.
+          </p>
+        )}
+        {children}
+      </main>
       <footer className="mx-auto hidden max-w-7xl items-center justify-between px-5 pb-10 text-xs text-atl-soft lg:flex">
-        <span>Voxera Atelier — design preview B. Demo data only; no live phone line is connected. Shortcuts: Ctrl K to find, Alt + number to jump.</span>
+        <span>Voxera Atelier — design preview B. {live ? "Today shows your real studio; no phone line is connected yet." : "Demo data only; no live phone line is connected."} Shortcuts: Ctrl K to find, Alt + number to jump.</span>
         <Link href="/atelier/studio/create" className="inline-flex items-center gap-1 hover:text-atl-ink"><BookOpenText size={13} /> Set up a new receptionist</Link>
       </footer>
       <nav className="fixed inset-x-3 bottom-3 z-40 flex justify-around rounded-full border border-atl-line bg-atl-paper/95 px-2 py-1.5 shadow-lg backdrop-blur lg:hidden" aria-label="Studio (mobile)">
