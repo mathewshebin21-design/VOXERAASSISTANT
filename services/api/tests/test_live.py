@@ -161,7 +161,19 @@ def test_brain_streams_runs_tools_on_workspace_data_and_meters(make_account, liv
     assert first["output_config"] == {"effort": "low"} and "temperature" not in first
     assert "Halden & Rye" in first["system"] and "999" in first["system"]
     assert first["messages"][0]["role"] == "user"  # synthetic opener before the greeting
-    assert {t["name"] for t in first["tools"]} == {"get_business_info", "get_opening_hours", "list_services"}
+    assert {t["name"] for t in first["tools"]} == {
+        "get_business_info",
+        "get_opening_hours",
+        "list_services",
+        "check_availability",
+        "book_appointment",
+        "find_my_appointments",
+        "reschedule_appointment",
+        "cancel_appointment",
+        "take_message",
+        "transfer_to_staff",
+    }
+    assert all(t["strict"] for t in first["tools"])
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and json.loads(result["content"])[0]["price_from_gbp"] == "165.00"
 

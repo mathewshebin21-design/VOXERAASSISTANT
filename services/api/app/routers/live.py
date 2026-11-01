@@ -22,7 +22,7 @@ from ..db import SessionLocal, set_tenant
 from ..deps import DB, OrgContext, require
 from ..live import providers
 from ..live.budget import budget, require_budget
-from ..live.receptionist import TOOLS, load_context, run_tool, system_prompt
+from ..live.receptionist import TOOLS, Turn, load_context, run_tool, system_prompt
 from ..models import UsageEvent, UsageKind, UsageSource
 from ..permissions import Perm
 from ..schemas import Strict
@@ -30,7 +30,7 @@ from ..schemas import Strict
 log = logging.getLogger("voxera.live")
 router = APIRouter(prefix="/v1/orgs/{org_id}/live", tags=["live"])
 
-MAX_ROUNDS = 3  # model turns per caller turn (tool calls in between)
+MAX_ROUNDS = 6  # model turns per caller turn (e.g. check availability → book → confirm)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Models that accept server-side refusal fallback; others (e.g. Claude Haiku 5.5) reject the parameter.
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
@@ -44,6 +44,8 @@ class LiveMessage(Strict):
 
 class BrainIn(Strict):
     request_id: RequestId
+    # One id per call: makes bookings idempotent if a turn is retried.
+    conversation_id: RequestId | None = None
     messages: list[LiveMessage] = Field(min_length=1, max_length=40)
 
 
@@ -148,9 +150,14 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
 
     fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.llm_model in FALLBACK_MODELS else {}
 
+    turn = Turn(org_id, body.conversation_id or body.request_id, body.messages[-1].text)
+    read_only = {"get_business_info", "get_opening_hours", "list_services"}
+
     def gen() -> Iterator[str]:
         used = 0
         partial_in = partial_chars = 0
+        tdb = SessionLocal()  # the request's session is closed once streaming starts
+        set_tenant(tdb, org_id=org_id, user_id=user_id)
         try:
             for _ in range(MAX_ROUNDS):
                 partial_in = partial_chars = 0
@@ -183,10 +190,9 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
                     break
                 results = []
                 for b in tool_uses:
-                    ok, out = run_tool(bctx, b.name, b.input)
-                    yield _sse(
-                        {"type": "tool", "name": b.name, "ok": ok, "result": "workspace data returned" if ok else out}
-                    )
+                    ok, out = run_tool(tdb, bctx, turn, b.name, b.input)
+                    shown = "workspace data returned" if ok and b.name in read_only else out[:300]
+                    yield _sse({"type": "tool", "name": b.name, "ok": ok, "result": shown})
                     results.append(
                         {
                             "type": "tool_result",
@@ -197,6 +203,9 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
                     )
                 msgs.append({"role": "assistant", "content": final.content})
                 msgs.append({"role": "user", "content": results})
+            if turn.handoff:
+                h = turn.handoff
+                yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
             yield _sse({"type": "done", "llm_tokens": used})
         except anthropic.RateLimitError:
             yield _sse({"type": "error", "message": "Language model is rate limited."})
@@ -208,6 +217,7 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
         except ValueError:  # unparseable streamed tool input
             yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
         finally:
+            tdb.close()
             # A caller barge-in closes the stream mid-reply; the provider still bills what it produced.
             used += partial_in + (partial_chars // 3 if partial_in else 0)
             if used:

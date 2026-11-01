@@ -48,6 +48,7 @@ class Role(str, enum.Enum):
     owner = "owner"
     admin = "admin"
     manager = "manager"
+    staff = "staff"  # front-desk employee: answers transferred calls, works cases, manages bookings
     viewer = "viewer"
 
 
@@ -196,10 +197,17 @@ class WorkspaceSettings(Base):
     )
     recording_retention_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
     data_region: Mapped[str] = mapped_column(String(16), default="uk", nullable=False)
+    # How many appointments can run at the same time (chairs/rooms/staff on shift).
+    booking_capacity: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1", nullable=False)
+    # Where the receptionist transfers callers once telephony is connected (E.164, e.g. +441179460000).
+    transfer_phone: Mapped[str | None] = mapped_column(String(20))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    __table_args__ = (CheckConstraint("recording_retention_days BETWEEN 7 AND 365", name="ck_settings_retention"),)
+    __table_args__ = (
+        CheckConstraint("recording_retention_days BETWEEN 7 AND 365", name="ck_settings_retention"),
+        CheckConstraint("booking_capacity BETWEEN 1 AND 50", name="ck_settings_capacity"),
+    )
 
 
 class AgentStatus(str, enum.Enum):
@@ -314,3 +322,125 @@ class VoiceTestSession(Base):
         CheckConstraint("duration_ms >= 0", name="ck_voice_duration"),
         Index("ix_voice_sessions_org_time", "organization_id", "started_at"),
     )
+
+
+class AppointmentStatus(str, enum.Enum):
+    booked = "booked"
+    cancelled = "cancelled"
+
+
+class Appointment(Base):
+    """A booking. ``blocks_until`` adds the service's buffer, so back-to-back bookings leave cleanup time."""
+
+    __tablename__ = "appointments"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("services.id", ondelete="SET NULL")
+    )
+    service_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    blocks_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    customer_phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    notes: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[AppointmentStatus] = mapped_column(
+        Enum(AppointmentStatus, name="appointment_status"), default=AppointmentStatus.booked, nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(20), default="staff", nullable=False)  # staff | ai_receptionist
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
+    created_at: Mapped[datetime] = _created()
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_appointment_idempotency"),
+        CheckConstraint("starts_at < ends_at AND ends_at <= blocks_until", name="ck_appointment_times"),
+        Index("ix_appointments_org_time", "organization_id", "starts_at"),
+        Index("ix_appointments_org_phone", "organization_id", "customer_phone"),
+    )
+
+
+class CallerMessageKind(str, enum.Enum):
+    message = "message"  # caller left a message
+    transfer = "transfer"  # caller asked for / needed a person; the agent handed over
+    callback = "callback"  # wanted a person outside opening hours: call them back
+
+
+class CallerMessageStatus(str, enum.Enum):
+    new = "new"  # in the shared queue, nobody has it yet
+    in_progress = "in_progress"  # assigned to one employee
+    resolved = "resolved"
+
+
+class CallerMessage(Base):
+    """A case on the staff desk: a message, a transferred call or a callback request.
+
+    Several employees work the desk at once. A case is claimed atomically (only while unassigned),
+    so two people never pick up the same caller; notes record what was done.
+    """
+
+    __tablename__ = "caller_messages"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    kind: Mapped[CallerMessageKind] = mapped_column(Enum(CallerMessageKind, name="caller_message_kind"), nullable=False)
+    caller_name: Mapped[str | None] = mapped_column(String(120))
+    caller_phone: Mapped[str | None] = mapped_column(String(32))
+    summary: Mapped[str] = mapped_column(String(1000), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(200))
+    urgent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[CallerMessageStatus] = mapped_column(
+        Enum(CallerMessageStatus, name="caller_message_status"), default=CallerMessageStatus.new, nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(20), default="ai_receptionist", nullable=False)
+    created_at: Mapped[datetime] = _created()
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution: Mapped[str | None] = mapped_column(String(1000))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    __table_args__ = (
+        Index("ix_caller_messages_org_time", "organization_id", "created_at"),
+        Index("ix_caller_messages_org_assignee", "organization_id", "assigned_to", "status"),
+    )
+
+
+class CaseNote(Base):
+    """What an employee did or learned on a case. Append-only for the API role."""
+
+    __tablename__ = "case_notes"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("caller_messages.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    author_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(String(2000), nullable=False)
+    created_at: Mapped[datetime] = _created()
+
+
+class DeskStatus(str, enum.Enum):
+    offline = "offline"
+    available = "available"  # can take transferred calls
+    busy = "busy"  # on a call or working a case
+
+
+class DeskAgent(Base):
+    """An employee's live availability on the desk (one row per member who has signed on)."""
+
+    __tablename__ = "desk_agents"
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    status: Mapped[DeskStatus] = mapped_column(Enum(DeskStatus, name="desk_status"), nullable=False)
+    status_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

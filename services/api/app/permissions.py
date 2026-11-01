@@ -18,13 +18,15 @@ class Perm(str, enum.Enum):
     data_export = "data_export"
     org_delete = "org_delete"
     billing = "billing"
+    calls_manage = "calls_manage"  # appointments and the caller inbox
 
 
 _ALL = set(Perm)
 ROLE_PERMS: dict[Role, set[Perm]] = {
     Role.owner: _ALL,
     Role.admin: _ALL - {Perm.data_export, Perm.org_delete, Perm.billing},
-    Role.manager: {Perm.read, Perm.knowledge_write},
+    Role.manager: {Perm.read, Perm.knowledge_write, Perm.calls_manage},
+    Role.staff: {Perm.read, Perm.calls_manage},
     Role.viewer: {Perm.read},
 }
 

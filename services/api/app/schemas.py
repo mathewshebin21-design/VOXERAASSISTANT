@@ -220,6 +220,8 @@ class SettingsPatch(Strict):
     recording_disclosure_enabled: bool | None = None
     recording_disclosure_text: str | None = Field(None, min_length=10, max_length=500)
     recording_retention_days: int | None = Field(None, ge=7, le=365)
+    booking_capacity: int | None = Field(None, ge=1, le=50)
+    transfer_phone: str | None = Field(None, pattern=r"^\+[1-9]\d{6,14}$", description="E.164, e.g. +441179460000")
 
     @field_validator("timezone")
     @classmethod
@@ -240,6 +242,8 @@ class SettingsOut(Out):
     recording_disclosure_text: str
     recording_retention_days: int
     data_region: str
+    booking_capacity: int
+    transfer_phone: str | None
 
 
 # ---- agents ----
@@ -376,3 +380,102 @@ class VoiceSessionOut(Out):
 
 class VoiceSessionDetail(VoiceSessionOut):
     turns: list[dict]
+
+
+# ---- reception desk ----
+
+
+class AppointmentOut(Out):
+    id: uuid.UUID
+    service_id: uuid.UUID | None
+    service_name: str
+    starts_at: datetime
+    ends_at: datetime
+    customer_name: str
+    customer_phone: str
+    notes: str | None
+    status: str
+    source: str
+    created_at: datetime
+    cancelled_at: datetime | None
+
+
+class AppointmentIn(Strict):
+    service_id: uuid.UUID
+    starts_at: datetime = Field(description="Local or offset time; naive times are taken in the workspace time zone")
+    customer_name: str = Field(min_length=1, max_length=120)
+    customer_phone: str = Field(min_length=7, max_length=32)
+    notes: str | None = Field(None, max_length=500)
+
+
+class SlotsOut(BaseModel):
+    service: str
+    timezone: str
+    slots: list[datetime]
+
+
+class CaseNoteOut(Out):
+    id: uuid.UUID
+    author_id: uuid.UUID | None
+    author_name: str | None = None
+    body: str
+    created_at: datetime
+
+
+class CaseOut(Out):
+    id: uuid.UUID
+    kind: str
+    caller_name: str | None
+    caller_phone: str | None
+    summary: str
+    reason: str | None
+    urgent: bool
+    status: str
+    source: str
+    assigned_to: uuid.UUID | None
+    assignee_name: str | None = None
+    assigned_at: datetime | None
+    resolution: str | None
+    resolved_at: datetime | None
+    resolved_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CaseDetail(CaseOut):
+    notes: list[CaseNoteOut] = []
+
+
+class CaseIn(Strict):
+    """A call an employee answered or a request they took directly (logged by hand)."""
+
+    caller_name: str | None = Field(None, max_length=120)
+    caller_phone: str | None = Field(None, max_length=32)
+    summary: str = Field(min_length=1, max_length=1000)
+    urgent: bool = False
+    assign_to_me: bool = True
+
+
+class NoteIn(Strict):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class ResolveIn(Strict):
+    resolution: str = Field(min_length=1, max_length=1000)
+
+
+class AssignIn(Strict):
+    user_id: uuid.UUID | None
+
+
+class PresenceIn(Strict):
+    status: Literal["offline", "available", "busy"]
+
+
+class DeskMemberOut(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    role: str
+    status: str
+    status_since: datetime | None
+    open_cases: int

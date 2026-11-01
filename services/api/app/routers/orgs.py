@@ -14,9 +14,11 @@ from ..db import set_tenant
 from ..deps import DB, CurrentPrincipal, OrgContext, client_meta, require
 from ..models import (
     Agent,
+    Appointment,
     AuditLog,
     AuthSession,
     BusinessProfile,
+    CallerMessage,
     DeletionReceipt,
     Invitation,
     Membership,
@@ -221,6 +223,8 @@ def export_org(ctx: Annotated[OrgContext, Depends(require(Perm.data_export))], d
         ],
         "usage_events": rows(UsageEvent, UsageEvent.occurred_at),
         "voice_test_sessions": rows(VoiceTestSession, VoiceTestSession.started_at),
+        "appointments": rows(Appointment, Appointment.starts_at),
+        "caller_messages": rows(CallerMessage, CallerMessage.created_at),
         "audit_logs": rows(AuditLog, AuditLog.created_at),
     }
     audit.record(db, oid, ctx.user.id, "organization.exported", "organization", oid, None, client_meta(request))
