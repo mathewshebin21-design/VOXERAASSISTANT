@@ -38,6 +38,10 @@ export default function Simulate() {
           </div>
           <button onClick={() => sim.setTts(!sim.tts)} disabled={!sim.ttsSupported} className="text-flw-mute hover:text-flw-text disabled:opacity-30" aria-label={sim.tts ? "Mute browser voice" : "Speak replies"}>{sim.tts ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
         </div>
+        <div className="border-b border-flw-line/70 px-4 py-2 text-[11px] text-flw-mute" data-testid="sim-source">
+          {sim.source === "workspace" ? <>Answering from <span className="text-flw-cyan">{sim.business}</span>&apos;s real services, hours and availability. Practice bookings aren&apos;t added to your diary.</> : <>Demo salon data. Sign in to practise with your own workspace.</>}
+          {sim.tts && <span className="block">Voice: {sim.voiceName ?? "browser default"}. For a more natural voice, install an “Enhanced” or “Natural” voice in your device settings, or use the Voice lab.</span>}
+        </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
           {!live && <div className="grid h-full place-items-center"><FBtn variant="glow" onClick={sim.start}><Play size={14} /> Start simulation</FBtn></div>}
           <AnimatePresence initial={false}>

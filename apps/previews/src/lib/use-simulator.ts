@@ -8,6 +8,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APPOINTMENTS } from "./demo-data";
 import { greeting, initialState, respond, SCENARIOS, type SimEvent, type SimState } from "./simulator";
 import { usePreview } from "./store";
+import { practiceGreeting, practiceInitial, practiceReply, type PracticeState } from "./live/practice";
+import { usePracticeSetup } from "./live/practice-catalog";
+import { chosenVoiceName, speakNaturally } from "./voice/natural";
 
 export interface SimMessage {
   id: number;
@@ -36,6 +39,14 @@ export function useSimulator() {
   const simBookings = usePreview((s) => s.simBookings);
   const addSimBookings = usePreview((s) => s.addSimBookings);
 
+  // Signed in: the practice receptionist answers from this workspace's real details.
+  const practice = usePracticeSetup();
+  const setup = practice.setup;
+  const [pState, setPState] = useState<PracticeState>(practiceInitial);
+  const pStateRef = useRef(pState);
+  pStateRef.current = pState;
+  const [voiceName, setVoiceName] = useState<string | null>(null);
+
   const [messages, setMessages] = useState<SimMessage[]>([]);
   const [state, setState] = useState<SimState>(initialState);
   const [speaking, setSpeaking] = useState(false);
@@ -61,6 +72,12 @@ export function useSimulator() {
     const w = window as unknown as Record<string, unknown>;
     setSttSupported(!!(w.SpeechRecognition || w.webkitSpeechRecognition));
     setTtsSupported("speechSynthesis" in window);
+    if (!("speechSynthesis" in window)) return;
+    // Voices load asynchronously in most browsers.
+    const update = () => setVoiceName(chosenVoiceName("en-GB"));
+    update();
+    window.speechSynthesis.addEventListener?.("voiceschanged", update);
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", update);
   }, []);
 
   const opts = useMemo(() => ({ persona: draft.persona, knowledge, appointments: [...APPOINTMENTS, ...simBookings], failTools }), [draft.persona, knowledge, simBookings, failTools]);
@@ -70,10 +87,7 @@ export function useSimulator() {
   const speak = useCallback((text: string) => {
     if (!tts || !ttsSupported) return;
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-GB";
-    u.rate = draft.speakingRate;
-    window.speechSynthesis.speak(u);
+    speakNaturally(text, { rate: draft.speakingRate, lang: "en-GB" });
   }, [tts, ttsSupported, draft.speakingRate]);
 
   // Drain the event queue one item at a time, streaming agent text word by word.
@@ -127,8 +141,11 @@ export function useSimulator() {
     const s0 = initialState();
     setState(s0);
     stateRef.current = s0;
-    enqueue(greeting(draft.persona));
-  }, [enqueue, draft.persona, ttsSupported]);
+    const p0 = practiceInitial();
+    setPState(p0);
+    pStateRef.current = p0;
+    enqueue(setup ? practiceGreeting(setup.catalog, setup.greeting, setup.recording) : greeting(draft.persona));
+  }, [enqueue, draft.persona, ttsSupported, setup]);
 
   /** Caller speaks. If the agent is mid-sentence this is a barge-in: stop and truncate. */
   const send = useCallback((text: string) => {
@@ -143,13 +160,23 @@ export function useSimulator() {
       setSpeaking(false); setThinking(false);
     }
     setMessages((m) => [...m, { id: idRef.current++, event: { kind: "caller", text } }]);
+    const barge: SimEvent[] = bargeIn ? [{ kind: "state", label: "Barge-in detected — agent stopped speaking" }] : [];
+    if (setup) {
+      setThinking(true);
+      const failing = failTools ? async () => { throw new Error("Availability lookup failed (simulated failure)"); } : practice.findSlots;
+      void practiceReply(text, pStateRef.current, setup.catalog, failing).then(({ events, state: p1 }) => {
+        setPState(p1);
+        pStateRef.current = p1;
+        enqueue([...barge, ...events]);
+      }).catch(() => enqueue([...barge, { kind: "agent", text: "Sorry, I lost my train of thought there. Could you say that again?", latencyMs: 400 }]));
+      return;
+    }
     const { events, state: s1 } = respond(text, stateRef.current, opts);
-    const evs: SimEvent[] = bargeIn ? [{ kind: "state", label: "Barge-in detected — agent stopped speaking" }, ...events] : events;
     setState(s1);
     stateRef.current = s1;
     if (s1.bookings.length) addSimBookings(s1.bookings);
-    enqueue(evs);
-  }, [opts, enqueue, addSimBookings, ttsSupported]);
+    enqueue([...barge, ...events]);
+  }, [opts, enqueue, addSimBookings, ttsSupported, setup, failTools, practice.findSlots]);
 
   /** Runs `fn` once the agent has been silent for a moment (no queued speech or tools). */
   const afterIdle = useCallback((fn: () => void) => {
@@ -204,8 +231,14 @@ export function useSimulator() {
 
   useEffect(() => () => { clearTimer(); scenarioTimers.current.forEach(clearTimeout); if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel(); }, []);
 
+  const shownState: SimState = setup ? { ...initialState(), stage: pState.stage === "need_service" ? "need_service" : pState.stage, node: pState.node } : state;
+
   return {
-    messages, state, speaking, thinking, level, timings,
+    /** "workspace" when answering from the signed-in workspace's real details. */
+    source: setup ? ("workspace" as const) : ("demo" as const),
+    business: setup?.catalog.business ?? null,
+    voiceName,
+    messages, state: shownState, speaking, thinking, level, timings,
     failTools, setFailTools, tts, setTts, ttsSupported,
     sttSupported, listening, interim, listen, stopListening,
     start, send, submit, runScenario, scenarios: SCENARIOS,

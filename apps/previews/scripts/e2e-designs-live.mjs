@@ -97,6 +97,20 @@ await step("Command: real bookings and desk cases appear after they're created",
   return /4\/6 done/.test(await p.locator("main").innerText());
 });
 
+await step("Flow Simulate: practice receptionist answers from the workspace's real details", async () => {
+  await p.goto(`${BASE}/flow/app/simulate`, { waitUntil: "networkidle" });
+  await p.getByTestId("sim-source").getByText(/real services, hours and availability/).waitFor({ timeout: 10000 });
+  const ask = async (text, expect) => {
+    await p.getByLabel("Caller message").fill(text);
+    await p.getByRole("button", { name: "Send" }).click();
+    await p.getByText(expect).last().waitFor({ timeout: 15000 });
+  };
+  await ask("Okay great what all services do you offer", /Gents cut \(from £20\)/);
+  await ask("What's a gents cut?", /Gents cut is a 30 minutes appointment/);
+  await ask("Can I book a sports massage tomorrow?", /I could do|The next one I have|is free/);
+  return (await p.getByText("unsupported_answer").count()) === 0;
+});
+
 await step("Command: other screens say they still show demo data", async () => {
   await p.goto(`${BASE}/command/calls`, { waitUntil: "networkidle" });
   return (await p.getByTestId("cmd-demo-screen").count()) === 1;

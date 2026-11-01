@@ -141,6 +141,41 @@ function parseWhen(text: string): { date?: string; afterMin?: number; beforeMin?
   return out;
 }
 
+/** Plain-English descriptions the demo receptionist can give when asked "what's a …?". */
+const SERVICE_INFO: Record<string, string> = {
+  "svc-cut-w": "a full consultation, wash, cut and finish, usually for a change of style",
+  "svc-cut-m": "a quick wash and cut for shorter hair or a tidy-up",
+  "svc-blow": "a wash and professional blow-dry, without a cut",
+  "svc-tint": "an all-over permanent colour from roots to ends",
+  "svc-balay": "a hand-painted lightening technique for a soft, natural, sun-kissed look",
+  "svc-gloss": "a quick semi-permanent glaze that refreshes tone and adds shine",
+  "svc-treat": "a conditioning treatment that rebuilds the bonds inside the hair, helping repair damage from colour, bleach or heat",
+  "svc-consult": "a short chat with a colourist plus the skin patch test we need before colour",
+  "svc-bridal": "styling for your wedding day, planned with you in advance",
+};
+
+const QUESTION = /\?\s*$|^(so |and |okay |ok |um |right |sorry )*(what|what'?s|whats|how|why|which|who|is|are|does|do|could|can|tell me|explain)\b/i;
+const DESCRIBE = /(what('?s| is| are| does)|whats)\s+(a|an|the|your)?\s*\w|tell me (more )?about|explain|what (does|is) .* (involve|include|mean)|what happens/i;
+const LIST_SERVICES = /(what|which)\b.*\b(services|treatments|options|do you (do|offer|provide)|you (do|offer|provide))|\b(services|treatments) (do )?you (offer|do|have)|what (else )?do you do\b|price list|\bmenu\b/i;
+
+function describeService(id: string): string {
+  const svc = serviceById(id);
+  const price = svc.priceFromGBP ? `from £${svc.priceFromGBP}` : "free";
+  return `${svc.name} is ${SERVICE_INFO[id] ?? "one of our services"}. It takes about ${svc.durationMin} minutes and it's ${price}.${svc.requiresPatchTest ? " It needs a patch test 48 hours before." : ""}`;
+}
+
+/** After a side question mid-booking, pick the booking back up. */
+function resumeBooking(s: SimState): string {
+  switch (s.stage) {
+    case "need_service": return "What would you like to book?";
+    case "need_time": return s.serviceId ? "Do you have a day or time in mind?" : "";
+    case "offered": return "Would any of the times I mentioned work for you?";
+    case "need_name": return "And what name shall I put the booking under?";
+    case "confirming": return "Shall I go ahead and book it?";
+    default: return s.serviceId && serviceById(s.serviceId).bookableByAgent ? "Would you like me to check availability?" : "";
+  }
+}
+
 function slotPhrase(s: Slot) {
   const st = staffById(s.staffId);
   const when = s.date === DEMO_TODAY ? "today" : s.date === addDays(DEMO_TODAY, 1) ? "tomorrow" : dayLong(s.date);
@@ -167,7 +202,7 @@ function lookup(name: string, query: string, entry: KnowledgeEntry | undefined, 
 function say(text: string, p: AgentPersona): SimEvent {
   // Warmth adds a softener; verbosity trims or keeps follow-up sentences.
   let t = text;
-  if (p.warmth > 66 && !/^(sorry|i'm sorry|of course|lovely)/i.test(t)) t = (["Of course. ", "Happy to help. ", "Lovely. "][t.length % 3]) + t;
+  if (p.warmth > 66 && !/^(sorry|i'm sorry|of course|lovely|happy to|sure|no problem|great|thanks|you're|yes|that's|okay|i'm afraid|hi)\b/i.test(t)) t = (["Of course. ", "Happy to help. ", "Lovely. "][t.length % 3]) + t;
   if (p.verbosity < 34) t = t.split(/(?<=[.?!])\s/).slice(0, 2).join(" ");
   return { kind: "agent", text: t, latencyMs: T.agent + Math.min(400, t.length * 2) };
 }
@@ -245,6 +280,26 @@ function transfer(s: SimState, ev: SimEvent[], opts: SimOptions, reason: string)
 
 function continueTurn(text: string, s: SimState, ev: SimEvent[], opts: SimOptions, allAppts: Appointment[]): { events: SimEvent[]; state: SimState } {
   const p = opts.persona;
+
+  // 3a · Answer the question that was actually asked, even mid-booking, then carry on.
+  const askedQ = QUESTION.test(text);
+  if (LIST_SERVICES.test(text) && !matchService(text)) {
+    const bookable = SERVICES.filter((x) => x.bookableByAgent);
+    ev.push({ kind: "tool", name: "list_services", args: {}, ok: true, result: `${SERVICES.length} services`, latencyMs: T.toolFast });
+    ev.push(say(`We do ${bookable.slice(0, -1).map((x) => `${x.name.toLowerCase()} (${x.priceFromGBP ? `from £${x.priceFromGBP}` : "free"})`).join(", ")} and ${bookable[bookable.length - 1].name.toLowerCase()}. Bridal styling is arranged with the team directly. ${s.stage === "open" ? "Is there one you'd like to book or know more about?" : resumeBooking(s)}`.trim(), { ...p, verbosity: 100 }));
+    s.node = "kb";
+    if (s.stage === "open") s.stage = "need_service";
+    return { events: ev, state: s };
+  }
+  const asked = matchService(text);
+  if (askedQ && DESCRIBE.test(text) && asked && !RE.price.test(text) && !RE.hours.test(text)) {
+    ev.push({ kind: "tool", name: "list_services", args: { query: serviceById(asked).name }, ok: true, result: serviceById(asked).name, latencyMs: T.toolFast });
+    const follow = s.stage === "open" ? "Would you like to book one?" : s.serviceId && s.serviceId !== asked ? resumeBooking(s) : s.stage === "need_time" ? "Do you have a day or time in mind?" : resumeBooking(s);
+    if (s.stage === "open") { s.serviceId = asked; s.stage = "need_time"; }
+    ev.push(say(`${describeService(asked)} ${follow}`.trim(), { ...p, verbosity: 100 }));
+    s.node = "kb";
+    return { events: ev, state: s };
+  }
 
   // 3 · Booking flow continuation.
   if (s.stage === "confirming") {
@@ -345,6 +400,16 @@ function continueTurn(text: string, s: SimState, ev: SimEvent[], opts: SimOption
       s.node = "message";
       return { events: ev, state: s };
     }
+    // "Colour" alone could mean several services: ask which rather than guess.
+    if (svcId && /^(i'?d like |can i (book|get|have) |a |an |some )*(a |an )?(colou?r|cut|haircut|styling)( please)?[.!?]*$/i.test(text.trim())) {
+      const cat = serviceById(svcId).category;
+      const opts2 = SERVICES.filter((x) => x.category === cat && x.bookableByAgent);
+      if (opts2.length > 1) {
+        s.stage = "need_service"; s.node = "intent";
+        ev.push(say(`Sure. For ${cat.toLowerCase()} we do ${opts2.slice(0, -1).map((x) => `${x.name.toLowerCase()} (from £${x.priceFromGBP})`).join(", ")} or ${opts2[opts2.length - 1].name.toLowerCase()} (from £${opts2[opts2.length - 1].priceFromGBP}). Which would you like?`, { ...p, verbosity: 100 }));
+        return { events: ev, state: s };
+      }
+    }
     if (svcId) s.serviceId = svcId;
     if (!s.serviceId) {
       s.stage = "need_service"; s.node = "intent";
@@ -361,7 +426,9 @@ function continueTurn(text: string, s: SimState, ev: SimEvent[], opts: SimOption
     }
     if (!when.date && when.afterMin == null && when.exactMin == null && s.stage !== "need_time") {
       s.stage = "need_time"; s.node = "slots";
-      ev.push(say(`Lovely — a ${svc.name.toLowerCase()}. Do you have a day or time in mind?`, p));
+      // If they only said a general word ("treatment"), say what that service actually is.
+      const generic = svcId && !svc.name.toLowerCase().split(/\W+/).filter((w) => w.length > 3 && !/treatment|colour|styling/.test(w)).some((w) => text.toLowerCase().includes(w));
+      ev.push(say(generic ? `Sure. Our ${svc.category.toLowerCase()} is the ${svc.name.toLowerCase()}: ${SERVICE_INFO[svc.id] ?? ""}. It's ${svc.durationMin} minutes, from £${svc.priceFromGBP}. Do you have a day or time in mind?` : `Lovely, a ${svc.name.toLowerCase()}. Do you have a day or time in mind?`, { ...p, verbosity: 100 }));
       return { events: ev, state: s };
     }
     return offer(s, ev, opts, allAppts, when);

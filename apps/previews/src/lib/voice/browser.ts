@@ -1,4 +1,5 @@
 // Browser adapters for the Voice lab. Free, no keys, no VOXERA servers involved.
+import { pickVoice, speakable } from "./natural";
 // Caveat shown in the UI: in Chrome the Web Speech API sends microphone audio to a
 // server-based recogniser (per MDN); other browsers may recognise on the device.
 // Latency measured here describes these engines on this device, not the hosted
@@ -78,11 +79,12 @@ export class SpeechSynthesisTts implements TtsAdapter {
     if (!speechSynthesisSupported()) return Promise.reject(new ProviderError("tts", "speech synthesis not supported", false));
     return new Promise((resolve, reject) => {
       const synth = window.speechSynthesis;
-      const u = new SpeechSynthesisUtterance(text);
+      const u = new SpeechSynthesisUtterance(speakable(text));
       const { rate, lang = "en-GB" } = this.opts();
       u.lang = lang; u.rate = rate;
-      const voice = synth.getVoices().find((v) => v.lang === lang) ?? synth.getVoices().find((v) => v.lang.startsWith("en"));
-      if (voice) u.voice = voice;
+      // The most natural installed voice (neural / enhanced first), not the browser's flat default.
+      const voice = pickVoice(synth.getVoices(), lang);
+      if (voice) { u.voice = voice; u.lang = voice.lang; }
       let started = false;
       const done = (fn: () => void) => { clearTimeout(watchdog); signal.removeEventListener("abort", abort); fn(); };
       const watchdog = setTimeout(() => { if (!started) { synth.cancel(); done(() => reject(new ProviderError("tts", `no audio within ${this.startTimeoutMs} ms`))); } }, this.startTimeoutMs);

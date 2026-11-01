@@ -109,3 +109,24 @@ describe("simulator — hands over when it can't help", () => {
     expect(r.s.stage).not.toBe("transferred");
   });
 });
+
+describe("simulator — answers the question that was asked", () => {
+  const said = (r: ReturnType<typeof run>) => r.all.filter((e) => e.kind === "agent").map((e) => (e as { text: string }).text);
+  it("explains a service when asked mid-booking instead of offering times", () => {
+    const r = run(["Hi, I'd like to book", "Treatment", "What's a bond repair treatment?"]);
+    const last = said(r).at(-1)!;
+    expect(last).toMatch(/rebuilds the bonds/);
+    expect(last).toMatch(/day or time in mind/);
+    expect(r.tools.some((t) => t.name === "check_availability")).toBe(false);
+    expect(said(r).join(" ")).not.toMatch(/Happy to help\. Happy to help/);
+  });
+  it("lists services when asked what's offered", () => {
+    const r = run(["Okay great what all services do you offer"]);
+    expect(said(r)[0]).toMatch(/restyle cut.*balayage/i);
+    expect(r.all.some((e) => e.kind === "guardrail" && e.rule === "unsupported_answer")).toBe(false);
+  });
+  it("asks which colour service rather than guessing", () => {
+    const r = run(["Can I book a colour"]);
+    expect(said(r)[0]).toMatch(/gloss & tone.*full colour.*balayage|full colour.*balayage.*gloss/i);
+  });
+});
