@@ -7,6 +7,12 @@ workspaces. Both can run on your existing Vercel account at no cost:
 > Vercel Hobby is for personal, non-commercial use. Move to Vercel Pro before charging customers.
 > Neon Free: 0.5–1 GB storage and 100 compute-hours a month; the database sleeps when idle and wakes in about a second.
 
+## Current state (2026-11-01)
+- [x] `voxera-api` project created (root `services/api`, FastAPI, London `lhr1`) at https://voxera-api-two.vercel.app. `/healthz` returns ok.
+- [x] Vercel login protection switched off for `voxera-api`, so the website's server can reach it. The API has its own authentication.
+- [x] `voxera-flow` has `VOXERA_API_URL=https://voxera-api-two.vercel.app` and has been redeployed.
+- [ ] **Neon database:** create it and connect it to `voxera-api` (step 2 below), then redeploy `voxera-api`. Until then `/readyz` reports `unavailable` and sign-up shows "accounts server isn't reachable".
+
 ## Steps (about 5 minutes, all in the Vercel dashboard)
 1. **Create the API project:** *Add New → Project →* import `mathewshebin21-design/voxeraassistant`.
    - Project name: `voxera-api`
