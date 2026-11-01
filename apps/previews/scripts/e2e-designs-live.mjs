@@ -46,6 +46,42 @@ await step("Command: a new workspace shows setup steps and honest empty states, 
     && !/Simulated data|Halden/.test(body);
 });
 
+await step("signed in, Pulse shows the real workspace and points to the setup assistant", async () => {
+  await p.goto(`${BASE}/flow/app`, { waitUntil: "networkidle" });
+  await p.getByTestId("pulse-setup").waitFor({ timeout: 10000 });
+  return (await p.getByText("James Turner").count()) === 0 && (await p.getByText("synthetic records").count()) === 0;
+});
+
+await step("setup assistant (guided): a conversation fills in the workspace", async () => {
+  await p.getByRole("button", { name: /Start the setup assistant/ }).click();
+  await p.waitForURL("**/flow/app/setup");
+  const chat = p.getByTestId("setup-chat");
+  const answer = async (text, expect) => {
+    await p.getByLabel("Your answer").fill(text);
+    await p.getByRole("button", { name: "Send" }).click();
+    await chat.getByText(expect).last().waitFor({ timeout: 10000 });
+  };
+  await chat.getByText(/What kind of business/).waitFor({ timeout: 10000 });
+  await answer("we're a hair salon", /phone number/);
+  await answer("0117 496 0123", /address/);
+  await answer("12 High Street, Bristol, BS1 4DJ", /When are you open/);
+  await answer("Tue-Sat 9-5:30, Sun and Mon closed", /Shall I save these hours/);
+  await answer("yes", /What can customers book/);
+  await p.getByLabel("Your answer").fill("Women's cut, 60 min, £45\nGents cut 30 min £20");
+  await p.getByRole("button", { name: "Send" }).click();
+  await chat.getByText(/Shall I save these/).last().waitFor({ timeout: 10000 });
+  await answer("yes", /at the same time/);
+  await answer("2", /receptionist be called/);
+  await answer("Ava", /essentials done/);
+  const state = await p.evaluate(async (id) => {
+    const g = async (u) => (await fetch(`/api/v1/orgs/${id}${u}`)).json();
+    return { profile: await g("/business-profile"), hours: await g("/office-hours"), services: await g("/services"), settings: await g("/settings"), agents: await g("/agents") };
+  }, orgId);
+  return state.profile.phone === "0117 496 0123" && state.profile.city === "Bristol" && state.hours.intervals.length === 5
+    && state.services.some((s) => s.name === "Gents cut" && s.price_from_pence === 2000) && state.settings.booking_capacity === 2
+    && state.agents.some((a) => a.name === "Ava" && /AI receptionist/.test(a.greeting));
+});
+
 await step("Command: real bookings and desk cases appear after they're created", async () => {
   const hours = { intervals: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opens_at: "00:00", closes_at: "23:59" })) };
   if ((await apiCall("PUT", `/orgs/${orgId}/office-hours`, hours)).status !== 200) throw new Error("hours");
@@ -55,10 +91,10 @@ await step("Command: real bookings and desk cases appear after they're created",
   const b = await apiCall("POST", `/orgs/${orgId}/appointments`, { service_id: svc.id, starts_at: slot, customer_name: "Tom Okafor", customer_phone: "07700 900456" });
   if (b.status !== 201) throw new Error(`booking ${b.status}`);
   await apiCall("POST", `/orgs/${orgId}/cases`, { summary: "Wants to know if you treat sciatica", caller_name: "Jo Bloggs", assign_to_me: false });
-  await p.reload({ waitUntil: "networkidle" });
+  await p.goto(`${BASE}/command/ops`, { waitUntil: "networkidle" });
   await p.getByTestId("cmd-bookings").getByText("Tom Okafor").waitFor({ timeout: 10000 });
   await p.getByTestId("cmd-queue").getByText("Jo Bloggs").waitFor();
-  return /2\/6 done/.test(await p.locator("main").innerText());
+  return /4\/6 done/.test(await p.locator("main").innerText());
 });
 
 await step("Command: other screens say they still show demo data", async () => {

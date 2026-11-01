@@ -60,10 +60,10 @@ export function summarise(d: DashboardInput, now: Date = new Date()): WorkspaceS
   const todayKey = dayIn(now, tz);
   const weekAgo = t - 7 * 86400000;
   const setup: SetupStep[] = [
-    { id: "profile", label: "Add your business details (address, phone)", done: !!(d.profile && (d.profile.phone || d.profile.city || d.profile.address_line1)), href: "/flow/app/workspace" },
-    { id: "hours", label: "Set your opening hours", done: d.hours.length > 0, href: "/flow/app/workspace" },
-    { id: "services", label: "Add the services callers can book", done: d.services.some((s) => s.active), href: "/flow/app/workspace" },
-    { id: "agent", label: "Create your receptionist", done: d.agents.length > 0, href: "/flow/app/new" },
+    { id: "profile", label: "Add your business details (address, phone)", done: !!(d.profile && (d.profile.phone || d.profile.city || d.profile.address_line1)), href: "/flow/app/setup" },
+    { id: "hours", label: "Set your opening hours", done: d.hours.length > 0, href: "/flow/app/setup" },
+    { id: "services", label: "Add the services callers can book", done: d.services.some((s) => s.active), href: "/flow/app/setup" },
+    { id: "agent", label: "Create your receptionist", done: d.agents.length > 0, href: "/flow/app/setup" },
     { id: "team", label: "Invite your team", done: d.members.length > 1, href: "/flow/app/team" },
     { id: "desk", label: "Go available on the staff desk", done: d.team.some((m) => m.status === "available"), href: "/flow/app/desk" },
   ];

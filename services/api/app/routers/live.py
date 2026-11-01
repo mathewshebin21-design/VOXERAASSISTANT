@@ -7,7 +7,7 @@ configured (see app/config.py). Transcripts are not stored: only metered usage i
 import json
 import logging
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -16,15 +16,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import SessionLocal, set_tenant
 from ..deps import DB, OrgContext, require
-from ..live import providers
+from ..live import providers, setup_agent
 from ..live.budget import budget, require_budget
 from ..live.receptionist import TOOLS, Turn, load_context, run_tool, system_prompt
 from ..models import UsageEvent, UsageKind, UsageSource
-from ..permissions import Perm
+from ..permissions import Perm, has_perm
 from ..schemas import Strict
 
 log = logging.getLogger("voxera.live")
@@ -148,82 +149,166 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
     if msgs[0]["role"] == "assistant":  # the conversation must open with a user turn
         msgs.insert(0, {"role": "user", "content": "(The call has just connected.)"})
 
-    fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.llm_model in FALLBACK_MODELS else {}
-
     turn = Turn(org_id, body.conversation_id or body.request_id, body.messages[-1].text)
     read_only = {"get_business_info", "get_opening_hours", "list_services"}
 
-    def gen() -> Iterator[str]:
-        used = 0
-        partial_in = partial_chars = 0
-        tdb = SessionLocal()  # the request's session is closed once streaming starts
-        set_tenant(tdb, org_id=org_id, user_id=user_id)
-        try:
-            for _ in range(MAX_ROUNDS):
-                partial_in = partial_chars = 0
-                with client.beta.messages.stream(
-                    model=s.llm_model,
-                    max_tokens=s.llm_max_output_tokens,
-                    system=system_prompt(bctx),
-                    tools=TOOLS,
-                    messages=msgs,
-                    output_config={"effort": s.llm_effort},
-                    **fallback,
-                ) as stream:
-                    for event in stream:
-                        if event.type == "message_start":
-                            partial_in = _usage_total(event.message.usage)
-                        elif event.type == "text":
-                            partial_chars += len(event.text)
-                            yield _sse({"type": "text", "text": event.text})
-                    final = stream.get_final_message()
-                used += _usage_total(final.usage)
-                partial_in = partial_chars = 0
-                if final.stop_reason == "refusal":
-                    yield _sse({"type": "error", "message": "The model declined to answer this turn."})
-                    break
-                tool_uses = [b for b in final.content if b.type == "tool_use"]
-                if not tool_uses:
-                    break
-                if final.stop_reason == "max_tokens":
-                    yield _sse({"type": "error", "message": "Reply was cut off before a tool call finished."})
-                    break
-                results = []
-                for b in tool_uses:
-                    ok, out = run_tool(tdb, bctx, turn, b.name, b.input)
-                    shown = "workspace data returned" if ok and b.name in read_only else out[:300]
-                    yield _sse({"type": "tool", "name": b.name, "ok": ok, "result": shown})
-                    results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": b.id,
-                            "content": out,
-                            **({} if ok else {"is_error": True}),
-                        }
-                    )
-                msgs.append({"role": "assistant", "content": final.content})
-                msgs.append({"role": "user", "content": results})
-            if turn.handoff:
-                h = turn.handoff
-                yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
-            yield _sse({"type": "done", "llm_tokens": used})
-        except anthropic.RateLimitError:
-            yield _sse({"type": "error", "message": "Language model is rate limited."})
-        except anthropic.APIStatusError as e:
-            log.warning("llm provider error", extra={"status": e.status_code, "request_id": e.request_id})
-            yield _sse({"type": "error", "message": f"Language model error (HTTP {e.status_code})."})
-        except anthropic.APIConnectionError:
-            yield _sse({"type": "error", "message": "Could not reach the language model."})
-        except ValueError:  # unparseable streamed tool input
-            yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
-        finally:
-            tdb.close()
-            # A caller barge-in closes the stream mid-reply; the provider still bills what it produced.
-            used += partial_in + (partial_chars // 3 if partial_in else 0)
-            if used:
-                _record(org_id, user_id, UsageKind.llm_tokens, used, f"llm-{body.request_id}", "voice lab brain")
+    def run(tdb, name, args):
+        ok, out = run_tool(tdb, bctx, turn, name, args)
+        return ok, out, ("workspace data returned" if ok and name in read_only else out[:300])
 
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={"cache-control": "no-store"})
+    def after() -> Iterator[str]:
+        if turn.handoff:
+            h = turn.handoff
+            yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
+
+    gen = _agent_stream(
+        client=client,
+        system=system_prompt(bctx),
+        tools=TOOLS,
+        msgs=msgs,
+        run=run,
+        after=after,
+        org_id=org_id,
+        user_id=user_id,
+        usage_key=f"llm-{body.request_id}",
+        reference="voice lab brain",
+    )
+    return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
+
+
+def _agent_stream(
+    *,
+    client: anthropic.Anthropic,
+    system: str,
+    tools: list[dict],
+    msgs: list[dict],
+    run: Callable[[Session, str, object], tuple[bool, str, str]],
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    usage_key: str,
+    reference: str,
+    after: Callable[[], Iterator[str]] | None = None,
+) -> Iterator[str]:
+    """Streams a tool-using Claude conversation as server-sent events (text, tool, error, done),
+    running tools in a fresh tenant-scoped session and metering the tokens it used."""
+    s = get_settings()
+    fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.llm_model in FALLBACK_MODELS else {}
+    used = 0
+    partial_in = partial_chars = 0
+    tdb = SessionLocal()  # the request's session is closed once streaming starts
+    set_tenant(tdb, org_id=org_id, user_id=user_id)
+    try:
+        for _ in range(MAX_ROUNDS):
+            partial_in = partial_chars = 0
+            with client.beta.messages.stream(
+                model=s.llm_model,
+                max_tokens=s.llm_max_output_tokens,
+                system=system,
+                tools=tools,
+                messages=msgs,
+                output_config={"effort": s.llm_effort},
+                **fallback,
+            ) as stream:
+                for event in stream:
+                    if event.type == "message_start":
+                        partial_in = _usage_total(event.message.usage)
+                    elif event.type == "text":
+                        partial_chars += len(event.text)
+                        yield _sse({"type": "text", "text": event.text})
+                final = stream.get_final_message()
+            used += _usage_total(final.usage)
+            partial_in = partial_chars = 0
+            if final.stop_reason == "refusal":
+                yield _sse({"type": "error", "message": "The model declined to answer this turn."})
+                break
+            tool_uses = [b for b in final.content if b.type == "tool_use"]
+            if not tool_uses:
+                break
+            if final.stop_reason == "max_tokens":
+                yield _sse({"type": "error", "message": "Reply was cut off before a tool call finished."})
+                break
+            results = []
+            for b in tool_uses:
+                ok, out, shown = run(tdb, b.name, b.input)
+                yield _sse({"type": "tool", "name": b.name, "ok": ok, "result": shown})
+                results.append(
+                    {"type": "tool_result", "tool_use_id": b.id, "content": out, **({} if ok else {"is_error": True})}
+                )
+            msgs.append({"role": "assistant", "content": final.content})
+            msgs.append({"role": "user", "content": results})
+        if after:
+            yield from after()
+        yield _sse({"type": "done", "llm_tokens": used})
+    except anthropic.RateLimitError:
+        yield _sse({"type": "error", "message": "Language model is rate limited."})
+    except anthropic.APIStatusError as e:
+        log.warning("llm provider error", extra={"status": e.status_code, "request_id": e.request_id})
+        yield _sse({"type": "error", "message": f"Language model error (HTTP {e.status_code})."})
+    except anthropic.APIConnectionError:
+        yield _sse({"type": "error", "message": "Could not reach the language model."})
+    except ValueError:  # unparseable streamed tool input
+        yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
+    finally:
+        tdb.close()
+        # An interrupted stream still bills what the provider produced.
+        used += partial_in + (partial_chars // 3 if partial_in else 0)
+        if used:
+            _record(org_id, user_id, UsageKind.llm_tokens, used, usage_key, reference)
+
+
+# ---------- setup assistant ----------
+
+
+class SetupIn(Strict):
+    request_id: RequestId
+    messages: list[LiveMessage] = Field(min_length=1, max_length=60)
+
+
+def _setup_perm(ctx: Annotated[OrgContext, Depends(require(Perm.business_write))]) -> OrgContext:
+    if not has_perm(ctx.membership.role, Perm.agent_write):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only owners and admins can run the setup assistant")
+    return ctx
+
+
+@router.get("/setup-assistant/status")
+def setup_status(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB) -> dict:
+    """Whether the Claude-powered assistant can run; otherwise the app uses its free guided mode."""
+    b = budget(db, ctx.org_id, UsageKind.llm_tokens)
+    return {"ai": _llm_ready() and b.org_cap > 0 and b.global_cap > 0 and b.remaining > 0}
+
+
+@router.post("/setup-assistant")
+def setup_assistant(body: SetupIn, ctx: Annotated[OrgContext, Depends(_setup_perm)], db: DB) -> StreamingResponse:
+    """One turn of the setup conversation, streamed: text, tool (what was saved), error, done."""
+    s = get_settings()
+    if not _llm_ready():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
+    if body.messages[-1].role != "user":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The last message must be yours")
+    est_input = sum(len(m.text) for m in body.messages) // 3 + 3000
+    require_budget(db, ctx.org_id, UsageKind.llm_tokens, (est_input + s.llm_max_output_tokens) * MAX_ROUNDS)
+    name = load_context(db, ctx.org_id).name
+    msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
+    if msgs[0]["role"] == "assistant":
+        msgs.insert(0, {"role": "user", "content": "(Opened the setup assistant.)"})
+    sctx = setup_agent.SetupContext(ctx.org_id, ctx.user.id)
+
+    def run(tdb, tool, args):
+        ok, out = setup_agent.run_tool(tdb, sctx, tool, args)
+        return ok, out, out[:300]
+
+    gen = _agent_stream(
+        client=providers.llm_client(),
+        system=setup_agent.system_prompt(name),
+        tools=setup_agent.TOOLS,
+        msgs=msgs,
+        run=run,
+        org_id=ctx.org_id,
+        user_id=ctx.user.id,
+        usage_key=f"setup-{body.request_id}",
+        reference="setup assistant",
+    )
+    return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
 
 
 @router.post("/tts")

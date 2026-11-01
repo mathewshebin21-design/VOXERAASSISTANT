@@ -204,8 +204,8 @@ if (process.env.LIVE_FAKES === "1") {
     await p.goto(`${BASE}/flow/app`, { waitUntil: "networkidle" });
     await p.getByTestId("dashboard-picker").click();
     await p.getByRole("radio", { name: /Trades & home services/ }).click();
-    await p.getByText("Pulse · Trades & home services").waitFor({ timeout: 8000 });
-    await p.getByText("When the phone rings").first().waitFor();
+    await p.getByText(/Pulse · .* · Trades & home services/).waitFor({ timeout: 8000 });
+    await p.getByText(/Jobs · next 7 days/i).first().waitFor();
     await p.goto(`${BASE}/flow/app/workspace`, { waitUntil: "networkidle" });
     return (await p.getByLabel("Sector").inputValue()) === "trades";
   });

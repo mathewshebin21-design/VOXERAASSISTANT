@@ -6,10 +6,13 @@ import { ChevronDown, Headset, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import { Bar, BarChart, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { Picker, useDashboard } from "@/components/flow/dashboard-picker";
+import { LivePulse } from "@/components/flow/live-pulse";
 import { Chip, Glass, GHead, Heading, Orb } from "@/components/flow/ui";
-import { DASHBOARDS, dashboardById, dashboardFor, sectorFor, type DashboardId, type DashboardTemplate, type KpiId, type WidgetId } from "@/lib/dashboards";
+import { useDataMode } from "@/lib/live/data-mode";
+import type { KpiId, WidgetId } from "@/lib/dashboards";
 import { CALLS } from "@/lib/demo-data";
-import { api, PERMS, type BusinessProfile, type DeskCase, type DeskMember } from "@/lib/live/api";
+import { PERMS, type DeskCase, type DeskMember } from "@/lib/live/api";
 import { useActiveOrg, useApi } from "@/lib/live/session";
 import { computeMetrics, dailySeries, inRange, INTENT_LABEL, OUTCOME_LABEL } from "@/lib/metrics";
 import { usePreview } from "@/lib/store";
@@ -43,45 +46,14 @@ function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; su
 
 const afterHours = (c: CallRecord) => c.timeMin < 9 * 60 || c.timeMin >= 18 * 60;
 
-/** Picks the dashboard: a signed-in workspace's sector, otherwise the demo choice. */
-function useDashboard(): { tpl: DashboardTemplate; chosen: boolean; choose: (id: DashboardId) => Promise<void>; saveNote: string | null } {
-  const active = useActiveOrg();
-  const base = active ? `/orgs/${active.organization.id}` : null;
-  const profile = useApi<BusinessProfile>(base ? `${base}/business-profile` : null);
-  const local = usePreview((s) => s.dashboard);
-  const setLocal = usePreview((s) => s.setDashboard);
-  const canWrite = !!active && PERMS[active.role].write;
-  const tpl = profile.data ? dashboardFor(profile.data.sector) : dashboardById(local) ?? DASHBOARDS[0];
-  const choose = async (id: DashboardId) => {
-    setLocal(id);
-    if (base && canWrite && profile.data) {
-      const updated = await api<BusinessProfile>(`${base}/business-profile`, { method: "PUT", body: { ...profile.data, sector: sectorFor(id) } });
-      profile.setData(updated);
-    }
-  };
-  const saveNote = active && !canWrite ? "Only owners and admins can change the workspace’s business type; this choice applies on this device." : null;
-  return { tpl: active && profile.data && !canWrite && local ? dashboardById(local)! : tpl, chosen: !!profile.data || !!local, choose, saveNote };
-}
-
-function Picker({ tpl, choose, note, onDone }: { tpl: DashboardTemplate; choose: (id: DashboardId) => Promise<void>; note: string | null; onDone: () => void }) {
-  return (
-    <Glass glow="cyan" className="mb-4">
-      <GHead title={<span className="flex items-center gap-2"><LayoutDashboard size={14} /> Choose the dashboard that fits your business</span>} right={<button onClick={onDone} className="text-xs text-flw-mute hover:text-flw-text">close</button>} />
-      <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4" role="radiogroup" aria-label="Dashboard type">
-        {DASHBOARDS.map((d) => (
-          <button key={d.id} role="radio" aria-checked={d.id === tpl.id} onClick={() => void choose(d.id).then(onDone)} className={clsx("rounded-xl border p-3 text-left transition", d.id === tpl.id ? "border-flw-cyan bg-flw-cyan/10" : "border-flw-line hover:border-flw-violet/60")}>
-            <div className="font-display text-sm font-medium">{d.label}</div>
-            <div className="mt-0.5 text-[11px] text-flw-mute">{d.examples}</div>
-            <div className="mt-2 text-xs">{d.focus}</div>
-          </button>
-        ))}
-      </div>
-      <p className="px-4 pb-4 text-[11px] text-flw-mute">The layout and wording change with the business type; you can switch at any time. {note}</p>
-    </Glass>
-  );
-}
-
 export default function Pulse() {
+  const dm = useDataMode();
+  if (dm.mode === "loading") return null;
+  if (dm.mode === "live") return <LivePulse orgId={dm.org!.organization.id} orgName={dm.org!.organization.name} />;
+  return <DemoPulse viewingDemo={dm.viewingDemo} onBack={dm.backToWorkspace} orgName={dm.org?.organization.name} />;
+}
+
+function DemoPulse({ viewingDemo, onBack, orgName }: { viewingDemo: boolean; onBack: () => void; orgName?: string }) {
   const [days, setDays] = useState(7);
   const { tpl, chosen, choose, saveNote } = useDashboard();
   const [picking, setPicking] = useState(false);
@@ -231,6 +203,7 @@ export default function Pulse() {
         {[7, 14, 28].map((d) => <button key={d} onClick={() => setDays(d)} className={clsx("rounded-xl px-3 py-1.5 font-mono text-xs", d === days ? "bg-flw-violet/25 text-flw-violet" : "text-flw-mute hover:text-flw-text")}>{d}d</button>)}
         <Chip tone="amber">synthetic records</Chip>
       </Heading>
+      {viewingDemo && <div className="mb-4 rounded-2xl border border-flw-amber/40 bg-flw-amber/10 px-4 py-2.5 text-sm text-flw-amber" role="status">You&apos;re exploring demo data. <button onClick={onBack} className="underline">Back to {orgName ?? "your workspace"}</button></div>}
       {(picking || !chosen) && <Picker tpl={tpl} choose={choose} note={saveNote} onDone={() => setPicking(false)} />}
       <div className="space-y-4">
         {rows.map((r, i) => (

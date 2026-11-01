@@ -16,6 +16,7 @@ Multi-tenant AI voice receptionist and appointment automation platform — **wor
 | [`docs/phase-2-foundation.md`](docs/phase-2-foundation.md) | Phase 2 scope, verification and limitations |
 | [`docs/phase-3-voice-engine.md`](docs/phase-3-voice-engine.md) | Phase 3 voice engine: what's built, how it's measured, verification, what needs approval |
 | [`docs/phase-3-live-providers.md`](docs/phase-3-live-providers.md) | Connecting a real AI brain (Claude) and voice (ElevenLabs): keys, monthly caps, costs, verification |
+| [`docs/setup-assistant.md`](docs/setup-assistant.md) | Built-in setup assistant (free guided mode + Claude agent) and real data on Flow's Pulse |
 | [`docs/design-a-b-live.md`](docs/design-a-b-live.md) | Real sign-in and real workspace dashboards in Command (A) and Atelier (B); demo as a separate option |
 | [`docs/reception-desk.md`](docs/reception-desk.md) | Receptionist behaviour and tools, booking engine, multi-employee staff desk, dashboards by business type |
 | [`docs/deploy-api-vercel.md`](docs/deploy-api-vercel.md) | Putting the API and database online (Vercel + Neon free tiers) |

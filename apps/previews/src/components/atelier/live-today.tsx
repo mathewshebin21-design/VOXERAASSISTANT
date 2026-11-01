@@ -41,7 +41,7 @@ export function LiveToday({ orgId, orgName, firstName }: { orgId: string; orgNam
               </li>
             ))}
           </ol>
-          <p className="mt-5 text-xs text-atl-soft">Settings open in the full workspace editor.</p>
+          <p className="mt-5 text-xs text-atl-soft">Each step opens the setup assistant — a short conversation that fills everything in for you.</p>
         </Card>
       )}
 

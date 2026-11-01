@@ -36,7 +36,7 @@ export function LiveOps({ orgId, orgName }: { orgId: string; orgName: string }) 
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-cmd-mute">Workspace settings open in the full workspace editor.</p>
+      <p className="mt-3 text-xs text-cmd-mute">Steps open the setup assistant, which asks you a few questions and saves the answers.</p>
     </Panel>
   );
 

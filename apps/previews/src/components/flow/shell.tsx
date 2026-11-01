@@ -2,16 +2,18 @@
 
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
+import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Rocket, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { usePreview } from "@/lib/store";
 import { api } from "@/lib/live/api";
+import { useDataMode } from "@/lib/live/data-mode";
 import { useActiveOrg, useSession } from "@/lib/live/session";
 
 export const FLOW_NAV = [
   { href: "/flow/app", label: "Pulse", icon: Gauge, exact: true, key: "1" },
+  { href: "/flow/app/setup", label: "Setup", icon: Rocket, key: "" },
   { href: "/flow/app/live", label: "Live", icon: Activity, key: "2" },
   { href: "/flow/app/insights", label: "Insights", icon: LineChart, key: "3" },
   { href: "/flow/app/calls", label: "Calls", icon: MessagesSquare, key: "4" },
@@ -33,6 +35,7 @@ const DEMO_BACKED = ["/flow/app/live", "/flow/app/insights", "/flow/app/calls", 
 
 function WorkspaceMenu() {
   const router = useRouter();
+  const dm = useDataMode();
   const { status, user, orgs, switchOrg, signOut, reloadOrgs } = useSession();
   const active = useActiveOrg();
   const [open, setOpen] = useState(false);
@@ -75,6 +78,9 @@ function WorkspaceMenu() {
           ) : (
             <button role="menuitem" onClick={() => setCreating(true)} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-text"><Plus size={14} /> New workspace</button>
           )}
+          {dm.viewingDemo
+            ? <button role="menuitem" onClick={() => { dm.backToWorkspace(); setOpen(false); router.push("/flow/app"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-cyan">Back to my workspace</button>
+            : <button role="menuitem" onClick={() => { dm.exploreDemo(); setOpen(false); router.push("/flow/app"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-text">Explore with demo data</button>}
           <button role="menuitem" onClick={async () => { await signOut(); setOpen(false); router.push("/flow/enter"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-pink"><LogOut size={14} /> Sign out</button>
         </div>
       )}
