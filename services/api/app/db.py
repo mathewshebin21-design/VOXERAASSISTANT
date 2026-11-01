@@ -20,7 +20,11 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from .config import get_settings
 
-engine = create_engine(get_settings().database_url, pool_pre_ping=True, future=True)
+# prepare_threshold=None: no server-side prepared statements, so the API also works through
+# transaction-pooling proxies (e.g. Neon's pooler). RLS settings are transaction-local, so pooling is safe.
+engine = create_engine(
+    get_settings().database_url, pool_pre_ping=True, future=True, connect_args={"prepare_threshold": None}
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=True)
 
 

@@ -3,6 +3,8 @@ import { ACCESS_COOKIE, API_URL, REFRESH_COOKIE, clearSessionCookies, csrfOk, re
 
 export const dynamic = "force-dynamic";
 
+const UNREACHABLE = "The accounts server isn't reachable right now, so sign-in and new workspaces are unavailable. The demo pages still work.";
+
 async function forward(path: string, body: unknown, req: NextRequest) {
   return fetch(`${API_URL}${path}`, {
     method: "POST",
@@ -25,7 +27,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ act
   }
   if (action !== "login" && action !== "signup") return NextResponse.json({ detail: "Not found" }, { status: 404 });
   const body = await req.json().catch(() => null);
-  const r = await forward(`/v1/auth/${action}`, body, req);
+  const r = await forward(`/v1/auth/${action}`, body, req).catch(() => null);
+  if (!r) return NextResponse.json({ detail: UNREACHABLE }, { status: 503 });
   const data = await r.json().catch(() => ({ detail: "Unexpected response" }));
   if (!r.ok) return NextResponse.json(data, { status: r.status });
   const res = NextResponse.json({ ok: true }, { status: r.status });

@@ -30,12 +30,14 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
     });
 
   let fresh: Tokens | null = null;
-  let r = await call(req.cookies.get(ACCESS_COOKIE)?.value);
+  let r: Response;
+  try { r = await call(req.cookies.get(ACCESS_COOKIE)?.value); }
+  catch { return NextResponse.json({ detail: "The VOXERA API isn't reachable right now." }, { status: 503 }); }
   if (r.status === 401) {
     const rt = req.cookies.get(REFRESH_COOKIE)?.value;
     if (rt) {
       fresh = await refreshOnce(rt);
-      if (fresh) r = await call(fresh.access_token);
+      if (fresh) r = await call(fresh.access_token).catch(() => r);
     }
   }
   const type = r.headers.get("content-type") ?? "application/json";

@@ -86,7 +86,7 @@ export function LiveTeam() {
               </form>
               {link && (
                 <div className="mx-3 mb-3 rounded-xl border border-flw-cyan/30 bg-flw-cyan/5 p-3 text-xs">
-                  <div className="flex items-center gap-2 text-flw-cyan"><Mail size={13} /> Development mode: emails aren&apos;t sent yet, so share this one-time link.</div>
+                  <div className="flex items-center gap-2 text-flw-cyan"><Mail size={13} /> Emails aren&apos;t sent yet, so send them this one-time link yourself.</div>
                   <div className="mt-2 flex items-center gap-2"><code className="min-w-0 flex-1 truncate font-mono text-[11px] text-flw-text" data-testid="invite-link">{link}</code>
                     <button aria-label="Copy invite link" onClick={() => navigator.clipboard?.writeText(link)} className="text-flw-mute hover:text-flw-text"><Copy size={13} /></button></div>
                 </div>

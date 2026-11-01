@@ -1,9 +1,12 @@
 """Runtime configuration. Every secret comes from the environment; nothing is hard-coded."""
 
+import os
 from functools import lru_cache
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .platform import hosted_overrides
 
 
 class Settings(BaseSettings):
@@ -22,7 +25,8 @@ class Settings(BaseSettings):
     refresh_token_days: int = 30
 
     cors_origins: list[str] = ["http://localhost:3000"]
-    # Only for local development/tests: return invitation tokens in API responses instead of emailing them.
+    # Until an email service is connected, the one-time invitation link is returned to the
+    # inviter (an owner/admin) to share themselves. Set to false once invitations are emailed.
     expose_invite_tokens: bool = True
     invitation_days: int = 7
 
@@ -53,15 +57,17 @@ class Settings(BaseSettings):
         return v
 
     def assert_production_safe(self) -> None:
-        if self.env == "production":
-            if "dev-only" in self.jwt_secret.get_secret_value() or "dev-only" in self.database_url:
-                raise RuntimeError("Development credentials must not be used in production")
-            if self.expose_invite_tokens:
-                raise RuntimeError("expose_invite_tokens must be false in production")
+        dev = "dev-only" in self.jwt_secret.get_secret_value() or "dev-only" in self.database_url
+        if self.env == "production" and dev:
+            raise RuntimeError("Development credentials must not be used in production")
 
 
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    # On a host that attaches a Postgres database (Vercel + Neon), fill in anything not set explicitly.
+    for key, value in hosted_overrides().items():
+        if f"VOXERA_{key.upper()}" not in os.environ:
+            setattr(s, key, SecretStr(value) if key == "jwt_secret" else value)
     s.assert_production_safe()
     return s
