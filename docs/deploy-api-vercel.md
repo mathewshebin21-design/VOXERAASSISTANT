@@ -11,7 +11,8 @@ workspaces. Both can run on your existing Vercel account at no cost:
 - [x] `voxera-api` project created (root `services/api`, FastAPI, London `lhr1`) at https://voxera-api-two.vercel.app. `/healthz` returns ok.
 - [x] Vercel login protection switched off for `voxera-api`, so the website's server can reach it. The API has its own authentication.
 - [x] `voxera-flow` has `VOXERA_API_URL=https://voxera-api-two.vercel.app` and has been redeployed.
-- [ ] **Neon database:** create it and connect it to `voxera-api` (step 2 below), then redeploy `voxera-api`. Until then `/readyz` reports `unavailable` and sign-up shows "accounts server isn't reachable".
+- [x] Neon database connected to `voxera-api`. The build created the `voxera_app` role and ran migrations 0001→0005. `/readyz` reports `ready`.
+- [x] `VOXERA_ENV=production` set on `voxera-api`, so it refuses development credentials.
 
 ## Steps (about 5 minutes, all in the Vercel dashboard)
 1. **Create the API project:** *Add New → Project →* import `mathewshebin21-design/voxeraassistant`.
