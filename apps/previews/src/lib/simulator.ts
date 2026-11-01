@@ -44,6 +44,10 @@ export interface SimState {
   bookings: Appointment[];
   turn: number;
   frustration: number;
+  /** The agent couldn't help and offered to put the caller through; waiting for a yes or no. */
+  offeredTransfer?: boolean;
+  /** How many questions in a row the agent couldn't answer. */
+  unknowns?: number;
   node: string; // id of the conversation-flow node currently active (used by Design C)
 }
 
@@ -175,7 +179,7 @@ export function respond(input: string, state: SimState, opts: SimOptions): { eve
   const text = input.trim();
   const allAppts = [...opts.appointments, ...s.bookings];
 
-  if (!text) return { events: [say("Sorry, I didn't catch that — could you say it again?", p)], state: s };
+  if (!text) return { events: [say("Sorry, I didn't quite catch that — could you say it again for me?", p)], state: s };
 
   // 1 · Safety and integrity rules run before anything else.
   if (has(text, RE.injection)) {
@@ -198,30 +202,49 @@ export function respond(input: string, state: SimState, opts: SimOptions): { eve
     return { events: ev, state: s };
   }
 
-  // 2 · Escalation: explicit request or rising frustration.
+  // 2 · Escalation: explicit request, rising frustration, or accepting an offer to be put through.
+  if (s.offeredTransfer) {
+    s.offeredTransfer = false;
+    if (has(text, RE.yes)) return transfer(s, ev, opts, "couldn't answer the caller's question");
+    if (has(text, RE.no)) {
+      ev.push(say("No problem at all. Is there anything else I can help you with?", p));
+      return { events: ev, state: s };
+    }
+  }
   if (has(text, RE.frustrated)) s.frustration++;
-  if ((has(text, RE.human) && !has(text, RE.book)) || s.frustration >= 2) {
+  if ((has(text, RE.human) && !has(text, RE.book)) || s.frustration >= 2) return transfer(s, ev, opts, s.frustration ? "caller frustrated" : "caller asked for a person");
+  if (has(text, RE.frustrated)) {
+    ev.push(say("I'm sorry about that — I'll do my best to sort it now, or I can put you through to the team. What would you prefer?", p));
+    return { events: ev, state: s };
+  }
+  return continueTurn(text, s, ev, opts, allAppts);
+}
+
+/** Hands the caller to a person, with a summary so they don't have to repeat themselves. */
+function transfer(s: SimState, ev: SimEvent[], opts: SimOptions, reason: string): { events: SimEvent[]; state: SimState } {
+  const p = opts.persona;
+  {
     if (!p.allowTransfer) {
       ev.push(say("I'm sorry I can't put you through right now. I'll take a message and the team will call you back today. What's the best number?", p));
       ev.push({ kind: "tool", name: "take_message", args: { reason: "caller_requested_human" }, ok: true, result: "Message queued (simulated)", latencyMs: T.toolFast });
       s.node = "message";
       return { events: ev, state: s };
     }
-    ev.push(say(s.frustration ? "I'm really sorry about that. Let me get you to a member of the team right now." : "Of course — I'll put you through to the team now.", p));
+    ev.push(say(s.frustration ? "I'm really sorry about that. Let me get you to a member of the team right now — one moment." : "Of course. I'll put you through to the team now — one moment, and I'll pass on what you've told me.", p));
     if (opts.failTools) {
       ev.push({ kind: "tool", name: "transfer_call", args: { destination: p.transferTarget }, ok: false, result: "No answer at front desk after 20s (simulated)", latencyMs: 2000 });
       ev.push(say("I'm sorry, nobody's free to take the call this second. I've taken your details and someone will ring you back within the hour.", p));
       s.node = "message";
       return { events: ev, state: s };
     }
-    ev.push({ kind: "tool", name: "transfer_call", args: { destination: p.transferTarget, summary_for_staff: `Caller ${s.frustration ? "frustrated" : "asked for a person"}; stage=${s.stage}` }, ok: true, result: "Warm transfer started (simulated — no real call placed)", latencyMs: T.toolSlow });
+    ev.push({ kind: "tool", name: "transfer_call", args: { destination: p.transferTarget, summary_for_staff: `${reason}; stage=${s.stage}` }, ok: true, result: "Warm transfer started (simulated — no real call placed)", latencyMs: T.toolSlow });
     s.stage = "transferred"; s.node = "transfer";
     return { events: ev, state: s };
   }
-  if (has(text, RE.frustrated)) {
-    ev.push(say("I'm sorry about that — I'll do my best to sort it now, or I can put you through to the team. What would you prefer?", p));
-    return { events: ev, state: s };
-  }
+}
+
+function continueTurn(text: string, s: SimState, ev: SimEvent[], opts: SimOptions, allAppts: Appointment[]): { events: SimEvent[]; state: SimState } {
+  const p = opts.persona;
 
   // 3 · Booking flow continuation.
   if (s.stage === "confirming") {
@@ -354,7 +377,11 @@ export function respond(input: string, state: SimState, opts: SimOptions): { eve
   // 5 · Unsupported / unknown: don't make anything up.
   ev.push(lookup("search_knowledge", text.slice(0, 60), undefined, opts.failTools));
   ev.push({ kind: "guardrail", rule: "unsupported_answer", text: "No verified knowledge matched. Agent declines to guess." });
-  ev.push(say("I'm not sure about that one and I'd rather not guess. I can take a message for the team, or help with bookings, prices and opening hours — what would be most helpful?", p));
+  s.unknowns = (s.unknowns ?? 0) + 1;
+  s.offeredTransfer = !!p.allowTransfer;
+  ev.push(say(p.allowTransfer
+    ? "I'm not sure about that one, and I'd rather not guess. Would you like me to put you through to someone on the team who can help?"
+    : "I'm not sure about that one, and I'd rather not guess. I can take a message for the team — would that help?", p));
   s.node = "fallback";
   return { events: ev, state: s };
 }

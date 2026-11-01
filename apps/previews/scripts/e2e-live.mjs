@@ -153,6 +153,62 @@ if (process.env.LIVE_FAKES === "1") {
     const chars = Number((await p.getByTestId("live-tts_characters").innerText()).replace(/,/g, ""));
     return /list_services/.test(log) && /Claude/.test(brain) && tokens > 0 && chars > 0;
   });
+
+  await step("staff desk: available employee receives an AI transfer and resolves it", async () => {
+    // Open around the clock, so "someone is in" holds whatever time the test runs (closed → callback instead).
+    const hours = { intervals: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opens_at: "00:00", closes_at: "23:59" })) };
+    const put = await p.evaluate(async ([id, body]) => (await fetch(`/api/v1/orgs/${id}/office-hours`, { method: "PUT", headers: { "content-type": "application/json", "x-voxera-csrf": "1" }, body: JSON.stringify(body) })).status, [orgId, hours]);
+    if (put !== 200) throw new Error(`hours ${put}`);
+    await p.goto(`${BASE}/flow/app/desk`, { waitUntil: "networkidle" });
+    await p.getByRole("radio", { name: "available" }).click();
+    await status(p, "You're available");
+    await p.goto(`${BASE}/flow/app/voice`, { waitUntil: "networkidle" });
+    const mic = p.getByRole("switch", { name: "Use microphone" });
+    if ((await mic.getAttribute("aria-checked")) === "true") await mic.click();
+    await p.getByTestId("live-llm_tokens").filter({ hasText: "left this month" }).waitFor({ timeout: 8000 });
+    await p.getByRole("switch", { name: "Claude as the brain" }).click();
+    await p.getByRole("button", { name: "Start call" }).click();
+    await p.getByTestId("voice-phase").filter({ hasText: "Listening" }).waitFor({ timeout: 20000 });
+    await p.getByLabel("Type as the caller").fill("Can I speak to someone please?");
+    await p.getByLabel("Type as the caller").press("Enter");
+    await p.getByText(/Transferred to Ada/).waitFor({ timeout: 15000 });
+    await p.getByTestId("voice-phase").filter({ hasText: "Call ended" }).waitFor({ timeout: 20000 });
+    await p.goto(`${BASE}/flow/app/desk`, { waitUntil: "networkidle" });
+    const busy = await p.getByRole("radio", { name: "busy" }).getAttribute("aria-checked");
+    await p.getByRole("tab", { name: "Mine" }).click();
+    await p.getByTestId("case-list").getByText("Caller said: Can I speak to someone please?").click();
+    await p.getByLabel("Add a note").fill("Called back, booked a consultation");
+    await p.getByRole("button", { name: "Add", exact: true }).click();
+    await p.getByTestId("case-detail").getByText("Called back, booked a consultation").waitFor({ timeout: 8000 });
+    await p.getByLabel("Resolution").fill("Sorted on the phone");
+    await p.getByRole("button", { name: "Resolve" }).click();
+    await status(p, "Resolved");
+    await p.getByRole("radio", { name: "available" }).and(p.locator('[aria-checked="true"]')).waitFor({ timeout: 8000 });
+    return busy === "true";
+  });
+
+  await step("staff desk: book a client into a free slot", async () => {
+    await p.getByRole("button", { name: "New" }).click();
+    await p.getByLabel("Service").selectOption({ label: "Balayage · 180 min" });
+    const sat = new Date(); sat.setDate(sat.getDate() + ((6 - sat.getDay() + 7) % 7 || 7));
+    await p.getByLabel("Day").fill(sat.toISOString().slice(0, 10));
+    await p.waitForFunction(() => document.querySelector('select[aria-label="Time"]')?.querySelectorAll("option").length > 1, null, { timeout: 8000 });
+    await p.getByLabel("Time").selectOption({ index: 1 });
+    await p.getByLabel("Customer name").fill("Priya Shah");
+    await p.getByLabel("Customer phone").fill("07700 900123");
+    await p.getByRole("button", { name: "Book", exact: true }).click();
+    await p.getByTestId("bookings").getByText("Priya Shah · Balayage").waitFor({ timeout: 8000 });
+  });
+
+  await step("dashboard follows the chosen business type and saves it to the workspace", async () => {
+    await p.goto(`${BASE}/flow/app`, { waitUntil: "networkidle" });
+    await p.getByTestId("dashboard-picker").click();
+    await p.getByRole("radio", { name: /Trades & home services/ }).click();
+    await p.getByText("Pulse · Trades & home services").waitFor({ timeout: 8000 });
+    await p.getByText("When the phone rings").first().waitFor();
+    await p.goto(`${BASE}/flow/app/workspace`, { waitUntil: "networkidle" });
+    return (await p.getByLabel("Sector").inputValue()) === "trades";
+  });
 }
 
 let inviteLink = "";

@@ -33,7 +33,7 @@ def reply(blocks: list[dict], stop: str) -> bytes:
         else:
             block = {"type": "tool_use", "id": "toolu_fake", "name": b["name"], "input": {}}
             evs.append({"type": "content_block_start", "index": i, "content_block": block})
-            delta = {"type": "input_json_delta", "partial_json": "{}"}
+            delta = {"type": "input_json_delta", "partial_json": json.dumps(b.get("input", {}))}
             evs.append({"type": "content_block_delta", "index": i, "delta": delta})
         evs.append({"type": "content_block_stop", "index": i})
     evs.append(
@@ -51,7 +51,26 @@ class H(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
         if self.path.startswith("/v1/messages"):
             last = body["messages"][-1]["content"]
-            if isinstance(last, list) and last and last[0].get("type") == "tool_result":
+            said = next((m["content"] for m in reversed(body["messages"]) if isinstance(m["content"], str)), "")
+            if (
+                isinstance(last, list)
+                and last
+                and last[0].get("type") == "tool_result"
+                and "outcome" in last[0]["content"]
+            ):
+                out = reply(
+                    [{"type": "text", "text": "Of course. I'm putting you through to the team now."}], "end_turn"
+                )
+            elif isinstance(last, str) and "someone" in said.lower():
+                args = {
+                    "reason": "caller asked for a person",
+                    "summary": f"Caller said: {said[:200]}",
+                    "caller_name": None,
+                    "caller_phone": None,
+                    "urgent": False,
+                }
+                out = reply([{"type": "tool_use", "name": "transfer_to_staff", "input": args}], "tool_use")
+            elif isinstance(last, list) and last and last[0].get("type") == "tool_result":
                 services = json.loads(last[0]["content"])
                 names = ", ".join(s["name"] for s in services) or "no services listed"
                 answer = f"We offer {names}. Is there one you'd like to know more about?"

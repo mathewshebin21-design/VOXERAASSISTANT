@@ -244,6 +244,7 @@ export class VoiceSession {
     const committed = this.clock.now();
     let buf = "";
     let endCall = false;
+    let endReason = "agent ended the call";
     let chain: Promise<void> = Promise.resolve();
     const say = (sentence: string) => { this.tts.prepare?.(sentence); chain = chain.then(() => this.speakSentence(sentence, ctl, m, t0)); };
 
@@ -255,7 +256,11 @@ export class VoiceSession {
           let match: RegExpMatchArray | null;
           while ((match = buf.match(SENTENCE))) { say(match[1].trim()); buf = buf.slice(match[0].length); }
         } else if (c.type === "end_call") endCall = true;
-        else this.emit(c);
+        else if (c.type === "handoff") {
+          this.emit(c);
+          // A transferred caller leaves the AI once it has finished saying so.
+          if (c.outcome === "transferred") { endCall = true; endReason = `transferred to ${c.staff ?? "the team"}`; }
+        } else this.emit(c);
       });
       if (buf.trim()) say(buf.trim());
       m.brainTotalMs = Math.round(this.clock.now() - committed);
@@ -280,7 +285,7 @@ export class VoiceSession {
     if (ctl.signal.aborted) return;
     this.ctl = null;
     if (this.cur === m) { this.emit({ type: "turn", metrics: { ...m } }); this.cur = null; }
-    if (endCall) return this.end("agent ended the call");
+    if (endCall) return this.end(endReason);
     this.setPhase("listening");
     this.armSilence();
   }

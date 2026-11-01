@@ -36,7 +36,9 @@ export type BrainChunk =
   | { type: "tool"; name: string; args: Record<string, unknown>; ok: boolean; result: string }
   | { type: "guardrail"; rule: string; text: string }
   | { type: "citation"; title: string; version: number }
-  | { type: "end_call" };
+  | { type: "end_call" }
+  /** The caller is being handed to a person (or queued / given a callback). */
+  | { type: "handoff"; outcome: "transferred" | "queued" | "callback"; staff: string | null };
 
 export interface BrainAdapter extends ProviderInfo {
   reset(): void;
@@ -97,4 +99,5 @@ export type SessionEvent =
   | { type: "notice"; level: "info" | "warn" | "error"; text: string }
   | { type: "providers"; stt: string; brain: string; tts: string; typedOnly: boolean }
   | { type: "turn"; metrics: TurnMetrics }
+  | { type: "handoff"; outcome: "transferred" | "queued" | "callback"; staff: string | null }
   | { type: "ended"; reason: string };

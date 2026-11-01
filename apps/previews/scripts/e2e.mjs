@@ -16,7 +16,7 @@ if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
 export const ROUTES = {
   command: ["/command", "/command/login", "/command/ops", "/command/live", "/command/calls", "/command/calls?outcome=booked", "/command/calls/call-0005", "/command/appointments", "/command/agents", "/command/agents/new", "/command/knowledge", "/command/simulator", "/command/integrations", "/command/team", "/command/billing"],
   atelier: ["/atelier", "/atelier/sign-in", "/atelier/studio", "/atelier/studio/create", "/atelier/studio/voice", "/atelier/studio/knowledge", "/atelier/studio/rehearse", "/atelier/studio/calls", "/atelier/studio/calls/call-0005", "/atelier/studio/diary", "/atelier/studio/connections", "/atelier/studio/plan", "/atelier/studio/live", "/atelier/studio/insights", "/atelier/studio/flow", "/atelier/studio/team", "/atelier/studio/calls?outcome=booked"],
-  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/voice", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked", "/flow/app/workspace", "/flow/invite?token=demo"],
+  flow: ["/flow", "/flow/enter", "/flow/app", "/flow/app/new", "/flow/app/canvas", "/flow/app/knowledge", "/flow/app/simulate", "/flow/app/voice", "/flow/app/desk", "/flow/app/calls", "/flow/app/calls/call-0005", "/flow/app/calendar", "/flow/app/integrations", "/flow/app/usage", "/flow/app/live", "/flow/app/insights", "/flow/app/agent", "/flow/app/team", "/flow/app/calls?outcome=booked", "/flow/app/workspace", "/flow/invite?token=demo"],
 };
 
 const results = [];
@@ -229,6 +229,26 @@ if (!ONLY || ONLY === "flow") {
     record("voice   background noise on the mic does not interrupt the agent", false, String(e).slice(0, 200));
   }
   await noisy.close();
+}
+
+// Dashboard by business type (demo mode): pick one, the layout and wording follow, and it persists.
+if (!ONLY || ONLY === "flow") {
+  const ctx = await browser.newContext({ viewport: viewports.desktop });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(BASE + "/flow/app", { waitUntil: "networkidle" });
+    await page.getByRole("radiogroup", { name: "Dashboard type" }).waitFor({ timeout: 8000 }); // first visit asks
+    await page.getByRole("radio", { name: /Restaurant & hospitality/ }).click();
+    await page.getByText("Pulse · Restaurant & hospitality").waitFor({ timeout: 8000 });
+    const hasPeak = await page.getByTestId("peak-hours").count();
+    const words = await page.getByText(/reservations/i).count();
+    await page.reload({ waitUntil: "networkidle" });
+    const kept = await page.getByText("Pulse · Restaurant & hospitality").count();
+    record("pulse   dashboard follows the chosen business type", hasPeak === 1 && words > 0 && kept === 1, `peak=${hasPeak} words=${words} kept=${kept}`);
+  } catch (e) {
+    record("pulse   dashboard follows the chosen business type", false, String(e).slice(0, 200));
+  }
+  await ctx.close();
 }
 
 await browser.close();

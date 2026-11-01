@@ -84,6 +84,7 @@ export function useVoiceLab() {
       case "guardrail": setLines((l) => [...l, { id, kind: "guardrail", rule: e.rule, text: e.text }]); break;
       case "citation": setLines((l) => [...l, { id, kind: "citation", title: e.title, version: e.version }]); break;
       case "notice": setLines((l) => [...l, { id, kind: "notice", level: e.level, text: e.text }]); break;
+      case "handoff": setLines((l) => [...l, { id, kind: "notice", level: "info", text: e.outcome === "transferred" ? `☎ Transferred to ${e.staff ?? "the team"} — they now have the call and a summary on the Desk.` : e.outcome === "queued" ? "☎ Everyone is busy — the caller is in the Desk queue for the next free person to call back." : "☎ The team is closed — a callback request is on the Desk." }]); break;
       case "providers": setProviders({ stt: e.stt, brain: e.brain, tts: e.tts, typedOnly: e.typedOnly }); break;
       case "turn": setTurns((t) => [...t, e.metrics]); break;
       case "ended": setEnded(e.reason); setEndedAt(Date.now()); micRef.current?.stop(); micRef.current = null; break;

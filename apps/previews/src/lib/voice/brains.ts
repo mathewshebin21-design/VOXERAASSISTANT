@@ -7,13 +7,14 @@ import { greeting, initialState, respond, type SimOptions, type SimState } from 
 import type { BrainAdapter, BrainChunk } from "./types";
 import type { SimEvent } from "../simulator";
 
-function* toChunks(events: SimEvent[], ended: boolean): Generator<BrainChunk> {
+function* toChunks(events: SimEvent[], ended: boolean, transferredTo?: string): Generator<BrainChunk> {
   for (const e of events) {
     if (e.kind === "agent") yield { type: "text", text: e.text };
     else if (e.kind === "tool") yield { type: "tool", name: e.name, args: e.args, ok: e.ok, result: e.result };
     else if (e.kind === "guardrail") yield { type: "guardrail", rule: e.rule, text: e.text };
     else if (e.kind === "citation") yield { type: "citation", title: e.title, version: e.version };
   }
+  if (transferredTo) yield { type: "handoff", outcome: "transferred", staff: transferredTo };
   if (ended) yield { type: "end_call" };
 }
 
@@ -27,10 +28,12 @@ export class SimulatorBrain implements BrainAdapter {
     yield* toChunks(greeting(this.opts().persona).filter((e) => e.kind !== "state"), false);
   }
   async *respond(text: string): AsyncIterable<BrainChunk> {
+    const before = this.state.stage;
     const { events, state } = respond(text, this.state, this.opts());
     this.state = state;
     this.onState?.(state);
-    yield* toChunks(events, state.stage === "ended");
+    const transferred = state.stage === "transferred" && before !== "transferred";
+    yield* toChunks(events, state.stage === "ended", transferred ? this.opts().persona.transferTarget : undefined);
   }
 }
 

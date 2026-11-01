@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NeedsSignIn, Notice } from "@/components/flow/live-ui";
 import { Chip, FBtn, finput, FSwitch, Glass, GHead, Heading } from "@/components/flow/ui";
+import { SECTORS } from "@/lib/dashboards";
 import { api, ApiError, PERMS, type BusinessProfile, type HoursInterval, type Service, type WorkspaceSettings } from "@/lib/live/api";
 import { useActiveOrg, useApi, useSession } from "@/lib/live/session";
 
@@ -64,7 +65,7 @@ function Profile({ base, canWrite }: { base: string; canWrite: boolean }) {
       <GHead title="Business profile" right={<span className="text-xs text-flw-mute">used by the receptionist when callers ask</span>} />
       <form className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void s.run(() => api(`${base}/business-profile`, { method: "PUT", body: { ...f, display_name: f.display_name } }), "Profile saved"); }}>
         {field("display_name", "Business name")}
-        <label className="block text-xs text-flw-mute">Sector<select disabled={!canWrite} className={finput + " mt-1"} value={f.sector} onChange={(e) => setF({ ...f, sector: e.target.value })}>{[["hair_beauty", "Hair & beauty"], ["aesthetics", "Aesthetics (non-clinical)"], ["wellness", "Wellness & spa"], ["agency", "Agency"], ["other", "Other"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+        <label className="block text-xs text-flw-mute">Sector<select disabled={!canWrite} className={finput + " mt-1"} value={f.sector} onChange={(e) => setF({ ...f, sector: e.target.value })}>{SECTORS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select><span className="mt-1 block text-[11px]">Also sets the dashboard layout on Pulse.</span></label>
         {field("phone", "Phone", "+44 117 …")}
         {field("email", "Email", "hello@…")}
         {field("website", "Website (https://…)", "https://")}
@@ -183,12 +184,14 @@ function SettingsTab({ base, canWrite }: { base: string; canWrite: boolean }) {
   return (
     <Glass>
       <GHead title="Workspace settings" right={<Chip>data region: {f.data_region.toUpperCase()}</Chip>} />
-      <form className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void s.run(() => api(`${base}/settings`, { method: "PATCH", body: { timezone: f.timezone, locale: f.locale, recording_disclosure_enabled: f.recording_disclosure_enabled, recording_disclosure_text: f.recording_disclosure_text, recording_retention_days: Number(f.recording_retention_days) } }), "Settings saved"); }}>
+      <form className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void s.run(() => api(`${base}/settings`, { method: "PATCH", body: { timezone: f.timezone, locale: f.locale, recording_disclosure_enabled: f.recording_disclosure_enabled, recording_disclosure_text: f.recording_disclosure_text, recording_retention_days: Number(f.recording_retention_days), booking_capacity: Number(f.booking_capacity), ...(f.transfer_phone ? { transfer_phone: f.transfer_phone } : {}) } }), "Settings saved"); }}>
         <label className="block text-xs text-flw-mute">Time zone (IANA)<input disabled={!canWrite} list="tz" className={finput + " mt-1"} value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} />
           <datalist id="tz">{["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York"].map((z) => <option key={z} value={z} />)}</datalist></label>
         <label className="block text-xs text-flw-mute">Locale<select disabled={!canWrite} className={finput + " mt-1"} value={f.locale} onChange={(e) => setF({ ...f, locale: e.target.value })}>{["en-GB", "en-IE", "en-US"].map((l) => <option key={l}>{l}</option>)}</select></label>
         <div className="flex items-center justify-between rounded-xl border border-flw-line p-3 text-sm">Play recording notice<FSwitch label="Recording notice" on={f.recording_disclosure_enabled} onChange={(b) => canWrite && setF({ ...f, recording_disclosure_enabled: b })} /></div>
         <label className="block text-xs text-flw-mute">Keep recordings & transcripts (days, 7–365)<input disabled={!canWrite} type="number" min={7} max={365} className={finput + " mt-1"} value={f.recording_retention_days} onChange={(e) => setF({ ...f, recording_retention_days: Number(e.target.value) })} /></label>
+        <label className="block text-xs text-flw-mute">Clients you can see at the same time (chairs, rooms or staff on shift)<input disabled={!canWrite} type="number" min={1} max={50} className={finput + " mt-1"} value={f.booking_capacity} onChange={(e) => setF({ ...f, booking_capacity: Number(e.target.value) })} /></label>
+        <label className="block text-xs text-flw-mute">Staff phone for transferred calls (used once phone lines are connected, e.g. +441179460000)<input disabled={!canWrite} className={finput + " mt-1"} placeholder="+44…" value={f.transfer_phone ?? ""} onChange={(e) => setF({ ...f, transfer_phone: e.target.value || null })} /></label>
         <label className="block text-xs text-flw-mute md:col-span-2">Recording notice text<input disabled={!canWrite} className={finput + " mt-1"} value={f.recording_disclosure_text} onChange={(e) => setF({ ...f, recording_disclosure_text: e.target.value })} /></label>
         <div className="flex items-center gap-3 md:col-span-2">
           {canWrite && <FBtn type="submit" variant="glow" disabled={s.busy}><Save size={14} /> Save settings</FBtn>}

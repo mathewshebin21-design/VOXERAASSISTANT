@@ -18,9 +18,10 @@ async function failure(stage: "brain" | "tts", r: Response): Promise<ProviderErr
 export class ApiBrain implements BrainAdapter {
   readonly costPerMinGbp = null; // per-token prices are not configured in VOXERA
   private history: { role: "user" | "assistant"; text: string }[] = [];
+  private conversationId = `call-${crypto.randomUUID()}`;
   constructor(private orgId: string, readonly name: string) {}
 
-  reset() { this.history = []; }
+  reset() { this.history = []; this.conversationId = `call-${crypto.randomUUID()}`; }
 
   async *greet(signal: AbortSignal): AsyncIterable<BrainChunk> {
     const r = await fetch(`/api/v1/orgs/${this.orgId}/live/greeting`, { signal });
@@ -34,7 +35,7 @@ export class ApiBrain implements BrainAdapter {
     this.history.push({ role: "user", text });
     const r = await fetch(`/api/v1/orgs/${this.orgId}/live/brain`, {
       method: "POST", headers, signal,
-      body: JSON.stringify({ request_id: `turn-${crypto.randomUUID()}`, messages: this.history.slice(-40) }),
+      body: JSON.stringify({ request_id: `turn-${crypto.randomUUID()}`, conversation_id: this.conversationId, messages: this.history.slice(-40) }),
     });
     if (!r.ok || !r.body) throw await failure("brain", r);
     const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -50,9 +51,10 @@ export class ApiBrain implements BrainAdapter {
           const line = buf.slice(0, i).split("\n").find((l) => l.startsWith("data: "));
           buf = buf.slice(i + 2);
           if (!line) continue;
-          const e = JSON.parse(line.slice(6)) as { type: string; text?: string; name?: string; ok?: boolean; result?: string; message?: string };
+          const e = JSON.parse(line.slice(6)) as { type: string; text?: string; name?: string; ok?: boolean; result?: string; message?: string; outcome?: "transferred" | "queued" | "callback"; staff?: string | null };
           if (e.type === "text" && e.text) { said += e.text; yield { type: "text", text: e.text }; }
           else if (e.type === "tool") yield { type: "tool", name: e.name ?? "tool", args: {}, ok: !!e.ok, result: e.result ?? "" };
+          else if (e.type === "handoff" && e.outcome) yield { type: "handoff", outcome: e.outcome, staff: e.staff ?? null };
           else if (e.type === "error") throw new ProviderError("brain", e.message ?? "provider error");
         }
       }

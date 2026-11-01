@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { fmtWhen, Notice } from "@/components/flow/live-ui";
 import { Chip, FBtn, finputAuto, Glass, GHead, Heading } from "@/components/flow/ui";
-import { api, ApiError, PERMS, type AuditEntry, type Invitation, type Member, type Role } from "@/lib/live/api";
+import { api, ApiError, PERMS, ROLE_LABEL, type AuditEntry, type Invitation, type Member, type Role } from "@/lib/live/api";
 import { useActiveOrg, useApi, useSession } from "@/lib/live/session";
 
-const ROLES: Role[] = ["owner", "admin", "manager", "viewer"];
+const ROLES: Role[] = ["owner", "admin", "manager", "staff", "viewer"];
 
 export function LiveTeam() {
   const active = useActiveOrg()!;
@@ -57,7 +57,7 @@ export function LiveTeam() {
                 <div className="min-w-0 flex-1"><div className="text-sm font-medium">{m.full_name}{self && <span className="ml-1 text-xs text-flw-mute">(you)</span>}</div><div className="truncate font-mono text-[11px] text-flw-mute">{m.email} · joined {fmtWhen(m.joined_at)}</div></div>
                 {canEdit ? (
                   <select aria-label={`Role for ${m.full_name}`} className={finputAuto} value={m.role} onChange={(e) => run(() => api(`${base}/members/${m.user_id}`, { method: "PATCH", body: { role: e.target.value } }), "Role updated")}>
-                    {ROLES.filter((r) => perms.owner || r !== "owner").map((r) => <option key={r}>{r}</option>)}
+                    {ROLES.filter((r) => perms.owner || r !== "owner").map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                   </select>
                 ) : <Chip>{m.role}</Chip>}
                 {(self || canEdit) && (
@@ -81,7 +81,7 @@ export function LiveTeam() {
                 setEmail("");
               }, "Invitation created"); }}>
                 <input aria-label="Invite email" type="email" required className={finputAuto + " min-w-[200px] flex-1"} placeholder="colleague@business.co.uk" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <select aria-label="Invite role" className={finputAuto} value={role} onChange={(e) => setRole(e.target.value as Role)}>{ROLES.filter((r) => perms.owner || r !== "owner").map((r) => <option key={r}>{r}</option>)}</select>
+                <select aria-label="Invite role" className={finputAuto} value={role} onChange={(e) => setRole(e.target.value as Role)}>{ROLES.filter((r) => perms.owner || r !== "owner").map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select>
                 <FBtn type="submit" variant="glow"><UserPlus size={14} /> Invite</FBtn>
               </form>
               {link && (

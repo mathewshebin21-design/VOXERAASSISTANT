@@ -11,6 +11,7 @@ import { APPOINTMENTS, KNOWLEDGE, SERVICES } from "./demo-data";
 import { DEFAULT_PERSONA, type AgentPersona } from "./simulator";
 import type { Appointment, KnowledgeEntry } from "./types";
 import { DEMO_TODAY } from "./time";
+import type { DashboardId } from "./dashboards";
 
 export interface EscalationRule {
   id: string;
@@ -43,6 +44,9 @@ interface PreviewState {
   knowledge: KnowledgeEntry[];
   simBookings: Appointment[];
   wizardDone: boolean;
+  /** Dashboard layout chosen in demo mode (signed-in workspaces use their business sector). */
+  dashboard: DashboardId | null;
+  setDashboard: (d: DashboardId) => void;
   setPersona: (p: Partial<AgentPersona>) => void;
   setDraft: (p: Partial<AgentConfig>) => void;
   publish: (note: string) => void;
@@ -85,6 +89,8 @@ export const usePreview = create<PreviewState>()(
       knowledge: KNOWLEDGE,
       simBookings: [],
       wizardDone: false,
+      dashboard: null,
+      setDashboard: (d) => set({ dashboard: d }),
       setPersona: (p) => set((s) => ({ draft: { ...s.draft, persona: { ...s.draft.persona, ...p } } })),
       setDraft: (p) => set((s) => ({ draft: { ...s.draft, ...p } })),
       publish: (note) => {

@@ -95,3 +95,17 @@ describe("simulator — safety & grounding", () => {
     expect(r.all.some((e) => e.kind === "guardrail" && e.rule === "tool_permission")).toBe(true);
   });
 });
+
+describe("simulator — hands over when it can't help", () => {
+  it("offers to put the caller through when it doesn't know, and transfers on yes", () => {
+    const r = run(["Do you sell gift cards for the spa next door?", "Yes please"]);
+    expect(r.all.some((e) => e.kind === "agent" && /put you through/.test(e.text))).toBe(true);
+    expect(r.tools.some((t) => t.name === "transfer_call" && t.ok)).toBe(true);
+    expect(r.s.stage).toBe("transferred");
+  });
+  it("respects a no and carries on", () => {
+    const r = run(["Do you sell gift cards for the spa next door?", "No thanks"]);
+    expect(r.tools.some((t) => t.name === "transfer_call")).toBe(false);
+    expect(r.s.stage).not.toBe("transferred");
+  });
+});
