@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 (branch `claude/agent-studio`, not pushed).
+Last updated: 2026-11-02 13:40 UTC (branch `claude/agent-studio`; this update is local, not pushed).
 
 ## Status key
 | Mark | Meaning |
@@ -29,10 +29,50 @@ Last updated: 2026-11-02 (branch `claude/agent-studio`, not pushed).
 | Browser e2e, three designs against the live API | 14/14 | local |
 | Browser e2e, Agent Studio | 14/14 | local |
 | Staging isolation checker tests | 9/9 | local |
-| GitHub CI on PR #1 | green | GitHub (last push 469283d) |
+| GitHub CI on PR #1 | green, all 7 checks | GitHub, head a7ba2f0 |
+| GitHub CI on PR #2 | api `test` ×2 and `live-e2e` ✅, others running at last check | GitHub, head 0318d01 |
+| voxera-api preview with no staging database | fails closed: "REFUSING TO DEPLOY: missing database configuration." | Vercel builds of a7ba2f0 and 0318d01 |
 | Production deployment | commit 767c0f2 live | https://voxera-api-two.vercel.app, https://voxera-flow.vercel.app |
 | Staging deployment | **not done**: no staging database yet | — |
 | Real phone calls, real AI provider, real voice | **never tested** | — |
+
+## Phase 0 log: staging database (2026-11-02)
+**Step 1: current infrastructure (read-only)**
+- Neon integration `icfg_Zev6kFBfjF7379jFbirExvlq` is on plan `free_v3` ("Free"): no payment method required, up to 100 projects, 1 GB and 100 CU-hours per project. A third project fits within it.
+- **voxera-db** (`store_UadVJGzLK4AemwDu`, Neon project `cool-block-14364291`, lhr1, Neon Auth off) is connected only to voxera-api, Production only. All 16 integration variables plus `VOXERA_ENV` target `production`. Hidden production variables: 0.
+- **neon-cobalt-flask** (`store_pHMCqUi5oDE7yLlQ`, Neon project `misty-wave-36712055`, lhr1, Neon Auth on) has 0 connected projects. Its secrets were rotated at 2026-11-02 12:18 UTC.
+- **voxera-api Preview and Development**: no database variables at all.
+- **voxera-flow**: no database variables. `VOXERA_API_URL` is the staging API for Preview and Development, and the production API for Production only.
+- **`voxera-staging` duplicate check**: no project has variables from such a store, but these tools can't list every store. Check Vercel → Storage.
+
+**Step 2: provisioning.** Not done. The Vercel tools here can create Blob stores only, and there's no Vercel or Neon CLI or token in this container.
+
+**Step 3: identity.** Not available until the store exists.
+
+**Step 4: prepared target configuration (not applied)**
+| Project | Environment | Database |
+|---|---|---|
+| voxera-api | Production | voxera-db (unchanged) |
+| voxera-api | Preview | voxera-staging |
+| voxera-api | Development | voxera-staging |
+| voxera-flow | Production / Preview | none (calls the API only) |
+
+**Credential exposure found**
+- 8 voxera-api preview deployments are still READY: `dpl_D8WTbbLe…`, `dpl_AzTGn3nn…`, `dpl_9MLFzZf5…`, `dpl_F7mWRfmR…`, `dpl_mfq3svRt…`, `dpl_BPQTF7o1…`, `dpl_3mGpaVh2…`, `dpl_CMEqkvv1…`.
+  - They were built while Preview had the production database; the earlier 0006 migration incident confirms that connection. Their stored runtime environment therefore likely still contains production database credentials.
+  - Their code has no environment guard.
+  - The branch alias `voxera-api-git-claude-stoic-davinci-vvk3jg-ai-e399.vercel.app` points at the newest one.
+- 8 voxera-flow previews for the same commits are READY, built while previews used the production API.
+- Changing the integration does not revoke these snapshots. Deployment protection status couldn't be confirmed from this session.
+
+**Step 5: code checks, all confirmed**
+1. Builds can't change schemas: the preflight connects with `default_transaction_read_only=on`; `test_build_never_changes_the_database`.
+2. Missing configuration fails closed: hosted builds refuse without a database (seen in Vercel logs); `test_invalid_hosted_identity_never_skips`.
+3. Wrong identity fails closed: `deploy_env.expected()` raises on unknown or conflicting environments; the runtime guard returns 503; `test_running_api_refuses_a_database_from_another_environment`.
+4. Migrations reject the wrong target: environment marker, `--confirm-host`, `--claim-if-empty` only on an empty database; `test_explicit_migrations_claim_once_and_refuse_the_wrong_environment`, `test_claim_if_empty_never_claims_an_existing_database`.
+5. Concurrent runs: `pg_try_advisory_xact_lock` is held through the whole run, so a second run stops; `test_concurrent_migration_refuses_before_claim`.
+6. Hosted isolation: `staging.yml` runs the identity check before any browser step that signs up. A failed step stops the job, and `/staging-identity` returns 503 unless the database is claimed for staging.
+7. Full Postgres regression suite: 205 passed (isolated local Postgres 16), plus migration round-trip.
 
 ## Phases
 
@@ -47,7 +87,8 @@ Last updated: 2026-11-02 (branch `claude/agent-studio`, not pushed).
 | Explicit migration runner and workflows | 🧪 | `scripts/migrate.py`, `db-migrate.yml`, `staging.yml` |
 | Production database connected to production only | ✅ | Vercel: voxera-db targets `production` only (checked 2026-11-02) |
 | Unused second Neon store disconnected | ✅ | neon-cobalt-flask has no project connections |
-| **Separate staging database for previews** | ❌ | No preview/development database variables on voxera-api. **Needs you** (see Dependencies). |
+| **Separate staging database for previews** | ❌ | Approved (Free plan, lhr1) but **not created**: the tools in this session can't create Neon stores. Needs a dashboard action (see Phase 0 log). |
+| Old previews holding production credentials | ⚠️ open risk | 8 READY voxera-api previews (PR #1 commits b1adb59…469283d) built while previews had the production database, plus 8 matching voxera-flow previews that call the production API. See Phase 0 log. |
 | Staging verified end to end | ❌ | Blocked on the line above |
 | Deployment and rollback docs | 🧪 | `docs/deployment.md` |
 
@@ -158,7 +199,9 @@ Last updated: 2026-11-02 (branch `claude/agent-studio`, not pushed).
 ## Dependencies
 | Item | Blocks | Who |
 |---|---|---|
-| Neon store `voxera-staging` (free plan) connected to voxera-api for **Preview and Development only** | Staging verification, safe PR previews | You (Vercel dashboard) |
+| Create Neon store `voxera-staging` (Free, lhr1, Auth off). **Approved; needs a dashboard action** | Staging verification | You (Vercel → Storage) |
+| Connect `voxera-staging` to voxera-api for Preview and Development | Staging verification, safe PR previews | Your approval, then dashboard |
+| Remove or protect the 16 old READY previews (8 api, 8 flow) | Closing the production credential exposure | Your decision |
 | GitHub secret `STAGING_DATABASE_URL_UNPOOLED` (and optional `STAGING_API_DEPLOY_HOOK`) | `staging.yml` workflow | You (GitHub settings) |
 | GitHub environment `production` with `DATABASE_URL_UNPOOLED` and required reviewers | `db-migrate.yml` for production | You |
 | AI provider key and monthly cap | Real receptionist, AI editing, model-graded tests | You (💷) |
