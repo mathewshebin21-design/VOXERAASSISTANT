@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.live import providers, receptionist, setup_agent
 from app.routers.live import _HideThinking
 
-from .test_live import BRAIN, events, setup_business
+from .test_live import brain_body, events, setup_business
 
 
 def chunks(*objs: dict, usage: int | None = None) -> bytes:
@@ -69,7 +69,7 @@ def test_groq_brain_runs_tools_streams_and_meters(make_account, oa):
     status = a.get(a.o("/live/status")).json()["llm"]
     assert (status["available"], status["provider"], status["model"]) == (True, "Groq", "qwen-test")
 
-    ev = events(a.post(a.o("/live/brain"), json=BRAIN))
+    ev = events(a.post(a.o("/live/brain"), json=brain_body()))
     assert [e["type"] for e in ev] == ["tool", "text", "text", "done"]
     assert ev[0] == {"type": "tool", "name": "list_services", "ok": True, "result": "workspace data returned"}
     assert "".join(e["text"] for e in ev if e["type"] == "text") == "Balayage starts from £165."
@@ -100,7 +100,7 @@ def test_estimates_tokens_when_the_provider_sends_no_counts(make_account, oa, mo
     monkeypatch.setattr(get_settings(), "llm_provider", "gemini")
     a = make_account("ada@example.com")
     oa["replies"] = [(200, chunks(*text("Hello!")))]
-    ev = events(a.post(a.o("/live/brain"), json=BRAIN))
+    ev = events(a.post(a.o("/live/brain"), json=brain_body()))
     assert ev[-1]["type"] == "done" and ev[-1]["llm_tokens"] > 1000  # the prompt and tools alone are thousands of chars
     req = oa["requests"][0]
     assert str(req.url) == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -110,18 +110,23 @@ def test_estimates_tokens_when_the_provider_sends_no_counts(make_account, oa, mo
 def test_errors_become_error_events(make_account, oa):
     a = make_account("ada@example.com")
     oa["replies"] = [(429, b'{"error": "slow down"}')]
-    assert events(a.post(a.o("/live/brain"), json=BRAIN)) == [
+    assert events(a.post(a.o("/live/brain"), json=brain_body())) == [
         {"type": "error", "message": "Language model is rate limited."}
     ]
     oa["replies"] = [(500, b"{}")]
-    assert events(a.post(a.o("/live/brain"), json=BRAIN)) == [
+    assert events(a.post(a.o("/live/brain"), json=brain_body())) == [
         {"type": "error", "message": "Language model error (HTTP 500)."}
     ]
-    oa["replies"] = [(200, chunks(*tool_call("list_services", '{"oops"')))]
-    assert events(a.post(a.o("/live/brain"), json=BRAIN))[-1] == {
-        "type": "error",
-        "message": "The model produced an invalid tool call.",
-    }
+    # Invalid JSON arguments: nothing runs, the model is told why and answers instead.
+    oa["replies"] = [
+        (200, chunks(*tool_call("list_services", '{"oops"'))),
+        (200, chunks(*text("Sorry, let me check that another way."))),
+    ]
+    ev = events(a.post(a.o("/live/brain"), json=brain_body()))
+    assert [e["type"] for e in ev] == ["tool", "text", "done"]
+    assert ev[0]["ok"] is False and "not valid JSON" in ev[0]["result"]
+    told = json.loads(oa["requests"][-1].content)["messages"][-1]
+    assert told["role"] == "tool" and "nothing was done" in told["content"]
 
 
 def test_setup_assistant_works_through_the_same_provider(make_account, oa):
@@ -148,7 +153,7 @@ def test_needs_a_model_and_a_key(make_account, oa, monkeypatch):
         "available": False,
         "model": "not set",
     }
-    assert a.post(a.o("/live/brain"), json=BRAIN).status_code == 503
+    assert a.post(a.o("/live/brain"), json=brain_body()).status_code == 503
     monkeypatch.setattr(s, "llm_model", "qwen3.5:27b")
     monkeypatch.setattr(s, "llm_api_key", None)
     assert not providers.llm_ready()

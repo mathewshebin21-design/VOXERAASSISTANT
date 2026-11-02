@@ -86,7 +86,8 @@ Owners can ask for changes at any time, during setup or long after it: "skin fad
 Mondays now", "we've hired another barber", "rename the receptionist to Sam", "tell callers we have free parking". \
 Just do it: check get_setup_state for the current values, make the change with the right tool straight away \
 (don't ask "shall I?"), then say exactly what changed as before → after, e.g. "Skin fade: £24 → £25". If they say \
-"undo" or "change it back", put the previous values back the same way. Only ask first when the request could \
+"undo" or "change it back", put back the "before" / "previous_hours" values the tool returned, the same way \
+(a removed service comes back with add_services under the same name). Only ask first when the request could \
 mean more than one thing (several services match, or no days were given for "we close at 6"). For "put all prices \
 up £2" or "10% on haircuts", call update_service for each service affected and list the new prices. To add \
 something callers should be told, append a sentence to the existing description — never replace what's there. \
@@ -181,7 +182,8 @@ TOOLS = [
     ),
     _tool(
         "remove_services",
-        "Delete services the business doesn't offer, by exact name.",
+        "Stop offering services, by their exact names. They are hidden from callers, not erased: existing "
+        "bookings keep them, and add_services with the same name brings one back (for undo).",
         _obj({"names": {"type": "array", "items": {"type": "string"}}}),
     ),
     _tool(
@@ -277,14 +279,19 @@ def state(db: Session, org_id: uuid.UUID) -> dict:
     }
 
 
-def _find_service(db: Session, org_id: uuid.UUID, name: object) -> Service | str:
-    """The one service a name refers to (exact, case-insensitive), or a message saying why not."""
+def _find_service(db: Session, org_id: uuid.UUID, name: object, *, exact_only: bool = False) -> Service | str:
+    """The one active service a name refers to (exact, case-insensitive), or a message saying why not.
+    Deleting needs the exact name; changing also accepts a part of the name that matches only one."""
     if not isinstance(name, str) or not name.strip():
         return "give the service's name"
-    rows = list(db.scalars(select(Service).where(Service.organization_id == org_id)))
+    rows = list(db.scalars(select(Service).where(Service.organization_id == org_id, Service.active.is_(True))))
     exact = [s for s in rows if s.name.lower() == name.strip().lower()]
     if exact:
         return exact[0]
+    if exact_only:
+        close = sorted(s.name for s in rows if name.strip().lower() in s.name.lower())
+        hint = f" Did you mean {', '.join(close)}? Confirm the exact name with the owner." if close else ""
+        return f"no service called exactly “{name}”.{hint}"
     close = sorted(s.name for s in rows if name.strip().lower() in s.name.lower())
     if len(close) == 1:
         return next(s for s in rows if s.name == close[0])
@@ -308,7 +315,9 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             if "website" in changes and not str(changes["website"]).startswith("https://"):
                 changes["website"] = "https://" + str(changes["website"]).removeprefix("http://")
             merged = BusinessProfileIO.model_validate({**current, **changes})
-            for k, v in merged.model_dump().items():
+            after = merged.model_dump()
+            before = {k: current.get(k) for k in changes}
+            for k, v in after.items():
                 setattr(p, k, v)
             audit.record(
                 db,
@@ -321,7 +330,10 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"saved": sorted(changes)})
+            # before → after lets the owner see exactly what changed, and "undo" restore it.
+            return True, json.dumps(
+                {"saved": sorted(changes), "before": before, "after": {k: after.get(k) for k in changes}}, default=str
+            )
 
         if name == "set_opening_hours":
             hours = HoursIn.model_validate(
@@ -332,6 +344,14 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                     ]
                 }
             )
+            previous = [
+                {"weekday": h.weekday, "opens": f"{h.opens_at:%H:%M}", "closes": f"{h.closes_at:%H:%M}"}
+                for h in db.scalars(
+                    select(OfficeHours)
+                    .where(OfficeHours.organization_id == ctx.org_id)
+                    .order_by(OfficeHours.weekday, OfficeHours.opens_at)
+                )
+            ]
             db.execute(delete(OfficeHours).where(OfficeHours.organization_id == ctx.org_id))
             db.add_all(OfficeHours(organization_id=ctx.org_id, **i.model_dump()) for i in hours.intervals)
             audit.record(
@@ -345,14 +365,17 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"saved_days": sorted({DAYS[i.weekday] for i in hours.intervals}, key=DAYS.index)})
+            return True, json.dumps(
+                {
+                    "saved_days": sorted({DAYS[i.weekday] for i in hours.intervals}, key=DAYS.index),
+                    "previous_hours": previous,  # pass back to set_opening_hours to undo
+                }
+            )
 
         if name == "add_services":
-            existing = {
-                n.lower()
-                for n in db.scalars(select(func.lower(Service.name)).where(Service.organization_id == ctx.org_id))
-            }
-            added, skipped = [], []
+            rows = {x.name.lower(): x for x in db.scalars(select(Service).where(Service.organization_id == ctx.org_id))}
+            existing = {k for k, v in rows.items() if v.active}
+            added, skipped, restored = [], [], []
             for x in args.get("services", []):
                 price = x.get("price_from_gbp")
                 svc = ServiceIn.model_validate(
@@ -367,6 +390,23 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                 )
                 if svc.name.lower() in existing:
                     skipped.append(svc.name)
+                    continue
+                old = rows.get(svc.name.lower())
+                if old is not None:  # removed earlier: bring the same service back, keeping its bookings' link
+                    for k, v in svc.model_dump().items():
+                        setattr(old, k, v)
+                    old.active = True
+                    existing.add(svc.name.lower())
+                    restored.append(old.name)
+                    audit.record(
+                        db,
+                        ctx.org_id,
+                        ctx.user_id,
+                        "service.updated",
+                        "service",
+                        old.id,
+                        {"fields": ["active"], "restored": True, "via": "setup_assistant"},
+                    )
                     continue
                 s = Service(organization_id=ctx.org_id, **svc.model_dump())
                 db.add(s)
@@ -384,7 +424,7 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                 )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"added": added, "already_existed": skipped})
+            return True, json.dumps({"added": added, "restored": restored, "already_existed": skipped})
 
         if name == "update_service":
             s = _find_service(db, ctx.org_id, args.get("name"))
@@ -410,6 +450,7 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                 )
                 if taken:
                     return _err(f"a service called {changes['name']} already exists")
+            before = {k: getattr(s, k) for k in changes}
             for k, v in changes.items():
                 setattr(s, k, v)
             audit.record(
@@ -423,17 +464,19 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"updated": s.name, "fields": sorted(changes)})
+            return True, json.dumps({"updated": s.name, "fields": sorted(changes), "before": before, "after": changes})
 
         if name == "remove_services":
             removed, problems = [], []
             for n in args.get("names", []):
-                s = _find_service(db, ctx.org_id, n)
+                s = _find_service(db, ctx.org_id, n, exact_only=True)
                 if isinstance(s, str):
                     problems.append(s)
                     continue
                 removed.append(s.name)
-                db.delete(s)
+                # Soft delete: callers can no longer book it, existing bookings keep their link, and
+                # "undo" (add_services with the same name) restores the very same service.
+                s.active = False
                 audit.record(
                     db,
                     ctx.org_id,
@@ -538,6 +581,6 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
     except ValidationError as e:
         db.rollback()
         return _err(e)
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, OverflowError) as e:
         db.rollback()
         return _err(str(e))

@@ -129,16 +129,23 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
         return;
       }
       case "service_remove": {
+        // Hidden from callers rather than erased: bookings keep their service, and "undo" brings back the same one.
         const list = await services();
-        for (const n of c.names) { const s = byName(list, n); if (s) await api(`${base}/services/${s.id}`, { method: "DELETE" }); }
+        for (const n of c.names) { const s = byName(list, n); if (s) await api(`${base}/services/${s.id}`, { method: "PATCH", body: { active: false } }); }
         return;
       }
-      case "service_add":
+      case "service_add": {
+        const all = await api<Service[]>(`${base}/services?include_inactive=true`);
         for (const s of c.services) {
-          try { await api(`${base}/services`, { method: "POST", body: { name: s.name, duration_min: s.duration_min, price_from_pence: s.price_from_pence, category: s.category, buffer_min: s.buffer_min, requires_patch_test: s.requires_patch_test } }); }
+          const fields = { duration_min: s.duration_min, price_from_pence: s.price_from_pence, category: s.category, buffer_min: s.buffer_min, requires_patch_test: s.requires_patch_test };
+          const old = byName(all, s.name);
+          if (old && !old.active) { await api(`${base}/services/${old.id}`, { method: "PATCH", body: { ...fields, active: true } }); continue; }
+          if (old) continue; // already offered
+          try { await api(`${base}/services`, { method: "POST", body: { name: s.name, ...fields } }); }
           catch (e) { if (!(e instanceof ApiError && e.status === 409)) throw e; }
         }
         return;
+      }
       case "profile": {
         const p = await api<BusinessProfile>(`${base}/business-profile`);
         await api(`${base}/business-profile`, { method: "PUT", body: { ...p, ...c.patch } });

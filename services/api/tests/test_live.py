@@ -1,6 +1,7 @@
 """Live provider endpoints, with the Anthropic and ElevenLabs HTTP APIs faked at the transport layer."""
 
 import json
+import uuid
 
 import anthropic
 import httpx
@@ -52,7 +53,7 @@ def message(blocks: list[tuple[str, dict]], stop: str, inp: int, out: int) -> by
                 {
                     "type": "content_block_delta",
                     "index": i,
-                    "delta": {"type": "input_json_delta", "partial_json": "{}"},
+                    "delta": {"type": "input_json_delta", "partial_json": data.get("json", "{}")},
                 },
             ]
         evs.append({"type": "content_block_stop", "index": i})
@@ -126,14 +127,19 @@ BRAIN = {
 }
 
 
+def brain_body(**kw) -> dict:
+    """A brain request with a fresh request id (each id may be used once)."""
+    return {**BRAIN, "request_id": f"turn-{uuid.uuid4().hex[:12]}", **kw}
+
+
 def test_switched_off_without_keys_or_caps(make_account, monkeypatch):
     a = make_account("ada@example.com")
     st = a.get(a.o("/live/status")).json()
     assert st["llm"]["available"] is False and st["tts"]["available"] is False
-    assert a.post(a.o("/live/brain"), json=BRAIN).status_code == 503
+    assert a.post(a.o("/live/brain"), json=brain_body()).status_code == 503
     assert a.post(a.o("/live/tts"), json={"request_id": "tts-0001-abc", "text": "Hi"}).status_code == 503
     monkeypatch.setattr(get_settings(), "anthropic_api_key", SecretStr("sk-test"))  # key but no cap
-    r = a.post(a.o("/live/brain"), json=BRAIN)
+    r = a.post(a.o("/live/brain"), json=brain_body())
     assert r.status_code == 503 and "cap" in r.json()["detail"]
 
 
@@ -144,7 +150,8 @@ def test_brain_streams_runs_tools_on_workspace_data_and_meters(make_account, liv
         (200, message([("tool", {"id": "toolu_1", "name": "list_services"})], "tool_use", 900, 30)),
         (200, message([("text", {"parts": ["Balayage starts ", "from £165."]})], "end_turn", 1000, 12)),
     ]
-    r = a.post(a.o("/live/brain"), json=BRAIN)
+    body = brain_body()
+    r = a.post(a.o("/live/brain"), json=body)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     ev = events(r)
     assert [e["type"] for e in ev] == ["tool", "text", "text", "done"]
@@ -185,7 +192,7 @@ def test_brain_streams_runs_tools_on_workspace_data_and_meters(make_account, liv
         "llm_tokens",
         "live",
         1942,
-        "llm-turn-0001-abcd",
+        f"llm-{body['request_id']}",
     )
     assert a.get(a.o("/live/status")).json()["llm"]["org_used"] == 1942
 
@@ -195,7 +202,7 @@ def test_provider_error_becomes_an_error_event(make_account, live):
     live["llm"] = [
         (529, json.dumps({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}).encode())
     ]
-    ev = events(a.post(a.o("/live/brain"), json=BRAIN))
+    ev = events(a.post(a.o("/live/brain"), json=brain_body()))
     assert ev == [{"type": "error", "message": "Language model error (HTTP 529)."}]
 
 
@@ -208,7 +215,7 @@ def test_brain_validation_and_caps(make_account, live, monkeypatch):
         == 422
     )
     monkeypatch.setattr(get_settings(), "live_llm_tokens_per_org_month", 500)
-    r = a.post(a.o("/live/brain"), json=BRAIN)
+    r = a.post(a.o("/live/brain"), json=brain_body())
     assert r.status_code == 429 and live["llm_requests"] == []
 
 
@@ -247,10 +254,10 @@ def test_roles_and_isolation(make_account, live):
     join(owner, viewer, "viewer")
     viewer.org_id = owner.org_id
     assert viewer.get(viewer.o("/live/status")).status_code == 200
-    assert viewer.post(viewer.o("/live/brain"), json=BRAIN).status_code == 403
+    assert viewer.post(viewer.o("/live/brain"), json=brain_body()).status_code == 403
     assert viewer.post(viewer.o("/live/tts"), json={"request_id": "tts-0001-abc", "text": "Hi"}).status_code == 403
     other = make_account("olu@example.com", "Elsewhere")
-    assert other.post(f"/v1/orgs/{owner.org_id}/live/brain", json=BRAIN).status_code == 404
+    assert other.post(f"/v1/orgs/{owner.org_id}/live/brain", json=brain_body()).status_code == 404
     assert "sk-test" not in owner.get(owner.o("/live/status")).text
 
 
@@ -265,7 +272,7 @@ def test_cheaper_model_without_fallback_support(make_account, live, monkeypatch)
     monkeypatch.setattr(get_settings(), "llm_model", "claude-haiku-5-5")
     a = make_account("ada@example.com")
     live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 10, 2))]
-    assert [e["type"] for e in events(a.post(a.o("/live/brain"), json=BRAIN))] == ["text", "done"]
+    assert [e["type"] for e in events(a.post(a.o("/live/brain"), json=brain_body()))] == ["text", "done"]
     body = json.loads(live["llm_requests"][0].content)
     assert body["model"] == "claude-haiku-5-5" and "fallbacks" not in body
     assert "server-side-fallback" not in live["llm_requests"][0].headers.get("anthropic-beta", "")

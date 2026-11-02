@@ -112,3 +112,10 @@ The Claude mode works the same way: its instructions say to make requested chang
   - a streamed turn, with the model faked.
 - **Live browser test** (in `scripts/e2e-designs-live.mjs`, 12/12): a new workspace's Pulse shows real data and the setup card. A full guided conversation then saves the phone, address, five days of hours, two services with prices, capacity 2, and a receptionist "Ava" with an AI-disclosing greeting. This is checked through the API.
 - **Not tested here:** Claude mode against the real model, because there's no key in this environment.
+
+## Data integrity of changes and undo
+- Removing a service (AI or guided mode) hides it from callers (`active = false`) instead of deleting it. Existing bookings keep their link to the service.
+- "Undo" (adding the same name back) restores the very same service, with the same id. Before this, a removal followed by undo created a new service, and the old bookings lost their link. In guided mode, undo could also silently fail on the unique name.
+- The AI assistant needs the exact service name to remove one. A partial name is refused, with a "did you mean".
+- Every AI change returns its `before` and `after` values (opening hours return `previous_hours`), so "undo" puts back exactly what was there.
+- Only owners and admins can run the AI assistant (tested: managers, staff and viewers get 403 before any provider call; other workspaces get 404). Every tool is limited to the signed-in workspace by row-level security and explicit workspace filters.

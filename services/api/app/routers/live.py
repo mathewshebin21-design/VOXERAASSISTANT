@@ -6,9 +6,9 @@ configured (see app/config.py). Transcripts are not stored: only metered usage i
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 import anthropic
@@ -16,16 +16,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import SessionLocal, set_tenant
 from ..deps import DB, OrgContext, require
-from ..live import providers, setup_agent
-from ..live.budget import budget, require_budget
+from ..live import budget as budget_mod
+from ..live import providers, setup_agent, toolcheck
+from ..live.budget import budget
 from ..live.receptionist import TOOLS, Turn, load_context, run_tool, system_prompt
-from ..models import UsageEvent, UsageKind, UsageSource
+from ..models import UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
 
@@ -65,31 +65,6 @@ def _tts_ready() -> bool:
     return s.elevenlabs_api_key is not None and bool(s.elevenlabs_voice_id)
 
 
-def _record(org_id: uuid.UUID, user_id: uuid.UUID, kind: UsageKind, qty: int, key: str, ref: str) -> None:
-    """Records live usage in its own transaction (the request's session may already be closed)."""
-    db = SessionLocal()
-    try:
-        set_tenant(db, org_id=org_id, user_id=user_id)
-        db.execute(
-            insert(UsageEvent)
-            .values(
-                organization_id=org_id,
-                kind=kind,
-                source=UsageSource.live,
-                quantity=qty,
-                occurred_at=datetime.now(UTC),
-                idempotency_key=key,
-                reference=ref,
-            )
-            .on_conflict_do_nothing(constraint="uq_usage_idempotency")
-        )
-        db.commit()
-    except Exception:  # never lose the response over metering, but make it loud
-        log.exception("failed to record live usage", extra={"org_id": str(org_id), "kind": kind.value, "qty": qty})
-    finally:
-        db.close()
-
-
 @router.get("/status")
 def live_status(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB) -> dict:
     s = get_settings()
@@ -103,6 +78,9 @@ def live_status(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB)
             "model": model,
             "unit": kind.value,
             "org_cap": b.org_cap,
+            "org_reserved": b.org_reserved,
+            "limit_note": f"Caps count {kind.value.replace('_', ' ')}, not a monetary amount. VOXERA cannot "
+            "enforce a spending limit in money: set one in the provider's own console.",
             "org_used": b.org_used,
             "remaining": b.remaining,
         }
@@ -134,14 +112,10 @@ def _usage_total(u: object) -> int:
 @router.post("/brain")
 def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_write))], db: DB) -> StreamingResponse:
     """Streams one receptionist reply as server-sent events: text, tool, error, done."""
-    s = get_settings()
     if not _llm_ready():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
     if body.messages[-1].role != "user":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The last message must be the caller's")
-    # Worst case for this request: every round re-reads the history plus tool data, and writes max output.
-    est_input = sum(len(m.text) for m in body.messages) // 3 + 2500
-    require_budget(db, ctx.org_id, UsageKind.llm_tokens, (est_input + s.llm_max_output_tokens) * MAX_ROUNDS)
     bctx = load_context(db, ctx.org_id)
     org_id, user_id = ctx.org_id, ctx.user.id
     msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
@@ -160,8 +134,12 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
             h = turn.handoff
             yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
 
+    system = system_prompt(bctx)
+    # Hold this turn's worst case against the monthly caps before calling the provider (atomic).
+    allowance = turn_allowance(system, TOOLS, msgs)
+    budget_mod.reserve(db, org_id, UsageKind.llm_tokens, allowance, f"llm-{body.request_id}")
     gen = _llm_stream(
-        system=system_prompt(bctx),
+        system=system,
         tools=TOOLS,
         msgs=msgs,
         run=run,
@@ -170,15 +148,9 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
         user_id=user_id,
         usage_key=f"llm-{body.request_id}",
         reference="voice lab brain",
+        reserved=allowance,
     )
     return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
-
-
-def _llm_stream(**kw) -> Iterator[str]:
-    """The configured provider's tool-using conversation, as server-sent events."""
-    if get_settings().llm_provider == "anthropic":
-        return _agent_stream(client=providers.llm_client(), **kw)
-    return _openai_stream(**kw)
 
 
 class _HideThinking:
@@ -206,31 +178,146 @@ class _HideThinking:
         return out
 
 
+def _llm_stream(**kw) -> Iterator[str]:
+    """The configured provider's tool-using conversation, as server-sent events."""
+    if get_settings().llm_provider == "anthropic":
+        return _agent_stream(client=providers.llm_client(), **kw)
+    return _openai_stream(**kw)
+
+
+TURN_DEADLINE_S = 60.0  # one caller turn, all rounds included; a phone caller won't wait longer
+MAX_CALLS_PER_ROUND = 8
+MAX_TOOL_INDEX = 15
+
+
+class StreamFault(Exception):
+    """A provider reply that can't be trusted or finished. The message is safe to show."""
+
+
+def _prompt_chars(system: str, tools: list[dict], msgs: list[dict]) -> int:
+    return len(system) + len(json.dumps(tools, default=str)) + len(json.dumps(msgs, default=str))
+
+
+def turn_allowance(system: str, tools: list[dict], msgs: list[dict]) -> int:
+    """The most tokens one caller turn may use: every round re-reads the prompt (which grows with
+    tool results) and may write the maximum output. Reserved before the turn and enforced per round."""
+    s = get_settings()
+    first = _prompt_chars(system, tools, msgs) // 3
+    growth = 1500  # tool results and the model's own tool calls added per round
+    return sum(first + growth * i + s.llm_max_output_tokens for i in range(MAX_ROUNDS))
+
+
+def _tool_event(by_name: dict[str, dict], name: object, ok: bool, shown: str) -> str:
+    safe = name if isinstance(name, str) and name in by_name else "invalid_tool_call"
+    return _sse({"type": "tool", "name": safe, "ok": ok, "result": shown})
+
+
+def _exec_tool(
+    tdb: Session,
+    run: Callable[[Session, str, dict], tuple[bool, str, str]],
+    by_name: dict[str, dict],
+    name: object,
+    args: object,
+) -> tuple[bool, str, str]:
+    """Validates a model's tool call against the offered tools' schemas, then runs it. Never raises."""
+    try:
+        valid = toolcheck.validate_call(by_name, name, args)
+    except toolcheck.ToolCallError as e:
+        msg = json.dumps({"error": f"Tool call rejected, nothing was done: {e}"})
+        return False, msg, msg[:300]
+    try:
+        return run(tdb, name, valid)  # type: ignore[arg-type]  # name is a str once validated
+    except Exception:
+        tdb.rollback()
+        log.exception("live tool failed", extra={"tool": name})
+        msg = json.dumps({"error": "That couldn't be done because of a problem on our side. Nothing was changed."})
+        return False, msg, "internal error"
+
+
+def _fail(e: BaseException, provider: str) -> str:
+    """The error event for a failed turn (and a log line)."""
+    if isinstance(e, StreamFault):
+        log.warning("llm stream fault", extra={"provider": provider, "reason": str(e)})
+        return _sse({"type": "error", "message": str(e)})
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        log.warning("llm provider error", extra={"status": code, "provider": provider})
+        msg = "Language model is rate limited." if code == 429 else f"Language model error (HTTP {code})."
+        return _sse({"type": "error", "message": msg})
+    if isinstance(e, httpx.TimeoutException | anthropic.APITimeoutError):
+        return _sse({"type": "error", "message": "The language model timed out."})
+    if isinstance(e, anthropic.RateLimitError):
+        return _sse({"type": "error", "message": "Language model is rate limited."})
+    if isinstance(e, anthropic.APIStatusError):
+        log.warning("llm provider error", extra={"status": e.status_code, "request_id": e.request_id})
+        return _sse({"type": "error", "message": f"Language model error (HTTP {e.status_code})."})
+    if isinstance(e, httpx.HTTPError | anthropic.APIConnectionError):
+        return _sse({"type": "error", "message": "Could not reach the language model."})
+    log.exception("live turn failed", exc_info=e)
+    return _sse({"type": "error", "message": "Something went wrong on our side. Nothing more was changed."})
+
+
+def _no_constants(token: str) -> object:
+    raise StreamFault("The language model sent a malformed reply.")
+
+
+def _chunk(data: str) -> dict:
+    """One streamed chat-completions chunk, shape-checked."""
+    try:
+        chunk = json.loads(data, parse_constant=_no_constants)
+    except ValueError:
+        raise StreamFault("The language model sent a malformed reply.") from None
+    if not isinstance(chunk, dict):
+        raise StreamFault("The language model sent a malformed reply.")
+    if chunk.get("error") is not None:  # providers report mid-stream failures as an error event
+        raise StreamFault("The language model reported an error mid-reply.")
+    choices = chunk.get("choices")
+    if choices is None:
+        chunk["choices"] = []
+    elif not isinstance(choices, list) or not all(isinstance(c, dict) for c in choices):
+        raise StreamFault("The language model sent a malformed reply.")
+    return chunk
+
+
+def _usage_tokens(chunk: dict) -> int:
+    u = chunk.get("usage")
+    t = u.get("total_tokens") if isinstance(u, dict) else None
+    return t if isinstance(t, int) and not isinstance(t, bool) and 0 <= t < 10_000_000 else 0
+
+
 def _openai_stream(
     *,
     system: str,
     tools: list[dict],
     msgs: list[dict],
-    run: Callable[[Session, str, object], tuple[bool, str, str]],
+    run: Callable[[Session, str, dict], tuple[bool, str, str]],
     org_id: uuid.UUID,
     user_id: uuid.UUID,
     usage_key: str,
     reference: str,
+    reserved: int,
     after: Callable[[], Iterator[str]] | None = None,
 ) -> Iterator[str]:
     """The same conversation as _agent_stream, through an OpenAI-compatible chat API (Groq,
-    Gemini, OpenRouter, Ollama…). Uses the provider's token counts when it sends them, and
-    otherwise a conservative estimate, so the monthly caps still hold."""
+    Gemini, OpenRouter, Ollama…). Every chunk is shape-checked; a reply only counts as complete
+    with a finish reason or [DONE]; tool calls run only from complete replies and only after
+    validation. Uses the provider's token counts when it sends them, and otherwise a
+    conservative estimate, so the monthly caps still hold."""
     s = get_settings()
     convo: list[dict] = [{"role": "system", "content": system}, *msgs]
     fn_tools = providers.openai_tools(tools, s.llm_provider)
+    by_name = {t["name"]: t for t in tools}
     used = 0
-    sent_chars = 0
+    pending = 0  # estimate for the round in flight, counted if it is interrupted
+    deadline = time.monotonic() + TURN_DEADLINE_S
     http = providers.openai_http()
     tdb = SessionLocal()
     set_tenant(tdb, org_id=org_id, user_id=user_id)
     try:
         for _ in range(MAX_ROUNDS):
+            prompt_chars = len(json.dumps(convo)) + len(json.dumps(fn_tools))
+            if used + prompt_chars // 3 + s.llm_max_output_tokens > reserved:
+                raise StreamFault("This turn reached its usage allowance.")
             body: dict = {
                 "model": s.model,
                 "messages": convo,
@@ -240,50 +327,86 @@ def _openai_stream(
             }
             if s.llm_provider in ("groq", "openrouter", "openai_compatible"):
                 body["stream_options"] = {"include_usage": True}
-            prompt_chars = len(json.dumps(convo)) + len(json.dumps(fn_tools))
-            text_out, calls, finish, usage = "", {}, None, 0
+            text_out, calls, finish, usage, done = "", {}, None, 0, False
             hide = _HideThinking()
-            sent_chars = prompt_chars
+            pending = prompt_chars // 3
             r = http.send(providers.openai_request(http, body), stream=True)
             try:
                 if r.status_code != 200:
                     r.read()
                     raise httpx.HTTPStatusError("provider error", request=r.request, response=r)
                 for line in r.iter_lines():
+                    if time.monotonic() > deadline:
+                        raise StreamFault("The language model took too long to answer.")
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
+                        done = True
                         break
-                    chunk = json.loads(data)
-                    u = chunk.get("usage") or {}
-                    usage = max(usage, int(u.get("total_tokens") or 0))
-                    for ch in chunk.get("choices") or []:
+                    chunk = _chunk(data)
+                    usage = max(usage, _usage_tokens(chunk))
+                    for ch in chunk["choices"]:
                         d = ch.get("delta") or {}
-                        if d.get("content"):
-                            shown = hide.feed(d["content"])
-                            text_out += d["content"]
+                        content, tcs, fr = (
+                            (d.get("content"), d.get("tool_calls"), ch.get("finish_reason"))
+                            if isinstance(d, dict)
+                            else (0, None, None)
+                        )
+                        if content is not None and not isinstance(content, str):
+                            raise StreamFault("The language model sent a malformed reply.")
+                        if fr is not None and not isinstance(fr, str):
+                            raise StreamFault("The language model sent a malformed reply.")
+                        if tcs is not None and not isinstance(tcs, list):
+                            raise StreamFault("The language model sent a malformed tool call.")
+                        if content:
+                            shown = hide.feed(content)
+                            text_out += content
                             if shown:
                                 yield _sse({"type": "text", "text": shown})
-                        for n, tc in enumerate(d.get("tool_calls") or []):
-                            slot = calls.setdefault(tc.get("index", n), {"id": None, "name": "", "args": ""})
+                        for n, tc in enumerate(tcs or []):
+                            idx = tc.get("index", n) if isinstance(tc, dict) else None
+                            f = tc.get("function") or {} if isinstance(tc, dict) else None
+                            if (
+                                not isinstance(idx, int)
+                                or isinstance(idx, bool)
+                                or not 0 <= idx <= MAX_TOOL_INDEX
+                                or not isinstance(f, dict)
+                                or not isinstance(f.get("name") or "", str)
+                                or not isinstance(f.get("arguments") or "", str)
+                                or not isinstance(tc.get("id") or "", str)
+                            ):
+                                raise StreamFault("The language model sent a malformed tool call.")
+                            slot = calls.setdefault(idx, {"id": None, "name": "", "args": ""})
                             slot["id"] = tc.get("id") or slot["id"]
-                            f = tc.get("function") or {}
                             slot["name"] += f.get("name") or ""
                             slot["args"] += f.get("arguments") or ""
-                        finish = ch.get("finish_reason") or finish
+                            if len(slot["args"]) > toolcheck.MAX_ARGS_BYTES:
+                                raise StreamFault("The language model sent an oversized tool call.")
+                        finish = fr or finish
+                    pending = (prompt_chars + len(text_out) + sum(len(c["args"]) for c in calls.values())) // 3
             finally:
                 r.close()
-            used += usage or (prompt_chars + len(text_out) + sum(len(c["args"]) for c in calls.values())) // 3
-            sent_chars = 0
+            if not done and finish is None:
+                raise StreamFault("The language model stopped before finishing its reply.")
+            used += usage or pending
+            pending = 0
+            if finish == "content_filter":
+                raise StreamFault("The language model's safety filter stopped this reply.")
             if not calls:
+                if finish == "length":
+                    raise StreamFault("The reply was cut off before it finished.")
                 break
             if finish == "length":
-                yield _sse({"type": "error", "message": "Reply was cut off before a tool call finished."})
-                break
+                raise StreamFault("Reply was cut off before a tool call finished.")
+            if len(calls) > MAX_CALLS_PER_ROUND:
+                raise StreamFault("The language model asked for too many actions at once.")
             ordered = [calls[k] for k in sorted(calls)]
+            ids: set[str] = set()
             for i, c in enumerate(ordered):
-                c["id"] = c["id"] or f"call_{i}"
+                if not c["id"] or c["id"] in ids:
+                    c["id"] = f"call_{i}"
+                ids.add(c["id"])
             convo.append(
                 {
                     "role": "assistant",
@@ -299,28 +422,27 @@ def _openai_stream(
                 }
             )
             for c in ordered:
-                args = json.loads(c["args"]) if c["args"].strip() else {}
-                ok, out, shown = run(tdb, c["name"], args)
-                yield _sse({"type": "tool", "name": c["name"], "ok": ok, "result": shown})
+                try:
+                    args = toolcheck.parse_args(c["args"])
+                except toolcheck.ToolCallError as e:
+                    out = json.dumps({"error": f"Tool call rejected, nothing was done: {e}"})
+                    ok, shown = False, out[:300]
+                else:
+                    ok, out, shown = _exec_tool(tdb, run, by_name, c["name"], args)
+                yield _tool_event(by_name, c["name"], ok, shown)
                 convo.append({"role": "tool", "tool_call_id": c["id"], "content": out})
+        else:
+            raise StreamFault("The receptionist couldn't finish this turn in time.")
         if after:
             yield from after()
         yield _sse({"type": "done", "llm_tokens": used})
-    except httpx.HTTPStatusError as e:
-        code = e.response.status_code
-        log.warning("llm provider error", extra={"status": code, "provider": s.llm_provider})
-        msg = "Language model is rate limited." if code == 429 else f"Language model error (HTTP {code})."
-        yield _sse({"type": "error", "message": msg})
-    except httpx.HTTPError:
-        yield _sse({"type": "error", "message": "Could not reach the language model."})
-    except ValueError:  # unparseable stream or tool arguments
-        yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
+    except Exception as e:  # every failure ends the stream with an error event, never a broken response
+        yield _fail(e, s.llm_provider)
     finally:
         tdb.close()
         http.close()
-        used += sent_chars // 3  # an interrupted request still counts what was sent
-        if used:
-            _record(org_id, user_id, UsageKind.llm_tokens, used, usage_key, reference)
+        used += pending  # an interrupted or cancelled request still counts what was sent
+        budget_mod.settle(org_id, user_id, UsageKind.llm_tokens, usage_key, used, reference)
 
 
 def _agent_stream(
@@ -329,23 +451,28 @@ def _agent_stream(
     system: str,
     tools: list[dict],
     msgs: list[dict],
-    run: Callable[[Session, str, object], tuple[bool, str, str]],
+    run: Callable[[Session, str, dict], tuple[bool, str, str]],
     org_id: uuid.UUID,
     user_id: uuid.UUID,
     usage_key: str,
     reference: str,
+    reserved: int,
     after: Callable[[], Iterator[str]] | None = None,
 ) -> Iterator[str]:
     """Streams a tool-using Claude conversation as server-sent events (text, tool, error, done),
-    running tools in a fresh tenant-scoped session and metering the tokens it used."""
+    running validated tools in a fresh tenant-scoped session and metering the tokens it used."""
     s = get_settings()
     fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.model in FALLBACK_MODELS else {}
+    by_name = {t["name"]: t for t in tools}
     used = 0
     partial_in = partial_chars = 0
+    deadline = time.monotonic() + TURN_DEADLINE_S
     tdb = SessionLocal()  # the request's session is closed once streaming starts
     set_tenant(tdb, org_id=org_id, user_id=user_id)
     try:
         for _ in range(MAX_ROUNDS):
+            if used + _prompt_chars(system, tools, msgs) // 3 + s.llm_max_output_tokens > reserved:
+                raise StreamFault("This turn reached its usage allowance.")
             partial_in = partial_chars = 0
             with client.beta.messages.stream(
                 model=s.model,
@@ -357,6 +484,8 @@ def _agent_stream(
                 **fallback,
             ) as stream:
                 for event in stream:
+                    if time.monotonic() > deadline:
+                        raise StreamFault("The language model took too long to answer.")
                     if event.type == "message_start":
                         partial_in = _usage_total(event.message.usage)
                     elif event.type == "text":
@@ -366,41 +495,37 @@ def _agent_stream(
             used += _usage_total(final.usage)
             partial_in = partial_chars = 0
             if final.stop_reason == "refusal":
-                yield _sse({"type": "error", "message": "The model declined to answer this turn."})
-                break
+                raise StreamFault("The model declined to answer this turn.")
             tool_uses = [b for b in final.content if b.type == "tool_use"]
             if not tool_uses:
+                if final.stop_reason == "max_tokens":
+                    raise StreamFault("The reply was cut off before it finished.")
                 break
             if final.stop_reason == "max_tokens":
-                yield _sse({"type": "error", "message": "Reply was cut off before a tool call finished."})
-                break
+                raise StreamFault("Reply was cut off before a tool call finished.")
+            if len(tool_uses) > MAX_CALLS_PER_ROUND:
+                raise StreamFault("The language model asked for too many actions at once.")
             results = []
             for b in tool_uses:
-                ok, out, shown = run(tdb, b.name, b.input)
-                yield _sse({"type": "tool", "name": b.name, "ok": ok, "result": shown})
+                ok, out, shown = _exec_tool(tdb, run, by_name, b.name, b.input)
+                yield _tool_event(by_name, b.name, ok, shown)
                 results.append(
                     {"type": "tool_result", "tool_use_id": b.id, "content": out, **({} if ok else {"is_error": True})}
                 )
             msgs.append({"role": "assistant", "content": final.content})
             msgs.append({"role": "user", "content": results})
+        else:
+            raise StreamFault("The receptionist couldn't finish this turn in time.")
         if after:
             yield from after()
         yield _sse({"type": "done", "llm_tokens": used})
-    except anthropic.RateLimitError:
-        yield _sse({"type": "error", "message": "Language model is rate limited."})
-    except anthropic.APIStatusError as e:
-        log.warning("llm provider error", extra={"status": e.status_code, "request_id": e.request_id})
-        yield _sse({"type": "error", "message": f"Language model error (HTTP {e.status_code})."})
-    except anthropic.APIConnectionError:
-        yield _sse({"type": "error", "message": "Could not reach the language model."})
-    except ValueError:  # unparseable streamed tool input
-        yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
+    except Exception as e:  # every failure ends the stream with an error event, never a broken response
+        yield _fail(e, "anthropic")
     finally:
         tdb.close()
-        # An interrupted stream still bills what the provider produced.
+        # An interrupted or cancelled stream still bills what the provider produced.
         used += partial_in + (partial_chars // 3 if partial_in else 0)
-        if used:
-            _record(org_id, user_id, UsageKind.llm_tokens, used, usage_key, reference)
+        budget_mod.settle(org_id, user_id, UsageKind.llm_tokens, usage_key, used, reference)
 
 
 # ---------- setup assistant ----------
@@ -427,13 +552,10 @@ def setup_status(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB
 @router.post("/setup-assistant")
 def setup_assistant(body: SetupIn, ctx: Annotated[OrgContext, Depends(_setup_perm)], db: DB) -> StreamingResponse:
     """One turn of the setup conversation, streamed: text, tool (what was saved), error, done."""
-    s = get_settings()
     if not _llm_ready():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
     if body.messages[-1].role != "user":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The last message must be yours")
-    est_input = sum(len(m.text) for m in body.messages) // 3 + 3000
-    require_budget(db, ctx.org_id, UsageKind.llm_tokens, (est_input + s.llm_max_output_tokens) * MAX_ROUNDS)
     name = load_context(db, ctx.org_id).name
     msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
     if msgs[0]["role"] == "assistant":
@@ -444,8 +566,11 @@ def setup_assistant(body: SetupIn, ctx: Annotated[OrgContext, Depends(_setup_per
         ok, out = setup_agent.run_tool(tdb, sctx, tool, args)
         return ok, out, out[:300]
 
+    system = setup_agent.system_prompt(name)
+    allowance = turn_allowance(system, setup_agent.TOOLS, msgs)
+    budget_mod.reserve(db, ctx.org_id, UsageKind.llm_tokens, allowance, f"setup-{body.request_id}")
     gen = _llm_stream(
-        system=setup_agent.system_prompt(name),
+        system=system,
         tools=setup_agent.TOOLS,
         msgs=msgs,
         run=run,
@@ -453,19 +578,19 @@ def setup_assistant(body: SetupIn, ctx: Annotated[OrgContext, Depends(_setup_per
         user_id=ctx.user.id,
         usage_key=f"setup-{body.request_id}",
         reference="setup assistant",
+        reserved=allowance,
     )
     return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
 
 
 @router.post("/tts")
 def tts(body: TtsIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_write))], db: DB) -> StreamingResponse:
-    """Synthesises one sentence as MP3. Characters are metered before the call (conservative)."""
+    """Synthesises one sentence as MP3. Characters are checked against the caps and recorded
+    atomically before the call (conservative: a failed call still counts)."""
     if not _tts_ready():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No text-to-speech provider key is configured")
-    require_budget(db, ctx.org_id, UsageKind.tts_characters, len(body.text))
-    db.rollback()
-    _record(
-        ctx.org_id, ctx.user.id, UsageKind.tts_characters, len(body.text), f"tts-{body.request_id}", "voice lab tts"
+    budget_mod.charge(
+        db, ctx.org_id, UsageKind.tts_characters, len(body.text), f"tts-{body.request_id}", "voice lab tts"
     )
     http = providers.tts_http()
     try:

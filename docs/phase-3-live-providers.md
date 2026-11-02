@@ -16,13 +16,25 @@ Speech recognition stays in the browser for now. Server-side STT arrives with te
 - **Keys:** read only by the API, from environment variables. They are never sent to the browser or returned by any endpoint (tested).
 - **Two caps per provider:** a monthly cap per workspace and a global monthly cap across all workspaces (UTC calendar month).
   - A cap of 0 switches that provider off.
-  - Each request is checked against its worst case before the provider is called. Actual usage is recorded afterwards as `live` usage events, visible on the Usage page.
-  - The global total is computed by a locked-down database function. A workspace can't see any other workspace's usage.
-- **Overshoot:** concurrent requests can each pass the check, so a cap can be exceeded by at most (concurrent requests × one request's maximum).
-  - For the LLM, one request's maximum is about 3 × (history + 2,500 + 400 output) tokens.
-  - For TTS it is one sentence, at most 600 characters.
-  - **Also set a hard spending limit in each provider's console.**
+  - **Caps are units, not money.** They count LLM tokens and TTS characters. VOXERA does not know provider prices or exchange rates, so it cannot enforce a monetary limit. `GET …/live/status` says so in `limit_note`. **Always set a hard spending limit in each provider's own console as well.**
+  - **Enforced by reservation** (migration 0006, `app/live/budget.py`). Before a provider call, the API takes a per-kind Postgres advisory lock, counts recorded usage plus every open reservation (this workspace and all workspaces), and inserts a reservation for the call's worst case. Then it releases the lock. Simultaneous requests, on any number of serverless instances, are serialised by the lock, so together they cannot reserve more than the cap (tested with 12 parallel requests, and the test fails if the lock is removed).
+  - When the call ends (normally, on error, or when the caller hangs up), the reservation is swapped for the actual usage in one transaction. If a worker crashes before that, the reservation keeps counting at its worst case. That fails safe: budget is under-used, never over-spent.
+  - The LLM worst case for one caller turn is every round (up to 6) re-reading the prompt plus 1,500 tokens of tool data per round, plus the maximum output. The stream also enforces this per round. Usage reported by the provider can slightly exceed the estimate, and the actual figure is always what gets recorded.
+  - TTS is charged atomically before the call (lock, check and record in one transaction).
+  - Each `request_id` can be used once. A replay gets 409 instead of a second, un-metered provider call.
+  - The global total is computed by locked-down database functions (`live_usage_total`, `live_reserved_total`). A workspace can't see any other workspace's usage.
 - **Barge-in:** when the caller interrupts, the browser aborts the request and the API stops reading from the provider. Tokens produced up to that point are still metered.
+- **Untrusted streams:**
+  - Every streamed chunk from an OpenAI-compatible provider is shape-checked. Malformed JSON, NaN/Infinity, wrong types, oversized or out-of-range tool calls, and mid-stream `error` events all end the turn with an error event.
+  - A reply counts as complete only with a finish reason or `[DONE]`. A cut connection is reported, and any half-received tool call is never run.
+  - `length` (cut-off) and `content_filter` finishes are reported, not accepted as complete. The same applies to Claude's `max_tokens` and `refusal`.
+  - A caller turn has a 60-second deadline across all rounds, and is stopped if the model is still calling tools after 6 rounds.
+  - Any unexpected exception becomes an error event (logged server-side) instead of a broken response.
+- **Model tool calls are validated before anything runs** (`app/live/toolcheck.py`, both providers):
+  - the tool name must be one offered on that endpoint;
+  - the arguments must be a JSON object matching the tool's schema exactly: no unknown fields, all required fields, correct types, enum values, finite numbers, bounded strings and arrays.
+  - A rejected call is reported back to the model ("nothing was done") so it can recover. A tool that crashes is rolled back and reported as an internal error, without leaking details.
+  - Tools still check meaning themselves: dates, the caller's ownership of a booking, and explicit consent. One "yes" now confirms one booking change.
 - **Failures:** provider errors, rate limits and refusals become an error event. The engine then speaks its recovery line, and after two failures in a row switches to the message-taking fallback. A failed voice falls back to text.
 - **Privacy:** transcripts are not stored, only usage counts. The Voice lab tells the user when their words are sent to the live providers.
 

@@ -72,6 +72,8 @@ def normalise_phone(raw: str) -> str:
 def find_service(db: Session, org_id: uuid.UUID, name: str) -> Service:
     services = list(db.scalars(select(Service).where(Service.organization_id == org_id, Service.active.is_(True))))
     want = name.strip().lower()
+    if not want:
+        raise DeskError("Which service? Ask the caller.")
     exact = [s for s in services if s.name.lower() == want]
     loose = exact or [s for s in services if want in s.name.lower() or s.name.lower() in want]
     if len(loose) == 1:

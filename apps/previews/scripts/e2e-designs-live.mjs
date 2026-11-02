@@ -82,6 +82,23 @@ await step("setup assistant (guided): a conversation fills in the workspace", as
     && state.agents.some((a) => a.name === "Ava" && /AI receptionist/.test(a.greeting));
 });
 
+await step("setup assistant (guided): removing a service then 'undo' brings back the same service", async () => {
+  const chat = p.getByTestId("setup-chat");
+  const svcs = (all) => p.evaluate(async ([id, q]) => (await fetch(`/api/v1/orgs/${id}/services${q}`)).json(), [orgId, all ? "?include_inactive=true" : ""]);
+  const before = (await svcs(true)).find((s) => s.name === "Gents cut");
+  await p.getByLabel("Your answer").fill("remove gents cut");
+  await p.getByRole("button", { name: "Send" }).click();
+  await chat.getByText(/Removed Gents cut/).last().waitFor({ timeout: 10000 });
+  const hidden = await svcs(false);
+  if (hidden.some((s) => s.name === "Gents cut")) throw new Error("still offered after removal");
+  await p.getByLabel("Your answer").fill("undo");
+  await p.getByRole("button", { name: "Send" }).click();
+  await chat.getByText(/✓/).last().waitFor({ timeout: 10000 });
+  await p.waitForTimeout(500);
+  const after = (await svcs(false)).find((s) => s.name === "Gents cut");
+  return !!after && after.id === before.id && after.price_from_pence === 2000;
+});
+
 await step("Command: real bookings and desk cases appear after they're created", async () => {
   const hours = { intervals: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opens_at: "00:00", closes_at: "23:59" })) };
   if ((await apiCall("PUT", `/orgs/${orgId}/office-hours`, hours)).status !== 200) throw new Error("hours");

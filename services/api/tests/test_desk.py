@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from .conftest import join
-from .test_live import BRAIN, events, live, message  # noqa: F401  (live is a fixture)
+from .test_live import brain_body, events, live, message  # noqa: F401  (live is a fixture)
 
 LONDON = ZoneInfo("Europe/London")
 ALL_WEEK = {"intervals": [{"weekday": d, "opens_at": "00:00", "closes_at": "23:59"} for d in range(7)]}
@@ -103,7 +103,7 @@ def ai_transfer(a, live, summary="Wants to discuss a complaint"):  # noqa: F811
     ]
     # The fake API returns the tool call with empty input; patch the input via the transport is overkill —
     # instead the handler below fills it in (see ai_input).
-    return a.post(a.o("/live/brain"), json={**BRAIN, "messages": [{"role": "user", "text": summary}]})
+    return a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": summary}]})
 
 
 @pytest.fixture
@@ -112,9 +112,9 @@ def tool_input(monkeypatch):
     import app.routers.live as live_router
 
     inputs: dict[str, dict] = {}
-    real = live_router.run_tool
+    real = live_router._exec_tool  # swap the model's arguments in before validation, so they are still checked
     monkeypatch.setattr(
-        live_router, "run_tool", lambda db, ctx, turn, name, args: real(db, ctx, turn, name, inputs.get(name, args))
+        live_router, "_exec_tool", lambda tdb, run, by, name, args: real(tdb, run, by, name, inputs.get(name, args))
     )
     return inputs
 
@@ -295,7 +295,7 @@ def test_ai_can_only_see_and_cancel_the_callers_own_bookings(make_account, live,
         (200, message([("text", {"parts": ["Found it."]})], "end_turn", 500, 5)),
     ]
     ev = events(
-        a.post(a.o("/live/brain"), json={**BRAIN, "messages": [{"role": "user", "text": "It's under 07700 900123"}]})
+        a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "It's under 07700 900123"}]})
     )
     found = json.loads(next(e for e in ev if e["type"] == "tool")["result"])["appointments"]
     assert [x["ref"] for x in found] == [mine["id"][:8]]
@@ -305,7 +305,7 @@ def test_ai_can_only_see_and_cancel_the_callers_own_bookings(make_account, live,
         (200, message([cancel], "tool_use", 500, 20)),
         (200, message([("text", {"parts": ["Hmm."]})], "end_turn", 500, 5)),
     ]
-    ev = events(a.post(a.o("/live/brain"), json={**BRAIN, "messages": [{"role": "user", "text": "Yes, cancel it"}]}))
+    ev = events(a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "Yes, cancel it"}]}))
     assert next(e for e in ev if e["type"] == "tool")["ok"] is False
     assert {x["status"] for x in a.get(a.o("/appointments?include_cancelled=true")).json()} == {"booked"}
 
@@ -323,7 +323,7 @@ def test_ai_takes_a_message_into_the_shared_queue(make_account, live, tool_input
         (200, message([call], "tool_use", 500, 20)),
         (200, message([("text", {"parts": ["Done."]})], "end_turn", 500, 5)),
     ]
-    events(a.post(a.o("/live/brain"), json=BRAIN))
+    events(a.post(a.o("/live/brain"), json=brain_body()))
     case = a.get(a.o("/cases")).json()[0]
     assert case["kind"] == "message" and case["status"] == "new" and case["caller_phone"] == "07700900333"
 
