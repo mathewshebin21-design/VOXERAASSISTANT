@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 19:05 UTC (branch `claude/agent-studio`; this update is local, not pushed).
+Last updated: 2026-11-02 19:30 UTC (branch `claude/agent-studio`; this update is local, not pushed).
 
 > **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
@@ -40,6 +40,21 @@ Last updated: 2026-11-02 19:05 UTC (branch `claude/agent-studio`; this update is
 | Production deployment | commit 767c0f2 live | https://voxera-api-two.vercel.app, https://voxera-flow.vercel.app |
 | **Staging verification (run #1)** | ✅ **passed**: migrate ✅, readiness ✅, isolation ✅, staging browser tests 14/14 ✅, demo designs 131/131 ✅ | GitHub Actions run 41502348420 (attempt 2), staging at 94dae66 |
 | Real phone calls, real AI provider, real voice | **never tested** | — |
+
+## Phase 0 closure status (2026-11-02): **NOT COMPLETE** (see `docs/phase-0-closure-report.md`)
+| Gate | Status |
+|---|---|
+| 0.1 Preview can't read production | FAIL: only because of 8 historical previews (current config PASS, tested) |
+| 0.2 Preview can't write production | FAIL: same historical previews (current config PASS, tested) |
+| 0.3 Staging migrator refuses production | PASS |
+| 0.4 Production migrator refuses staging | PASS |
+| 0.5 No production credentials in Preview/Development | FAIL: deployed artifacts of the historical previews (config PASS) |
+| 0.6 Wrong identity fails closed | PASS |
+| 0.7 Hosted tests on staging only | PASS |
+| 0.8 Production unaffected | PASS |
+
+- **Evidence:** 78/78 negative and compatibility checks on disposable databases; PR #2 CI 6/6 at `41a4a13`; staging run 41502348420 green.
+- **To close:** delete the 16 historical previews (owner approval). Confirm Deployment Protection. Rotate voxera-db's password after PR #1 is live.
 
 ## Phase 0 log: staging run #1 (2026-11-02, approved "approve staging run")
 - **Branch:** `staging` created at `94dae660d50fc356a53a48f43e2fcd63807e2377` (PR #2's head).

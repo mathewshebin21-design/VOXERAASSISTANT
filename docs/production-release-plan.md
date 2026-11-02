@@ -17,6 +17,14 @@ Prepared 2026-11-02 after staging run #1 passed (staging at 94dae66: claimed, mi
 1. **The production build refuses unless the database is claimed `production` and at the code's migration head.** If anything is out of order, the merge deploys nothing and the current site stays live. That's safe, but it's a no-op until the database is ready.
 2. **`db-migrate` can't run yet.** GitHub only offers manually-triggered workflows that exist on the default branch, which here is the production branch. `db-migrate.yml` arrives with PR #1, so it can't be used *before* PR #1 merges. The first production claim therefore happens either after the merge (option A, recommended) or by the owner running `migrate.py` locally (option B).
 
+## Findings from the Phase 0 compatibility tests (2026-11-02, disposable databases)
+Each finding was proven against the real commits on throwaway databases (40/40 compatibility checks):
+- **Production is already one revision ahead of its code.** `767c0f2` ships migrations 0001–0005, but the database is at 0006. The 0006 migration was applied by the PR #1 preview build `dpl_3mGpaVh2…` ("Running upgrade 0005 -> 0006"). `767c0f2` runs normally on 0006, 0007 and 0008.
+- **`767c0f2` cannot be rebuilt.** Its build runs `alembic upgrade head` and fails with "Can't locate revision 0006", changing nothing. Roll back to it **only with Instant Rollback** (no rebuild), never with "Redeploy".
+- **PR #1's code (`a7ba2f0`) runs on 0008 but refuses to *build* there** ("schema is at 0008, this code needs 0007"). Between steps 6 and 7, go back to PR #1 only with Instant Rollback, and merge PR #2 promptly after 0008.
+- **`--claim` and `upgrade` migrate to the head of the code they run.** In steps 2, 3 and 6, run `db-migrate` with **"Use workflow from: `claude/confident-shannon-7nb05f`"**. Running it from `claude/agent-studio` in step 3 would jump straight to 0008, and step 4's build would then refuse.
+- **Neon Free plan:** a 6-hour point-in-time restore window (capped at 1 GB of history) and **1 manual snapshot**. Take the snapshot or branch in step 0, immediately before step 3.
+
 ## 0. Prerequisites ⛔ (owner, dashboards; free)
 1. **Backup point.** In the Neon console for voxera-db, create a branch, for example `pre-release-2026-11-xx`, from the current state. This is the fastest way to restore. Also note the restore window your plan offers.
 2. **GitHub environment `production`.** Settings → Environments → New environment `production`:
@@ -75,8 +83,18 @@ Prepared 2026-11-02 after staging run #1 passed (staging at 94dae66: claimed, mi
   - a test call works;
   - existing pages are unchanged.
 
-## 8. After the release ⛔ (separately)
-- **Production database password rotation:** recommended because of the old previews. It changes the derived JWT secret, so everyone is signed out, and the app role's password, so re-run `db-migrate` production **upgrade** to reset the role. Plan it for a quiet time.
+## 8. After the release ⛔ (separately): revoke the old previews' production credentials
+Rotation must come **after** PR #1 is live. `767c0f2` cannot be rebuilt, so rotating while it is still production would leave no way to redeploy it with the new password.
+1. **Optional first:** set `VOXERA_JWT_SECRET` (Production only, random 64-hex) and redeploy. Sessions then no longer depend on the database password, so this rotation and later ones don't sign everyone out. The change itself signs everyone out once.
+2. Rotate voxera-db's owner password in Neon. The Vercel integration updates voxera-api's Production variables, but running deployments keep the old password until redeployed.
+3. Update the GitHub `production` environment secret `DATABASE_URL_UNPOOLED` to the new value.
+4. Run `db-migrate` production **upgrade**. This resets the `voxera_app` role's password to the value derived from the new owner password. **From here until step 5 completes, the live API cannot connect** (expect about 1–3 minutes of 503 responses).
+5. Redeploy production (API and web) immediately, then check `/readyz` and sign-in.
+
+**What this does:** every older deployment, including the 8 old previews, older production deployments and rollback targets, can no longer reach the database. After rotation, Instant Rollback to a pre-rotation deployment would also fail to connect.
+
+## Old preview deployments ⛔ (before the release if possible)
+Preview deployments on these projects are publicly reachable: the staging workflow's unauthenticated runner read their JSON. Deleting the 8 old voxera-api previews (`b1adb59` … `469283d`) removes the only deployments that hold production database credentials, without rotating anything. This is the fastest mitigation. Rotation (step 8) then covers anything already copied.
 - **Update the tracker:** record the production commit, schema 0008 and the checks run.
 
 ## Rollback
