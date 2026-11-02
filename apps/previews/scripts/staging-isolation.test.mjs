@@ -18,13 +18,18 @@ for (const [name, apiOrigin, webOrigin, ref, responses, expected] of [
   ["wrong API revision", api, web, sha, [{ ...backend, commit: "old" }], false],
   ["wrong web revision", api, web, sha, [backend, { ...frontend, commit: "old" }], false],
   ["wrong web upstream", api, web, sha, [backend, { ...frontend, usesStagingApi: false }], false],
+  // Regression (staging run #1): Vercel's building page arrived as HTML with status 200.
+  ["web building page (HTML 200)", api, web, sha, [backend, "<!DOCTYPE html><title>Deployment is building</title>"], false],
+  ["API building page (HTML 200)", api, web, sha, ["<!DOCTYPE html><title>Deployment is building</title>"], false],
 ]) {
   test(name, async () => {
     const requests = [];
     const request = async (url, options) => {
       requests.push([url, options]);
       const body = responses[requests.length - 1];
-      return typeof body === "number" ? new Response(null, { status: body }) : Response.json(body);
+      if (typeof body === "number") return new Response(null, { status: body });
+      if (typeof body === "string") return new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+      return Response.json(body);
     };
     const probe = verifyStaging(apiOrigin, webOrigin, ref, request);
     if (expected) await probe;

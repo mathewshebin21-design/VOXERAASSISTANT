@@ -63,7 +63,7 @@ jobs:
       - run: npm ci
       - run: npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
       - name: Wait for this commit's staging deployments
-        run: node scripts/wait-for-deploy.mjs "$STAGING_API" "$STAGING_WEB" "${GITHUB_SHA::7}"
+        run: node scripts/wait-for-deploy.mjs "$STAGING_API" "$STAGING_WEB" "$GITHUB_SHA"
       - name: Isolation checks (staging API uses the staging database)
         run: node scripts/staging-isolation.mjs "$STAGING_API" "$STAGING_WEB" "$GITHUB_SHA"
       - name: Browser tests against staging (sign-up, sign-in, real data, setup assistant, undo)
