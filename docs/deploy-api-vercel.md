@@ -19,15 +19,16 @@ workspaces. Both can run on your existing Vercel account at no cost:
    - Project name: `voxera-api`
    - Root Directory: `services/api` (Vercel detects FastAPI)
    - Production branch: the same one as `voxera-flow`
-   - Deploy. The first build logs "no database attached — skipping migrations", which is expected.
+   - Deploy. The first build logs "no database attached — skipping the database preflight", which is expected.
 2. **Create the database:** *Storage → Create Database → Neon.*
    - Region: **London (aws-eu-west-2)**
    - Name: `voxera-db`
-   - Connect it to the `voxera-api` project, all environments, with no prefix.
-3. **Redeploy `voxera-api`:** *Deployments → … → Redeploy.* The build now:
-   - creates the restricted `voxera_app` database role, which owns nothing, so row-level security applies;
-   - runs all migrations;
-   - logs "migrations complete".
+   - Connect it to the `voxera-api` project for **Production only**, with no prefix. Previews get a separate staging database: see [`deployment.md`](deployment.md).
+3. **Migrate and claim it explicitly** (builds never change a database). Use either:
+   - the `db-migrate` GitHub workflow, with environment `production` and action `claim`; or
+   - `uv run python scripts/migrate.py --env production --claim --confirm-host <host>`, run from `services/api`.
+
+   This creates the restricted `voxera_app` role (it owns nothing, so row-level security applies), runs all migrations, and marks the database as production. Then redeploy `voxera-api`. Its build checks, read-only, that the database is production's and is up to date.
 4. **Check it:** open `https://<voxera-api domain>/readyz`. It should return `{"status":"ready"}`.
 5. **Connect the website:** in the `voxera-flow` project, open *Settings → Environment Variables*, add `VOXERA_API_URL = https://<voxera-api domain>` (no trailing slash), then redeploy `voxera-flow`.
 6. Open the site, choose **Create workspace**, and sign up.

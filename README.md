@@ -20,6 +20,7 @@ Multi-tenant AI voice receptionist and appointment automation platform — **wor
 | [`docs/practice-receptionist.md`](docs/practice-receptionist.md) | Simulate answers from your workspace and answers the question asked; more natural browser voice |
 | [`docs/design-a-b-live.md`](docs/design-a-b-live.md) | Real sign-in and real workspace dashboards in Command (A) and Atelier (B); demo as a separate option |
 | [`docs/reception-desk.md`](docs/reception-desk.md) | Receptionist behaviour and tools, booking engine, multi-employee staff desk, dashboards by business type |
+| [`docs/deployment.md`](docs/deployment.md) | Production vs staging isolation, explicit migrations, release and rollback procedures |
 | [`docs/deploy-api-vercel.md`](docs/deploy-api-vercel.md) | Putting the API and database online (Vercel + Neon free tiers) |
 | [`docs/voices.md`](docs/voices.md) | Free on-device Kokoro voices, custom-voice options and licences |
 | [`docs/decisions/ADR-0004-voice-engine.md`](docs/decisions/ADR-0004-voice-engine.md) | Voice framework and provider evaluation (LiveKit Agents, Pipecat, realtime models, open source) |

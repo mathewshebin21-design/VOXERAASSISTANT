@@ -1,0 +1,58 @@
+name: db-migrate
+
+# Run database migrations explicitly against ONE named environment. Manual only.
+# Each GitHub environment holds its own DATABASE_URL_UNPOOLED secret; protect the
+# `production` environment (Settings → Environments) so only the owner can run it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which database
+        type: choice
+        options: [staging, production]
+        required: true
+      action:
+        description: check (no changes), upgrade, claim (first run on a database), downgrade
+        type: choice
+        options: [check, upgrade, claim, downgrade]
+        default: check
+      confirm_host:
+        description: For claim — the database host, typed back exactly
+        required: false
+      downgrade_to:
+        description: For downgrade — the revision to roll back to (e.g. 0006)
+        required: false
+
+concurrency: db-migrate-${{ inputs.environment }}
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen
+      - name: ${{ inputs.action }} ${{ inputs.environment }}
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          ACTION: ${{ inputs.action }}
+          CONFIRM_HOST: ${{ inputs.confirm_host }}
+          DOWNGRADE_TO: ${{ inputs.downgrade_to }}
+        run: |
+          case "$ACTION" in
+            check)     uv run python scripts/migrate.py --env "$ENVIRONMENT" --check ;;
+            upgrade)   uv run python scripts/migrate.py --env "$ENVIRONMENT" ;;
+            claim)     uv run python scripts/migrate.py --env "$ENVIRONMENT" --claim --confirm-host "$CONFIRM_HOST" ;;
+            downgrade) uv run python scripts/migrate.py --env "$ENVIRONMENT" --downgrade-to "$DOWNGRADE_TO" --yes ;;
+          esac

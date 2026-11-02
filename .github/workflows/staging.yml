@@ -1,0 +1,72 @@
+name: staging
+
+# Explicit staging release: migrate the STAGING database, then test the staging site.
+# Runs when the `staging` branch is updated. Production is never touched here
+# (production migrations: workflow `db-migrate`, run by hand; see docs/deployment.md).
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency: staging
+
+permissions:
+  contents: read
+
+env:
+  STAGING_WEB: https://voxera-flow-git-staging-ai-e399.vercel.app
+  STAGING_API: https://voxera-api-git-staging-ai-e399.vercel.app
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen
+      - name: Migrate the staging database (claims it for staging on first run, only if empty)
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.STAGING_DATABASE_URL_UNPOOLED }}
+        run: |
+          if [ -z "$DATABASE_URL_UNPOOLED" ]; then
+            echo "::error::Add the staging database's DATABASE_URL_UNPOOLED as the repository secret STAGING_DATABASE_URL_UNPOOLED"
+            exit 1
+          fi
+          uv run python scripts/migrate.py --env staging --claim-if-empty
+          uv run python scripts/migrate.py --env staging --check
+      - name: Rebuild the staging API now that its database is migrated
+        # Vercel's own build for this push may have run its read-only preflight before the
+        # migration finished (and refused). A deploy hook for voxera-api on the `staging`
+        # branch (Vercel → voxera-api → Settings → Git → Deploy Hooks) rebuilds it.
+        env:
+          HOOK: ${{ secrets.STAGING_API_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$HOOK" ]; then curl -fsS -X POST "$HOOK" > /dev/null && echo "staging API rebuild requested"; else echo "::warning::No STAGING_API_DEPLOY_HOOK secret: redeploy the staging API by hand if its build ran before the migration"; fi
+
+  verify:
+    needs: migrate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
+      - name: Wait for this commit's staging deployments
+        run: node scripts/wait-for-deploy.mjs "$STAGING_API" "$STAGING_WEB" "${GITHUB_SHA::7}"
+      - name: Isolation checks (staging API uses the staging database)
+        run: node scripts/staging-isolation.mjs "$STAGING_API" "$STAGING_WEB"
+      - name: Browser tests against staging (sign-up, sign-in, real data, setup assistant, undo)
+        run: BASE_URL="$STAGING_WEB" node scripts/e2e-designs-live.mjs
+      - name: Demo designs A, B and C
+        run: BASE_URL="$STAGING_WEB" node scripts/e2e.mjs
