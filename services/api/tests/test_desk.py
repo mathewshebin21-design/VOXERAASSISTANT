@@ -295,7 +295,9 @@ def test_ai_can_only_see_and_cancel_the_callers_own_bookings(make_account, live,
         (200, message([("text", {"parts": ["Found it."]})], "end_turn", 500, 5)),
     ]
     ev = events(
-        a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "It's under 07700 900123"}]})
+        a.post(
+            a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "It's under 07700 900123"}]}
+        )
     )
     found = json.loads(next(e for e in ev if e["type"] == "tool")["result"])["appointments"]
     assert [x["ref"] for x in found] == [mine["id"][:8]]
@@ -305,7 +307,9 @@ def test_ai_can_only_see_and_cancel_the_callers_own_bookings(make_account, live,
         (200, message([cancel], "tool_use", 500, 20)),
         (200, message([("text", {"parts": ["Hmm."]})], "end_turn", 500, 5)),
     ]
-    ev = events(a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "Yes, cancel it"}]}))
+    ev = events(
+        a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": "Yes, cancel it"}]})
+    )
     assert next(e for e in ev if e["type"] == "tool")["ok"] is False
     assert {x["status"] for x in a.get(a.o("/appointments?include_cancelled=true")).json()} == {"booked"}
 
