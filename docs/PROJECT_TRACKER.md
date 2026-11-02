@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 18:00 UTC (branch `claude/agent-studio`).
+Last updated: 2026-11-02 19:05 UTC (branch `claude/agent-studio`; this update is local, not pushed).
 
 > **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
@@ -38,8 +38,28 @@ Last updated: 2026-11-02 18:00 UTC (branch `claude/agent-studio`).
 | Agent Studio intermittent failure | **Fixed and pushed** (e0a9dcc test reliability, 273e5f5 app fixes, PR #2). Locally: 7/10 runs passed before the fixes, 20/20 after, then 5/5 with 2 regression checks. CI on 273e5f5: Agent Studio **16/16** in both `live-e2e` runs | local Chromium, GitHub CI |
 | voxera-api preview with no staging database | fails closed: "REFUSING TO DEPLOY: missing database configuration." | Vercel builds of a7ba2f0 and 0318d01 |
 | Production deployment | commit 767c0f2 live | https://voxera-api-two.vercel.app, https://voxera-flow.vercel.app |
-| Staging deployment | **not done**: no staging database yet | — |
+| **Staging verification (run #1)** | ✅ **passed**: migrate ✅, readiness ✅, isolation ✅, staging browser tests 14/14 ✅, demo designs 131/131 ✅ | GitHub Actions run 41502348420 (attempt 2), staging at 94dae66 |
 | Real phone calls, real AI provider, real voice | **never tested** | — |
+
+## Phase 0 log: staging run #1 (2026-11-02, approved "approve staging run")
+- **Branch:** `staging` created at `94dae660d50fc356a53a48f43e2fcd63807e2377` (PR #2's head).
+- **migrate** (18:37–18:38 UTC):
+  - secret present;
+  - target host `ep-raspy-brook-za7ptsba.c-2.eu-west-2.aws.neon.tech`, database `neondb`;
+  - ran 0001→0008, then "database claimed for staging";
+  - check: "claimed for: staging; schema at 0008; code head 0008; pending migrations: none".
+  - Ran once only; the verify re-run reused it.
+- **Deployments:** Vercel did not build the new branch on its own (the commit had already been deployed for `claude/agent-studio`). Both `staging` previews were created by hand, preview target only:
+  - API `dpl_CEjtPzeC6MzYNv3zLZyF38KqMC3y`: "database preflight passed (staging, schema at 0008)", READY;
+  - web `dpl_6LddL7Zny7eZSNGyRjMAHAhpWxN2`: READY.
+- **verify, attempt 1:** failed. The readiness step accepted Vercel's "Deployment is building" page (HTML, HTTP 200), and the isolation script crashed parsing it. No test ran against an unverified deployment.
+  - Fixed locally in commit 1d40bf6 (not pushed, waiting for review).
+- **verify, attempt 2:** ✅
+  - readiness: API serving 94dae66, readyz 200, web 200;
+  - isolation: "Verified staging database marker, web upstream and both deployment commits";
+  - staging browser tests (`e2e-designs-live`): 14/14;
+  - demo designs (`e2e`): 131/131.
+- **Production:** not accessed or changed. No production deployment and no production setting change. voxera-db is still Production-only on voxera-api.
 
 ## Phase 0 log: staging database (2026-11-02)
 **Step 1: current infrastructure (read-only)**
@@ -110,9 +130,9 @@ Safest cleanup, in this order, each needing approval:
 | Explicit migration runner and workflows | 🧪 | `scripts/migrate.py`, `db-migrate.yml`, `staging.yml` |
 | Production database connected to production only | ✅ | Vercel: voxera-db targets `production` only (checked 2026-11-02) |
 | Unused second Neon store disconnected | ✅ | neon-cobalt-flask has no project connections |
-| **Separate staging database for previews** | ❌ | Approved (Free plan, lhr1) but **not created**: the tools in this session can't create Neon stores. Needs a dashboard action (see Phase 0 log). |
+| **Separate staging database for previews** | ✅ | `voxera-staging` (`store_bgUUGFK36oqz4kfJ`, Neon `blue-night-16595257`, Free, lhr1, Auth off) connected to voxera-api for Preview and Development only. voxera-db stays Production only. Created by the owner 2026-11-02. |
 | Old previews holding production credentials | ⚠️ open risk | 8 READY voxera-api previews (PR #1 commits b1adb59…469283d) built while previews had the production database, plus 8 matching voxera-flow previews that call the production API. See Phase 0 log. |
-| Staging verified end to end | ❌ | Blocked on the line above |
+| Staging verified end to end | ✅ | Run #1: database claimed for staging and migrated 0001→0008; API preflight passed (staging, 0008); isolation gate passed; 14/14 + 131/131 browser checks on staging |
 | Deployment and rollback docs | 🧪 | `docs/deployment.md` |
 
 ### Phase 1: Core product (workspace, services, hours, staff, bookings)
