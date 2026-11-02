@@ -24,11 +24,17 @@ BY_VERCEL_ENV = {"production": "production", "preview": "staging", "development"
 def expected() -> str | None:
     """The database environment this deployment requires, or None outside Vercel (local, tests)."""
     explicit = os.environ.get("VOXERA_EXPECT_DB_ENV")
-    if explicit:
-        if explicit not in ENVIRONMENTS:
-            raise ValueError("VOXERA_EXPECT_DB_ENV must be production or staging")
-        return explicit
-    return BY_VERCEL_ENV.get(os.environ.get("VERCEL_ENV", ""))
+    if explicit and explicit not in ENVIRONMENTS:
+        raise ValueError("VOXERA_EXPECT_DB_ENV must be production or staging")
+    vercel_env = os.environ.get("VERCEL_ENV")
+    if vercel_env is None and os.environ.get("VERCEL") != "1":
+        return explicit or None
+    hosted = BY_VERCEL_ENV.get(vercel_env or "")
+    if hosted is None:
+        raise ValueError("Missing or unsupported VERCEL_ENV on hosted deployment")
+    if explicit and explicit != hosted:
+        raise ValueError("VOXERA_EXPECT_DB_ENV conflicts with VERCEL_ENV")
+    return hosted
 
 
 def claimed(conn: Connection) -> str | None:

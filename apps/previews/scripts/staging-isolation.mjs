@@ -1,34 +1,29 @@
-// Checks that staging is isolated from production, from the outside.
-// Usage: node scripts/staging-isolation.mjs <staging-api-url> <staging-web-url>
-const [api, web] = process.argv.slice(2);
-const PRODUCTION_API = "https://voxera-api-two.vercel.app";
-const results = [];
-const check = (name, ok, detail = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
+// A read-only gate for the subsequent browser suite, which creates synthetic accounts.
+import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 
-// 1. The staging API is ready, which it only is when its database is claimed for staging
-//    (app/deploy_env.py refuses every request otherwise).
-const ready = await fetch(`${api}/readyz`);
-check("staging API is ready on a database claimed for staging", ready.status === 200, `HTTP ${ready.status}`);
+export async function verifyStaging(api, web, sha, request = fetch) {
+  assert.equal(api, "https://voxera-api-git-staging-ai-e399.vercel.app", "Unexpected staging API origin");
+  assert.equal(web, "https://voxera-flow-git-staging-ai-e399.vercel.app", "Unexpected staging web origin");
+  assert.match(sha ?? "", /^[a-f0-9]{40}$/, "Full Git commit required");
 
-// 2. The staging web app talks to the staging API, not production: an account created through it
-//    exists on staging, and cannot sign in to production.
-const email = `isolation-${Date.now().toString(36)}@e2e.example`;
-const password = "correct horse battery staple";
-const signup = await fetch(`${web}/api/session/signup`, {
-  method: "POST",
-  headers: { "content-type": "application/json", "x-voxera-csrf": "1" },
-  body: JSON.stringify({ email, password, full_name: "Isolation Check", organization_name: "Isolation Check" }),
-});
-check("sign-up through the staging web app works", signup.ok, `HTTP ${signup.status}`);
-const onStaging = await fetch(`${api}/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
-check("that account exists in the staging API", onStaging.status === 200, `HTTP ${onStaging.status}`);
-const onProduction = await fetch(`${PRODUCTION_API}/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
-check("that account does not exist in production", onProduction.status === 401, `HTTP ${onProduction.status}`);
+  async function read(url) {
+    const response = await request(url, {
+      method: "GET", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10000),
+    });
+    assert.equal(response.status, 200, "Staging identity endpoint unavailable");
+    return response.json();
+  }
 
-// Clean up the test account on staging.
-if (onStaging.ok) {
-  const { access_token: token } = await onStaging.json();
-  const del = await fetch(`${api}/v1/me`, { method: "DELETE", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ password }) });
-  check("test account removed from staging", del.status === 204, `HTTP ${del.status}`);
+  const backend = await read(api + "/staging-identity");
+  assert.equal(backend.environment, "staging", "Runtime database is not marked staging");
+  assert.equal(backend.commit, sha, "Staging API commit differs");
+  const frontend = await read(web + "/api/staging-identity");
+  assert.equal(frontend.commit, sha, "Staging web commit differs");
+  assert.equal(frontend.usesStagingApi, true, "Web session handlers use a different API");
 }
-process.exit(results.every(Boolean) ? 0 : 1);
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await verifyStaging(...process.argv.slice(2));
+  console.log("Verified staging database marker, web upstream and both deployment commits.");
+}

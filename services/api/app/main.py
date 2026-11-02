@@ -108,6 +108,16 @@ def create_app() -> FastAPI:
             log.exception("readiness check failed")
             return JSONResponse({"status": "unavailable"}, status_code=503)
 
+    @app.get("/staging-identity", include_in_schema=False)
+    def staging_identity() -> JSONResponse:
+        if os.getenv("VERCEL_ENV") != "preview" or os.getenv("VERCEL_GIT_COMMIT_REF") != "staging":
+            return JSONResponse({}, status_code=404)
+        with SessionLocal() as session:
+            # Read the marker from the actual runtime connection on every probe.
+            if deploy_env.claimed(session.connection()) != "staging":
+                return JSONResponse({}, status_code=503)
+        return JSONResponse({"commit": os.getenv("VERCEL_GIT_COMMIT_SHA"), "environment": "staging"})
+
     for r in (
         auth.router,
         orgs.router,

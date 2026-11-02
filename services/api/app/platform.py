@@ -58,7 +58,12 @@ def hosted_overrides() -> dict[str, str]:
     }
 
 
-def app_role_password() -> str | None:
+def migration_owner_url() -> str | None:
     direct = _first("DATABASE_URL_UNPOOLED", "POSTGRES_URL_NON_POOLING", "DATABASE_URL", "POSTGRES_URL")
-    pw = unquote(urlsplit(direct).password or "") if direct else ""
+    return _psycopg(direct) if direct and urlsplit(direct).password else None
+
+
+def app_role_password() -> str | None:
+    owner = migration_owner_url()
+    pw = unquote(urlsplit(owner).password or "") if owner else ""
     return derive(pw, "app-role") if pw else None

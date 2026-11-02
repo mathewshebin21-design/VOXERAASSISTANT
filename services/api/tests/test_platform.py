@@ -86,6 +86,24 @@ def tables(eng) -> set[str]:
         return set(c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
 
 
+def test_migration_check_with_only_workflow_secret(fresh_db):
+    env, eng = fresh_db
+    for name in ("DATABASE_URL", "POSTGRES_URL", "POSTGRES_URL_NON_POOLING"):
+        env.pop(name, None)
+    result = run("migrate.py", env, "--env", "staging", "--check")
+    assert result.returncode == 0, result.stdout
+    assert tables(eng) == set()
+
+
+def test_concurrent_migration_refuses_before_claim(fresh_db):
+    env, eng = fresh_db
+    with eng.begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(1448040517, 1)"))
+        result = run("migrate.py", env, "--env", "staging", "--claim-if-empty")
+        assert result.returncode == 3 and "another migration" in result.stdout
+        assert tables(eng) == set()
+
+
 def test_build_never_changes_the_database(fresh_db):
     env, eng = fresh_db
     r = run("vercel_build.py", env | {"VERCEL_ENV": "preview"})
@@ -176,6 +194,31 @@ def test_running_api_refuses_a_database_from_another_environment(monkeypatch, ow
 
 
 def test_build_script_skips_without_database():
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("VOXERA_", "DATABASE_URL", "POSTGRES_URL"))}
+    prefixes = ("VOXERA_", "VERCEL", "DATABASE_URL", "POSTGRES_URL")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(prefixes)}
     r = build(env)
     assert r.returncode == 0 and "skipping the database preflight" in r.stdout
+
+    for hosted in ({"VERCEL_ENV": "preview"}, {"VERCEL_ENV": "production"}):
+        r = build(env | hosted)
+        assert r.returncode == 1 and "missing database configuration" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "variables",
+    [
+        {"VERCEL": "1"},
+        {"VERCEL_ENV": "unknown"},
+        {"VERCEL_ENV": "preview", "VOXERA_EXPECT_DB_ENV": "production"},
+        {"VERCEL_ENV": "production", "VOXERA_EXPECT_DB_ENV": "staging"},
+    ],
+)
+def test_invalid_hosted_identity_never_skips(monkeypatch, variables):
+    from app.deploy_env import expected
+
+    for key in ("VERCEL", "VERCEL_ENV", "VOXERA_EXPECT_DB_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in variables.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(ValueError):
+        expected()
