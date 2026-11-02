@@ -165,6 +165,15 @@ await step("publish runs the tests and makes v1 live", async () => {
   return true;
 });
 
+await step("after publishing, every step is still drawn on the canvas", async () => {
+  // Regression: nodes rebuilt without their measured size were left hidden (blank canvas).
+  await p.waitForFunction(() => {
+    const nodes = [...document.querySelectorAll(".react-flow__node")];
+    return nodes.length >= 15 && nodes.every((n) => getComputedStyle(n).visibility === "visible");
+  }, null, { timeout: 5000 });
+  return true;
+});
+
 await step("a failing test blocks publishing and shows why", async () => {
   const agent = (await call("GET", `/orgs/${orgId}/agents`)).json[0].id;
   const t = await call("POST", `/orgs/${orgId}/agents/${agent}/flow/tests`, { scenario: { name: "Mentions parking", lines: ["is there parking?"], assertions: [{ type: "says", value: "free parking" }] } });
@@ -198,6 +207,19 @@ await step("insights are labelled as simulated and count the test call", async (
   await p.getByText("Simulated conversations (not real callers)").waitFor({ timeout: 10000 });
   await shot(p, "8-insights");
   return (await p.getByTestId("insights-panel").getByText("100% (1/1)").count()) === 1;
+});
+
+await step("a slow save still finishes: the badge reaches 'draft saved' and Publish re-enables", async () => {
+  // Regression: a save slower than the 900 ms debounce left the page on "unsaved" for good.
+  const slow = async (r) => { if (r.request().method() === "PUT") await new Promise((s) => setTimeout(s, 1500)); await r.continue(); };
+  await p.route("**/flow/draft", slow);
+  try {
+    await p.getByRole("tab", { name: "Step" }).click();
+    await p.getByTestId("node-closed").click();
+    await p.getByTestId("inspector").getByLabel("Message").fill("We're closed. Leave a message and we'll call you back.");
+    await draftSaved((d) => closedMessage(d) === "We're closed. Leave a message and we'll call you back.", "slow save");
+    return await p.getByRole("button", { name: "Publish", exact: true }).isEnabled() || "Publish stayed disabled";
+  } finally { await p.unroute("**/flow/draft", slow); }
 });
 
 await step("mobile: the Studio stacks and stays usable", async () => {

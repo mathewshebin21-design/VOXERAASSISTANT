@@ -59,41 +59,53 @@ function Editor({ base, agents, agentId, onAgent, canEdit }: { base: string; age
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const revision = useRef(0);
   const savedDoc = useRef<FlowDoc | null>(null);
+  const latest = useRef<FlowDoc | null>(null);
   const inflight = useRef(false);
+  const conflict = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const s = await api<FlowState>(base);
       setState(s); setHist(history(s.draft)); setValidation(s.validation); setSave("saved");
-      revision.current = s.revision; savedDoc.current = s.draft; setLoadErr(null);
+      revision.current = s.revision; savedDoc.current = s.draft; conflict.current = false; setLoadErr(null);
     } catch (e) { setLoadErr(e instanceof ApiError ? e.detail : "Couldn't load the flow"); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
 
   const flow = hist?.present ?? null;
-  const flash = (kind: "ok" | "error", text: string) => { setToast({ kind, text }); setTimeout(() => setToast(null), 4000); };
+  latest.current = flow;
+  const flash = useCallback((kind: "ok" | "error", text: string) => { setToast({ kind, text }); setTimeout(() => setToast(null), 4000); }, []);
   const edit = useCallback((next: FlowDoc) => setHist((h) => (h ? commit(h, next) : h)), []);
 
-  // Autosave: one request at a time, debounced, with the revision we last saw.
+  // Autosave: one request at a time, always sending the newest draft with the revision we last saw.
+  // A save that finishes while newer edits are waiting sends them straight away, so an edit is
+  // never dropped and the badge only says "draft saved" once the newest draft is stored.
+  const flush = useCallback(async () => {
+    if (inflight.current || conflict.current) return; // the save in flight picks up newer edits when it finishes
+    const sending = latest.current;
+    if (!sending || sending === savedDoc.current) return;
+    inflight.current = true; setSave("saving");
+    try {
+      const r = await api<{ revision: number; validation: Validation }>(`${base}/draft`, { method: "PUT", body: { graph: sending, base_revision: revision.current } });
+      revision.current = r.revision; savedDoc.current = sending; setValidation(r.validation);
+      setState((s) => (s ? { ...s, revision: r.revision, draft_differs: true } : s));
+    } catch (e) {
+      inflight.current = false;
+      if (e instanceof ApiError && e.status === 409) { conflict.current = true; setSave("conflict"); }
+      else { setSave("error"); flash("error", e instanceof ApiError ? e.detail : "Couldn't save — check your connection"); }
+      return;
+    }
+    inflight.current = false;
+    if (latest.current !== savedDoc.current) void flush();
+    else setSave("saved");
+  }, [base, flash]);
+
   useEffect(() => {
-    if (!flow || !canEdit || flow === savedDoc.current || save === "conflict") return;
+    if (!flow || !canEdit || flow === savedDoc.current || conflict.current) return;
     setSave("dirty");
-    const t = setTimeout(async () => {
-      if (inflight.current) return;
-      inflight.current = true; setSave("saving");
-      const sending = flow;
-      try {
-        const r = await api<{ revision: number; validation: Validation }>(`${base}/draft`, { method: "PUT", body: { graph: sending, base_revision: revision.current } });
-        revision.current = r.revision; savedDoc.current = sending; setValidation(r.validation);
-        setState((s) => (s ? { ...s, revision: r.revision, draft_differs: true } : s));
-        setSave((cur) => (cur === "saving" ? "saved" : cur));
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 409) setSave("conflict");
-        else { setSave("error"); flash("error", e instanceof ApiError ? e.detail : "Couldn't save — check your connection"); }
-      } finally { inflight.current = false; }
-    }, 900);
+    const t = setTimeout(() => void flush(), 900);
     return () => clearTimeout(t);
-  }, [flow, base, canEdit, save]);
+  }, [flow, canEdit, flush]);
 
   const node = sel?.kind === "node" ? flow?.nodes.find((n) => n.id === sel.id) ?? null : null;
   const deleteSelected = useCallback(() => {
@@ -104,7 +116,7 @@ function Editor({ base, agents, agentId, onAgent, canEdit }: { base: string; age
       edit(removeNode(flow, sel.id));
     }
     setSel(null);
-  }, [flow, sel, canEdit, edit]);
+  }, [flow, sel, canEdit, edit, flash]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

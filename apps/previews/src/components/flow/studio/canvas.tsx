@@ -89,6 +89,10 @@ export interface CanvasProps {
 function Inner({ flow, selected, onSelect, onChange, onAdd, onError, issues, active, visited = [], readOnly }: CanvasProps) {
   const rf = useReactFlow();
   const [drag, setDrag] = useState<Record<string, { x: number; y: number }>>({});
+  // React Flow reports each node's measured size through onNodesChange. Node objects are rebuilt
+  // on every render here, so the sizes must be passed back in; a node without `measured` is
+  // treated as new and stays hidden until React Flow happens to measure it again.
+  const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({});
   const worst = useMemo(() => {
     const m: Record<string, "error" | "warning"> = {};
     for (const i of issues) if (i.node_id && m[i.node_id] !== "error") m[i.node_id] = i.severity;
@@ -99,7 +103,8 @@ function Inner({ flow, selected, onSelect, onChange, onAdd, onError, issues, act
     id: n.id, type: "studio", position: drag[n.id] ?? n.position, deletable: !readOnly && n.type !== "start",
     data: { flow, id: n.id, selected: n.id === selected, active: n.id === active, visited: visited.includes(n.id), issue: worst[n.id] ?? null },
     selected: n.id === selected,
-  })), [flow, drag, selected, active, visited, worst, readOnly]);
+    ...(sizes[n.id] ? { measured: sizes[n.id] } : {}),
+  })), [flow, drag, sizes, selected, active, visited, worst, readOnly]);
 
   const edges = useMemo<Edge[]>(() => flow.edges.map((e) => {
     const hot = visited.includes(e.source) && (visited.includes(e.target) || e.target === active);
@@ -117,6 +122,10 @@ function Inner({ flow, selected, onSelect, onChange, onAdd, onError, issues, act
   const onNodesChange = useCallback((changes: NodeChange<Node<NData>>[]) => {
     for (const c of changes) {
       if (c.type === "position" && c.position) setDrag((d) => ({ ...d, [c.id]: c.position! }));
+      else if (c.type === "dimensions" && c.dimensions) {
+        const size = c.dimensions;
+        setSizes((s) => (s[c.id]?.width === size.width && s[c.id]?.height === size.height ? s : { ...s, [c.id]: size }));
+      }
     }
   }, []);
 
