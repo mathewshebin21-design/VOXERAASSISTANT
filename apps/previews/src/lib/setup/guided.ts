@@ -13,6 +13,8 @@ import {
   DAY_NAMES, describeDay, describeWeek, isSkip, isYes, parseAddress, parseCount, parseHours, parsePhone, parseSector,
   parseServices, yesBut, type ParsedService, type Week,
 } from "./parse";
+import { describePlan, interpret, reverseLine, type Change, type Saved, type Topic } from "./commands";
+import { findService, key } from "./match";
 import { templateFor, type BusinessTemplate } from "./templates";
 
 export const STEPS = ["type", "phone", "address", "hours", "services", "capacity", "receptionist", "done"] as const;
@@ -38,7 +40,9 @@ export type SetupAction =
   /** `description` (house policies from a template) is saved only if the business has none yet. */
   | { type: "services"; services: ServiceDraft[]; description?: string }
   | { type: "capacity"; capacity: number }
-  | { type: "agent"; name: string; greeting: string };
+  | { type: "agent"; name: string; greeting: string }
+  /** Changes to what's already saved, asked for in the owner's own words (see ./commands). */
+  | { type: "changes"; changes: Change[] };
 
 export interface GuidedState {
   step: StepId;
@@ -46,14 +50,21 @@ export interface GuidedState {
   /** The business type, once known: it unlocks that type's ready-made template. */
   sector?: string | null;
   pending: { kind: "hours"; week: Week } | { kind: "services"; services: ServiceDraft[]; description?: string } | null;
+  /** What's saved in the workspace now, refreshed by the UI before each message. */
+  saved?: Saved;
+  /** How to reverse the last change made from a request, for “undo”. */
+  undo?: { changes: Change[]; done: string[] } | null;
 }
 
-export interface Turn { state: GuidedState; say: string[]; action?: SetupAction }
+/** `stay`: after the action, keep asking the current question rather than moving on. */
+export interface Turn { state: GuidedState; say: string[]; action?: SetupAction; stay?: boolean }
 
 const DEFAULT_MINUTES = 30;
 const USE_TEMPLATE = /^\s*(?:yes,?\s+)?(?:please\s+)?(?:use|load|start from|go with)?\s*(?:the\s+|a\s+|your\s+)?(?:template|standard|default|typical|ready-?made)\b/i;
 const QUESTION = /^\s*(what(?! about)|why|how(?! about)|who|which|where|when|can|could|do|does|is|are|should|will|would|help|explain|i don'?t (understand|get|know)|not sure|confused|huh|eh)\b|\?\s*$/i;
 const BACK = /^\s*(?:go\s+)?back(?:\s+(?:one|a step))?\s*$|^\s*(previous( step)?|undo|last (step|question))\s*$/i;
+const UNDO = /^\s*(?:please\s+)?(?:undo(?: that| it| the last (?:one|change))?|change it back|put it back|revert(?: that| it)?|go back to how it was|cancel that( change)?)\s*[.!]?\s*$/i;
+const NEXT = /^\s*(next|continue|carry on|move on|keep going|that'?s (?:it|all|everything)|nothing else|all done|done)\s*[.!]?\s*$/i;
 const RESTART = /^\s*(start (again|over|from scratch)|restart|from the (start|beginning)|begin again)\b/i;
 const JUMP = /\b(?:go back to|back to|change|edit|redo|update|fix|go to)\s+(?:the\s+|my\s+|our\s+)?(business type|type of business|type|phone( number)?|number|address|opening hours|hours|times|services|service list|menu|price list|capacity|chairs|receptionist( name)?)\b/i;
 const JUMP_TO: [RegExp, StepId][] = [
@@ -92,7 +103,7 @@ const HELP: Record<StepId, string> = {
   services: "These are the things callers can book. The length tells the booking engine how much time to block; the price is a “from” price the receptionist can quote. If you give a range (£18–£25) I'll use the lowest as the starting price. Before saving you can say “remove kids cut”, “add beard dye 20 min £15” or “skin fade £25”.",
   capacity: "This is how many appointments can run at the same moment — usually the number of staff working (or chairs, if there are fewer). With 2 barbers on, two customers can be booked for 10am, but not three.",
   receptionist: "This is the name the AI uses when it answers: “Hi, I'm Ava, the AI receptionist”. Callers are always told they're speaking to an AI, as UK rules expect. Pick any short name.",
-  done: "Setup is finished. You can say “change the hours”, “edit services” or “go back” to change anything, or edit it in Workspace.",
+  done: "Setup is finished, but you can change anything just by telling me: “skin fade is now £25”, “remove head shave”, “we close at 6 on Wednesdays”, “we've hired another barber”, “rename the receptionist to Sam”, “tell callers we have free parking”. I'll do it straight away and you can say “undo”.",
 };
 
 export function next(step: StepId, skip: ReadonlySet<StepId> = new Set()): StepId {
@@ -102,34 +113,6 @@ export function next(step: StepId, skip: ReadonlySet<StepId> = new Set()): StepI
 }
 
 // ---- services: matching names, showing lists, editing before save ----
-
-/** Comparable form of a service name: "Kids' Cuts & Shapes" ≈ "kid cut and shape". */
-const key = (s: string) =>
-  s.toLowerCase().replace(/&/g, " and ").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean)
-    .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)).join(" ");
-
-/**
- * Indexes of the services a name refers to: an exact match; else the same name ignoring a
- * bracketed note; else every service whose name (not its bracketed note) has all the words
- * typed, in order ("hot towel shave" → "Hot towel cut-throat shave").
- */
-export function findService(name: string, list: { name: string }[]): number[] {
-  const k = key(name);
-  if (!k) return [];
-  const exact = list.flatMap((s, i) => (key(s.name) === k ? [i] : []));
-  if (exact.length) return exact;
-  // "kids cut" → "Kids' cut (under 12)": the same name once the bracketed note is ignored.
-  const bare = list.flatMap((s, i) => (key(s.name.replace(/\([^)]*\)/g, " ")) === k ? [i] : []));
-  if (bare.length) return bare;
-  const words = k.split(" ");
-  const inOrder = (name: string) => {
-    const ws = key(name.replace(/\([^)]*\)/g, " ")).split(" ");
-    let at = 0;
-    for (const w of words) { at = ws.indexOf(w, at); if (at < 0) return false; at++; }
-    return true;
-  };
-  return list.flatMap((s, i) => (inOrder(s.name) ? [i] : []));
-}
 
 const describeService = (s: ServiceDraft, note = "") =>
   `• ${s.name} — ${s.duration_min} min${note}${s.price_from_pence === null ? ", no price" : s.price_from_pence === 0 ? ", free" : `, from ${gbp(s.price_from_pence)}`}${s.requires_patch_test ? ", needs a patch test" : ""}`;
@@ -283,8 +266,48 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
   if (!text) return { state, say: [ask()] };
   const tpl = templateFor(state.sector);
 
-  // Getting around: restart, back, or jump to a named step.
   if (RESTART.test(text)) return goTo("type", "Sure — let's start from the top. Anything already saved stays saved until you change it.");
+  if (UNDO.test(text)) {
+    if (!state.undo) return { state, say: ["There's nothing to undo — I only undo changes you asked me to make in this chat."], stay: true };
+    return { state: { ...state, undo: null }, say: [`Put back:${state.undo.done.length === 1 ? ` ${state.undo.done[0]}` : `\n${state.undo.done.map((d) => (d.startsWith("  ") ? d : `• ${d}`)).join("\n")}`}`], action: { type: "changes", changes: state.undo.changes }, stay: true };
+  }
+  if (state.pending && isYes(text)) {
+    if (state.pending.kind === "hours") return move(["Saving your opening hours…"], { type: "hours", week: state.pending.week });
+    const { services, description } = state.pending;
+    return move([`Saving ${plural(services.length, "service")}…`], { type: "services", services, ...(description ? { description } : {}) });
+  }
+
+  // "Skin fade is now £25", "we're closed on Mondays", "our new number is …": done straight away,
+  // at any point. While a step is waiting for its own first answer (or a shown list or week is
+  // waiting for a yes), messages about that same thing go to the step instead.
+  const cmd = state.saved ? interpret(text, state.saved, state.sector) : null;
+  if (cmd && state.saved) {
+    const topic: Topic = "plan" in cmd ? cmd.plan.topic : cmd.topic;
+    const onStep = topic === state.step;
+    const s = state.saved;
+    const hasSaved: Record<Topic, boolean> = {
+      hours: s.week.some((d) => d.length), services: s.services.length > 0, phone: !!s.phone, address: !!(s.city || s.address_line1),
+      capacity: s.capacity > 1, receptionist: !!s.receptionist, policies: true,
+    };
+    // The answer to the question being asked wins: "we're a barbers with 3 chairs" at the
+    // business-type question is the business type.
+    const answersStep =
+      (state.step === "type" && parseSector(text) !== null) ||
+      (state.step === "capacity" && !parsePhone(text) && (parseCount(text) ?? 0) >= 1 && (parseCount(text) ?? 0) <= 50) ||
+      (state.step === "address" && !!parseAddress(text).postcode && topic !== "phone");
+    if (!answersStep && (state.step === "done" || !onStep || (!state.pending && hasSaved[topic]))) {
+      const stay = !onStep || state.step === "done";
+      const again = stay && state.step !== "done" ? [state.pending ? "Now, back to the list above — shall I save it? (yes, or tell me what to change)" : ask()] : [];
+      if ("ask" in cmd) return { state, say: [cmd.ask, ...again], stay: true };
+      return { state: { ...state, undo: { changes: cmd.plan.undo, done: cmd.plan.done.map(reverseLine) } }, say: [...describePlan(cmd.plan), ...again], action: { type: "changes", changes: cmd.plan.changes }, stay };
+    }
+  }
+
+  // Getting around: back, next, or jump to a named step.
+  if (NEXT.test(text) && state.step !== "done" && !state.pending) {
+    const step = next(state.step, skip);
+    return { state: { ...state, step, pending: null }, say: [ask(step)] };
+  }
   if (BACK.test(text)) {
     const i = Math.max(0, STEPS.indexOf(state.step) - 1);
     return goTo(STEPS[i], `OK, back to ${STEP_LABEL[STEPS[i]].toLowerCase()}.`);
@@ -293,12 +316,7 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
   const target = jump ? JUMP_TO.find(([re]) => re.test(jump[1].toLowerCase()))?.[1] : undefined;
   if (target && target !== state.step) return goTo(target, `OK, let's change the ${STEP_LABEL[target].toLowerCase()}.`);
 
-  // A pending interpretation waits for a yes; anything else is a correction or a new answer.
-  if (state.pending && isYes(text)) {
-    if (state.pending.kind === "hours") return move(["Saving your opening hours…"], { type: "hours", week: state.pending.week });
-    const { services, description } = state.pending;
-    return move([`Saving ${plural(services.length, "service")}…`], { type: "services", services, ...(description ? { description } : {}) });
-  }
+  // A pending interpretation that isn't a yes is a correction or a new answer (below).
   if (isSkip(text) && state.step !== "done") {
     const step = next(state.step, skip);
     return { state: { ...state, step, pending: null }, say: ["No problem — you can add that later.", ask(step)] };
@@ -306,7 +324,7 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
   if (/^\s*(no|nope|nah|wrong|that'?s wrong|not right|not quite)\s*[.!]?\s*$/i.test(text)) {
     return { state, say: [state.pending ? "No problem — tell me what to change, or type it again." : `No problem. ${ask()}`] };
   }
-  const help = (): Turn => ({ state, say: [HELP[state.step], ask()] });
+  const help = (): Turn => ({ state, say: state.step === "done" ? [HELP.done] : [HELP[state.step], ask()] });
   if (QUESTION.test(text) && (state.step === "receptionist" || state.step === "capacity" || state.step === "done" || state.step === "type")) {
     if (!(state.step === "type" && parseSector(text)) && !(state.step === "capacity" && parseCount(text) !== null)) return help();
   }
@@ -400,7 +418,7 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
       return move([`Lovely — meet ${pretty}. Their greeting: “${greeting}”`], { type: "agent", name: pretty, greeting });
     }
     case "done":
-      return { state, say: ["You're all set up. You can say “change the hours”, “edit services” or “go back”, or edit anything in Workspace."] };
+      return orHelp({ state, say: ["I didn't catch a change in that. Just tell me what you'd like — e.g. “skin fade is now £25”, “we're closed on Mondays”, “add beard dye 20 min £15”, “our new number is …” — and I'll do it."] });
   }
 }
 
@@ -408,7 +426,8 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
 export function advance(state: GuidedState, skip: ReadonlySet<StepId> = new Set()): Turn {
   const step = next(state.step, skip);
   const say = step === "done"
-    ? ["🎉 That's the essentials done. Next: go Available on the Desk so transferred callers reach you, invite your team, and try a test call in the Voice lab."]
+    ? ["🎉 That's the essentials done. Next: go Available on the Desk so transferred callers reach you, invite your team, and try a test call in the Voice lab.",
+      "Need to change something later? Just tell me here in your own words — “skin fade is now £25”, “we're closed on Mondays”, “add beard dye 20 min £15” — and I'll do it."]
     : [prompt(step, state.businessName, state.sector)];
   return { state: { ...state, step, pending: null }, say };
 }

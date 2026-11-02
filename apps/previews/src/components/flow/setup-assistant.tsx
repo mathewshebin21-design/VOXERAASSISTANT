@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chip, FBtn, Glass, GHead } from "./ui";
 import { api, ApiError, type Agent, type BusinessProfile, type HoursInterval, type Service, type WorkspaceSettings } from "@/lib/live/api";
+import { savedFrom, type Change } from "@/lib/setup/commands";
 import { advance, prompt, reply, STEP_LABEL, STEPS, type GuidedState, type SetupAction, type StepId } from "@/lib/setup/guided";
 
 type Line = { id: number; from: "assistant" | "you" | "saved" | "error"; text: string };
@@ -14,6 +15,8 @@ interface Snapshot { profile: BusinessProfile; hours: HoursInterval[]; services:
 const TOOL_LABEL: Record<string, string> = {
   get_setup_state: "Checked what's set up", update_business_details: "Saved business details", set_opening_hours: "Saved opening hours",
   add_services: "Saved services", set_booking_capacity: "Saved capacity", create_receptionist: "Created your receptionist",
+  update_service: "Updated a service", remove_services: "Removed services", update_receptionist: "Updated your receptionist",
+  get_business_template: "Looked up the template",
 };
 
 function doneSteps(s: Snapshot | null): Set<StepId> {
@@ -105,24 +108,81 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
       case "agent":
         await api(`${base}/agents`, { method: "POST", body: { name: a.name, greeting: a.greeting } });
         return `${a.name} created`;
+      case "changes":
+        for (const c of a.changes) await applyChange(c);
+        return "Saved to your workspace";
+    }
+  };
+
+  /** One change asked for in the owner's words. Services are found by their current name. */
+  const applyChange = async (c: Change) => {
+    const services = () => api<Service[]>(`${base}/services`);
+    const byName = (list: Service[], name: string) => list.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    switch (c.kind) {
+      case "hours":
+        await api(`${base}/office-hours`, { method: "PUT", body: { intervals: c.week.flatMap((periods, weekday) => periods.map((p) => ({ weekday, opens_at: p.opens, closes_at: p.closes }))) } });
+        return;
+      case "service_update": {
+        const s = byName(await services(), c.name);
+        if (!s) throw new Error(`I couldn't find ${c.name} any more — it may have been changed in Workspace.`);
+        await api(`${base}/services/${s.id}`, { method: "PATCH", body: c.patch });
+        return;
+      }
+      case "service_remove": {
+        const list = await services();
+        for (const n of c.names) { const s = byName(list, n); if (s) await api(`${base}/services/${s.id}`, { method: "DELETE" }); }
+        return;
+      }
+      case "service_add":
+        for (const s of c.services) {
+          try { await api(`${base}/services`, { method: "POST", body: { name: s.name, duration_min: s.duration_min, price_from_pence: s.price_from_pence, category: s.category, buffer_min: s.buffer_min, requires_patch_test: s.requires_patch_test } }); }
+          catch (e) { if (!(e instanceof ApiError && e.status === 409)) throw e; }
+        }
+        return;
+      case "profile": {
+        const p = await api<BusinessProfile>(`${base}/business-profile`);
+        await api(`${base}/business-profile`, { method: "PUT", body: { ...p, ...c.patch } });
+        return;
+      }
+      case "capacity":
+        await api(`${base}/settings`, { method: "PATCH", body: { booking_capacity: c.capacity } });
+        return;
+      case "receptionist": {
+        const [agent] = await api<Agent[]>(`${base}/agents`);
+        if (!agent) throw new Error("There's no receptionist to change yet.");
+        await api(`${base}/agents/${agent.id}`, { method: "PATCH", body: c.patch });
+        return;
+      }
     }
   };
 
   const sendGuided = async (input: string) => {
     if (!guided || !snap) return;
     const skip = doneSteps(snap);
-    const t = reply(guided, input, skip);
-    t.say.forEach((m) => say("assistant", m));
-    if (!t.action) { setGuided(t.state); return; }
+    const t = reply({ ...guided, saved: savedFrom(snap) }, input, skip);
+    if (!t.action) { t.say.forEach((m) => say("assistant", m)); setGuided(t.state); return; }
+    // For a change to what's saved, say what was done only once it has been saved.
+    const [first, ...rest] = t.stay ? t.say : [];
+    if (!t.stay) t.say.forEach((m) => say("assistant", m));
     try {
-      say("saved", `✓ ${await perform(t.action)}`);
+      const saved = await perform(t.action);
       const s = await load();
+      if (t.stay) {
+        say("assistant", first);
+        say("saved", `✓ ${saved}`);
+        rest.forEach((m) => say("assistant", m));
+        setGuided({ ...t.state, saved: savedFrom(s) });
+        return;
+      }
+      say("saved", `✓ ${saved}`);
       const n = advance(t.state, doneSteps(s));
       setGuided(n.state);
       n.say.forEach((m) => say("assistant", m));
     } catch (e) {
-      say("error", e instanceof ApiError ? `Couldn't save that: ${e.detail}` : "Couldn't save that — please try again.");
-      setGuided({ ...t.state, pending: null });
+      const why = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "please try again";
+      say("error", `Couldn't save that: ${why}`);
+      await load().catch(() => null);
+      setGuided({ ...t.state, pending: t.stay ? t.state.pending : null, undo: t.stay ? guided.undo : t.state.undo });
     }
   };
 
@@ -202,7 +262,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
         <form onSubmit={(e) => { e.preventDefault(); void send(text); }} className="flex items-end gap-2 border-t border-flw-line/70 p-3">
           <textarea aria-label="Your answer" rows={guided?.step === "services" || guided?.step === "hours" ? 3 : 1} value={text} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && guided?.step !== "services") { e.preventDefault(); void send(text); } }}
-            placeholder={mode === "ai" ? "Tell the assistant about your business…" : guided?.step === "services" ? "One service per line, then press Send" : "Type your answer…"}
+            placeholder={mode === "ai" ? "Tell the assistant about your business, or what to change…" : guided?.step === "services" ? "One service per line, then press Send" : guided?.step === "done" ? "Tell me what to change — e.g. “skin fade is now £25”" : "Type your answer, or tell me what to change…"}
             className="min-w-0 flex-1 resize-none rounded-xl border border-flw-line bg-flw-bg/70 px-3 py-2 text-sm outline-none focus:border-flw-cyan" />
           <FBtn type="submit" variant="glow" aria-label="Send" disabled={busy || !text.trim()}><Send size={14} /></FBtn>
         </form>
@@ -220,7 +280,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
         </ul>
         <div className="space-y-1.5 border-t border-flw-line/70 p-4 text-xs text-flw-mute">
           <p className="flex items-center gap-1.5"><Sparkles size={12} /> {aiAvailable ? "Claude can take free-form answers." : "Free guided mode. With a Claude key on the server, the assistant also understands free-form chat."}</p>
-          <p>Everything is saved straight to your workspace. Edit any time in <Link href="/flow/app/workspace" className="text-flw-cyan hover:underline">Workspace</Link>.</p>
+          <p>Everything is saved straight to your workspace. To change something later, just tell the assistant (“we&rsquo;re closed on Mondays now”) and say “undo” if it&rsquo;s wrong — or edit it in <Link href="/flow/app/workspace" className="text-flw-cyan hover:underline">Workspace</Link>.</p>
         </div>
       </Glass>
     </div>

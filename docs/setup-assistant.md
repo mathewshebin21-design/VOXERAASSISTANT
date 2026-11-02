@@ -67,6 +67,37 @@ The Claude agent gets the same rules in its instructions, plus `update_service` 
 
 Tests: `apps/previews/src/lib/setup/parse.test.ts` and `guided.test.ts` hold each of these phrasings and conversations; `services/api/tests/test_setup_assistant.py` covers the agent's tools.
 
+## Just tell it what you want
+
+Owners don't have to find the right step or a settings page. At any point, during setup or long after it, they can type what they want changed. The assistant changes the saved workspace straight away, says exactly what changed (before → after), and **"undo"** puts it back.
+
+| Owner says | What happens |
+|---|---|
+| "skin fade is now £25", "change the price of the hot towel shave to £24", "make kids cut 20 minutes" | That one service is updated |
+| "put all prices up by £2", "increase all haircuts by 10%" | Every priced service (or one category) changes, with each new price listed |
+| "we don't do perms anymore", "remove head shave and beard colour" | Those services are removed |
+| "add beard dye 20 min £15", "we now offer eyebrow threading £7" | A service is added (a missing length uses the template's typical time, or 30 minutes, and says so) |
+| "rename line-up / edge-up to Shape up" | Renamed |
+| "we're closed on Mondays now", "change Saturday to 9-5", "Friday 9-12 and 1-7" | Only those days change |
+| "we close at 6 on Wednesdays", "we open at 10 on Saturdays", "open till 9 on Thursdays" | Only that end of those days moves |
+| "our new number is 07700 900123", "we've moved to 12 High Street, Leeds, LS1 4DJ" | Phone or address updated |
+| "we have 3 barbers now", "we hired another barber", "one of the barbers left" | Capacity 3; +1; −1 |
+| "rename the receptionist to Sam", "change the greeting to …" | Name updated (and in the greeting); a greeting without an AI disclosure gets one added, and the owner is told why |
+| "tell callers we have free parking", "we're closed on bank holidays" | A sentence is added to the description the receptionist answers from; what's already there is kept |
+
+It asks instead of guessing when a request could mean two things: "fade £26" when there are four fades, "we close at 5" with no days, "open till 9 on Mondays" when Monday is closed, or a service name it can't find (it lists what there is).
+
+How it fits around the step-by-step questions:
+
+- A change about something else is made, then the current question is asked again. A list or week waiting for a yes stays waiting.
+- The answer to the question being asked wins: "we're a barbers with 3 chairs" at the business-type question sets the business type.
+- Back at the hours step with hours already saved, "Saturday 9-5" changes Saturday only and keeps the rest of the week. This was the limitation in the previous version.
+- After setup, "what can I change?" lists examples, and anything it doesn't catch gets a hint on how to ask.
+
+The logic is in `apps/previews/src/lib/setup/commands.ts`, which reads a request against the saved workspace and returns the changes plus their exact reverse for undo. The setup screen applies them through the normal API (services are found by their current name), and `commands.test.ts` covers each phrasing above.
+
+The Claude mode works the same way: its instructions say to make requested changes straight away with before → after, undo on request, append to the description rather than replace it, and ask only when a request is ambiguous. A new `update_receptionist` tool renames the receptionist or changes its greeting (still checked for the AI disclosure) instead of creating a second one.
+
 ## Verification (2026-11-01)
 - **Unit tests: 97.**
   - 34 for the parsers: days, time ranges ("9-5", "1-5pm", "9 to noon"), weekly hours with overrides and closed days, services ("1h30", "3 hours", "£75.50", patch test), UK phone and postcode, business type, yes and skip.

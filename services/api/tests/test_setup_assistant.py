@@ -194,3 +194,16 @@ def test_barbershop_is_a_business_type():
     assert "barbershop" in setup_agent.SECTORS
     assert "barbershop" in json.dumps(setup_agent.TOOLS)
     assert setup_agent.template("../secrets") is None
+
+
+def test_update_receptionist(tool):
+    a = tool.account
+    ok, out = tool("update_receptionist", name="Sam", greeting=None)
+    assert not ok and "create_receptionist" in out["error"]
+    assert tool("create_receptionist", name="Ava", greeting="Hello, I'm Ava, the AI receptionist at EW Saloon.")[0]
+    ok, out = tool("update_receptionist", name="Sam", greeting="Hello, I'm Sam, the AI receptionist at EW Saloon.")
+    assert ok and out["before"] == {"name": "Ava", "greeting": "Hello, I'm Ava, the AI receptionist at EW Saloon."}
+    ok, out = tool("update_receptionist", name=None, greeting="Hello, thanks for calling EW Saloon!")
+    assert not ok and "greeting" in out["error"]  # must still disclose it's an AI
+    assert [x["name"] for x in a.get(a.o("/agents")).json()] == ["Sam"]
+    assert not tool("update_receptionist", name=None, greeting=None)[0]

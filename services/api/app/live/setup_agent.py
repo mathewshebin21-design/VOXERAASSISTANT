@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from .. import audit
 from ..models import Agent, BusinessProfile, OfficeHours, Service, WorkspaceSettings
-from ..schemas import AgentIn, BusinessProfileIO, HoursIn, ServiceIn, ServicePatch
+from ..schemas import AgentIn, AgentPatch, BusinessProfileIO, HoursIn, ServiceIn, ServicePatch
 
 SECTORS = [
     "hair_beauty",
@@ -44,6 +44,7 @@ def template(sector: str) -> dict | None:
 
 
 def system_prompt(business_name: str) -> str:
+    # The noqa on the closing line: S608 mistakes this English ("update … set") for SQL.
     return f"""You are the VOXERA setup assistant, helping the owner of {business_name} get their AI phone \
 receptionist ready. You are friendly, calm and brief: plain sentences, no jargon, one question at a time.
 
@@ -81,8 +82,18 @@ hours with set_opening_hours, services with add_services (keep each service's ca
 template's policies with update_business_details as the description — but only if they have no description yet, \
 or they agree to replace it.
 
+Owners can ask for changes at any time, during setup or long after it: "skin fade is now £25", "we're closed on \
+Mondays now", "we've hired another barber", "rename the receptionist to Sam", "tell callers we have free parking". \
+Just do it: check get_setup_state for the current values, make the change with the right tool straight away \
+(don't ask "shall I?"), then say exactly what changed as before → after, e.g. "Skin fade: £24 → £25". If they say \
+"undo" or "change it back", put the previous values back the same way. Only ask first when the request could \
+mean more than one thing (several services match, or no days were given for "we close at 6"). For "put all prices \
+up £2" or "10% on haircuts", call update_service for each service affected and list the new prices. To add \
+something callers should be told, append a sentence to the existing description — never replace what's there. \
+Renaming the receptionist uses update_receptionist (its greeting keeps saying it's an AI); never create a second one.
+
 When everything is set, say so and suggest the next steps: go Available on the Desk, invite the team on the \
-Team page, and try a test call in the Voice lab. Only help with setting up this workspace."""
+Team page, and try a test call in the Voice lab. Only help with setting up and running this workspace's setup."""  # noqa: S608
 
 
 def _obj(props: dict) -> dict:
@@ -188,6 +199,12 @@ TOOLS = [
         "create_receptionist",
         "Create the AI receptionist. The greeting must say it is an AI receptionist.",
         _obj({"name": {"type": "string"}, "greeting": {"type": "string"}}),
+    ),
+    _tool(
+        "update_receptionist",
+        "Rename the existing receptionist or change its greeting. Pass null for anything not being changed. "
+        "The greeting must still say it is an AI receptionist.",
+        _obj({"name": NS, "greeting": NS}),
     ),
 ]
 
@@ -491,6 +508,31 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             db.commit()
             ctx.writes += 1
             return True, json.dumps({"created": a.name})
+
+        if name == "update_receptionist":
+            a = db.scalars(select(Agent).where(Agent.organization_id == ctx.org_id).order_by(Agent.created_at)).first()
+            if a is None:
+                return _err("there is no receptionist yet: use create_receptionist")
+            changes = AgentPatch.model_validate(
+                {k: v for k, v in {"name": args.get("name"), "greeting": args.get("greeting")}.items() if v}
+            ).model_dump(exclude_unset=True)
+            if not changes:
+                return _err("nothing to change: give a new name or greeting")
+            before = {k: getattr(a, k) for k in changes}
+            for k, v in changes.items():
+                setattr(a, k, v)
+            audit.record(
+                db,
+                ctx.org_id,
+                ctx.user_id,
+                "agent.updated",
+                "agent",
+                a.id,
+                {"fields": sorted(changes), "via": "setup_assistant"},
+            )
+            db.commit()
+            ctx.writes += 1
+            return True, json.dumps({"before": before, "after": changes})
 
         return _err(f"unknown tool {name}")
     except ValidationError as e:
