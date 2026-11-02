@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 19:30 UTC (branch `claude/agent-studio`; this update is local, not pushed).
+Last updated: 2026-11-02 19:45 UTC (branch `claude/agent-studio`; this update is local, not pushed).
 
 > **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
@@ -55,6 +55,37 @@ Last updated: 2026-11-02 19:30 UTC (branch `claude/agent-studio`; this update is
 
 - **Evidence:** 78/78 negative and compatibility checks on disposable databases; PR #2 CI 6/6 at `41a4a13`; staging run 41502348420 green.
 - **To close:** delete the 16 historical previews (owner approval). Confirm Deployment Protection. Rotate voxera-db's password after PR #1 is live.
+
+### Phase 0 final cleanup (2026-11-02, owner approval "PHASE 0 FINAL CLEANUP")
+- **Docs pushed:** `23ec727` and `cf1ab39` (docs only, no secrets). PR #2 head `cf1ab39`. No GitHub workflow triggered (path filters). Last code CI: 6/6 green at `41a4a13`.
+- **Deletion: NOT DONE.** No tool in this session can delete Vercel deployments (only in-progress builds can be cancelled). These 16 READY previews are verified historical and safe to delete in the dashboard:
+
+| Project | Deployment | Commit (branch `claude/stoic-davinci-vvk3jg`) | Alias |
+|---|---|---|---|
+| voxera-api | dpl_D8WTbbLe4LqUfqRKVoyZGZTAqPjG | b1adb59 | none |
+| voxera-api | dpl_AzTGn3nnrj3AoH8YDYLEZsLRHcRW | 1b6ed70 | none |
+| voxera-api | dpl_9MLFzZf5wZtbR8sV4sPKUWNZ49mv | d65747d | none |
+| voxera-api | dpl_F7mWRfmRG5SdoLH6aMrVrujzz6Zh | 4ded6ff | none |
+| voxera-api | dpl_mfq3svRtZSmyKxZs31cdXXbgchp8 | eb9d7ee | none |
+| voxera-api | dpl_BPQTF7o1F7BcjD1SBhZGVGqYqhZW | 9963feb | none |
+| voxera-api | dpl_3mGpaVh2vbPRPc4jEmSDcPXDWoGb | 0588709 | none (applied 0006 to production) |
+| voxera-api | dpl_CMEqkvv1RyR7CiRUVAU9niv7u7q2 | 469283d | `voxera-api-git-claude-stoic-davinci-vvk3jg-ai-e399.vercel.app` (PR #1 branch link, not used by staging or production) |
+| voxera-flow | dpl_Bt2eVKNvnc8mCmTsxZ5VsxxkMF7c | b1adb59 | none |
+| voxera-flow | dpl_EDhZsdU6bvp5dkaj66SxYyqrN7JE | 1b6ed70 | none |
+| voxera-flow | dpl_HRJEVfchu4ZiA5JP1yn8mtRD1BZb | d65747d | none |
+| voxera-flow | dpl_qMbgjcs6MeLDRziiUPLvyjXSAkmu | 4ded6ff | none |
+| voxera-flow | dpl_9p7YpryTvMu6owbU7wjp3JDM9aEu | eb9d7ee | none |
+| voxera-flow | dpl_36fDwZ27PFksMF7SBiGtmDC6mUEE | 9963feb | none |
+| voxera-flow | dpl_1RFR5XKJmfwtQK9RnnPYN3RRXAaN | 0588709 | none |
+| voxera-flow | dpl_57Gd5RLRQQ5Uft6MiKNv6GemUs5Z | 469283d | none |
+
+- **Not in the list (must stay):**
+  - production: voxera-api `dpl_EEBqGurCwGj7mWkhzWNGQSo4JWiA`, voxera-flow `dpl_9HL5T88ctcVAPYQqHiHf9Dj1DzSm` (767c0f2), plus older production rollback candidates;
+  - staging: `dpl_CEjtPzeC6MzYNv3zLZyF38KqMC3y` and `dpl_6LddL7Zny7eZSNGyRjMAHAhpWxN2` (94dae66);
+  - PR #2 previews;
+  - all previews built after the switch to staging.
+- **Deployment Protection:** not verifiable with read-only access. Evidence (an unauthenticated CI runner read preview JSON) indicates Preview protection is **off**.
+- **Phase 0: still NOT COMPLETE.** Gates 0.1, 0.2 and 0.5 stay FAIL until the 8 voxera-api previews above are deleted. After deletion, the residual risk is copied credentials until voxera-db's password is rotated (release plan step 8, after PR #1 is live).
 
 ## Phase 0 log: staging run #1 (2026-11-02, approved "approve staging run")
 - **Branch:** `staging` created at `94dae660d50fc356a53a48f43e2fcd63807e2377` (PR #2's head).
