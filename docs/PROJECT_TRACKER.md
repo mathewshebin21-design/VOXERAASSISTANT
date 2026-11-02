@@ -4,7 +4,9 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 13:40 UTC (branch `claude/agent-studio`; this update is local, not pushed).
+Last updated: 2026-11-02 14:35 UTC (branch `claude/agent-studio`; this update is local, not pushed).
+
+> **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
 ## Status key
 | Mark | Meaning |
@@ -30,7 +32,8 @@ Last updated: 2026-11-02 13:40 UTC (branch `claude/agent-studio`; this update is
 | Browser e2e, Agent Studio | 14/14 | local |
 | Staging isolation checker tests | 9/9 | local |
 | GitHub CI on PR #1 | green, all 7 checks | GitHub, head a7ba2f0 |
-| GitHub CI on PR #2 | api `test` ×2 and `live-e2e` ✅, others running at last check | GitHub, head 0318d01 |
+| GitHub CI on PR #2 | 0318d01: all green after one re-run. 6e32b6d (tracker only, same code): `live-e2e` ❌ (Agent Studio 12/14, the intermittent bug below), `test` and `check` ✅ | GitHub |
+| Agent Studio intermittent failure | **2 real app bugs found and fixed locally** (app-fix commit, not pushed). Without the fixes: 7/10 local runs pass. With them: 20/20, then 5/5 with 2 new regression checks | local Chromium |
 | voxera-api preview with no staging database | fails closed: "REFUSING TO DEPLOY: missing database configuration." | Vercel builds of a7ba2f0 and 0318d01 |
 | Production deployment | commit 767c0f2 live | https://voxera-api-two.vercel.app, https://voxera-flow.vercel.app |
 | Staging deployment | **not done**: no staging database yet | — |
@@ -64,6 +67,24 @@ Last updated: 2026-11-02 13:40 UTC (branch `claude/agent-studio`; this update is
   - The branch alias `voxera-api-git-claude-stoic-davinci-vvk3jg-ai-e399.vercel.app` points at the newest one.
 - 8 voxera-flow previews for the same commits are READY, built while previews used the production API.
 - Changing the integration does not revoke these snapshots. Deployment protection status couldn't be confirmed from this session.
+
+**Agent Studio intermittent failure (investigated 2026-11-02)**
+1. *Blank canvas.* Node objects were rebuilt without React Flow's measured sizes, so React Flow hid them (`visibility: hidden`) until it measured them again, which sometimes never happened. The CI symptom was a timed-out click on a node that is "not visible", with an empty canvas in the screenshot.
+2. *Autosave stuck on "unsaved".* Every edit was saved twice, and a save slower than 900 ms left the badge on "unsaved" and Publish disabled until a reload. Reproduced deterministically with a 1.5 s save.
+- Test-only commit "Agent Studio e2e: keep full failure details…" (local): full error and call log, screenshot and page text on failure (uploaded by CI), waits on the real saved state, and Publish clicked only once enabled. No retries, no weaker assertions.
+- App-fix commit "Agent Studio: fix autosave getting stuck…" (local, awaiting approval): both fixes, one save per edit, and regression checks for a slow save and for a canvas still drawn after publishing.
+
+**Historical preview deployments (inventory; nothing deleted)**
+| Project | Count | Built from | Production credentials | Reachable |
+|---|---|---|---|---|
+| voxera-api | 8, READY | PR #1 commits b1adb59 → 469283d (Preview) | **Yes, very likely in the runtime environment**: the build logs show migrations run against the then-connected database, which was only voxera-db | Unknown. Depends on Deployment Protection, which I can't read from here. The branch alias `voxera-api-git-claude-stoic-davinci-vvk3jg…` points at the newest |
+| voxera-flow | 8, READY | the same commits | No database credentials (none connected to voxera-flow then). They call the **production API** | Unknown, as above |
+
+Safest cleanup, in this order, each needing approval:
+1. Confirm Deployment Protection (Vercel Authentication) covers Preview on both projects. Reversible; immediate.
+2. Delete the 8 voxera-api previews (this also frees the branch alias), then confirm production is untouched.
+3. Delete the 8 voxera-flow previews.
+4. Separately, plan a production database password rotation as defence in depth. The JWT secret and the app role password are derived from it, so this is a planned production change that signs users out.
 
 **Step 5: code checks, all confirmed**
 1. Builds can't change schemas: the preflight connects with `default_transaction_read_only=on`; `test_build_never_changes_the_database`.
