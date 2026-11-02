@@ -139,3 +139,58 @@ def test_streams_a_setup_turn_with_tools(make_account, live):  # noqa: F811
     assert "setup assistant" in first["system"] and "EW Saloon" in first["system"]
     assert {t["name"] for t in first["tools"]} == {t["name"] for t in setup_agent.TOOLS}
     assert get_settings().anthropic_api_key == SecretStr("sk-test")
+
+
+def test_template_update_and_remove_services(tool):
+    a = tool.account
+    ok, out = tool("get_business_template", business_type="hair_beauty")
+    assert ok and out == {"template": None}
+    ok, out = tool("get_business_template", business_type="barbershop")
+    t = out["template"]
+    assert t["label"] == "Barbershop" and len(t["services"]) == 29
+    assert {"weekday": 3, "opens": "09:00", "closes": "20:00"} in t["opening_hours"]
+    assert "24 hours' notice" in t["policies_description"]
+    assert a.get(a.o("/services")).json() == []  # reading a template saves nothing
+
+    svc = [{**s, "requires_patch_test": False} for s in t["services"][:3]]
+    assert tool("add_services", services=svc)[1]["added"] == ["Classic men's cut", "Skin fade", "Low, mid or high fade"]
+    saved = {s["name"]: s for s in a.get(a.o("/services")).json()}
+    assert (saved["Skin fade"]["category"], saved["Skin fade"]["buffer_min"]) == ("Haircuts", 5)
+
+    # Corrections change one service; a part-name works only when it is unambiguous.
+    ok, out = tool(
+        "update_service", name="skin", new_name=None, duration_minutes=None, price_from_gbp=25, category=None
+    )
+    assert ok and out == {"updated": "Skin fade", "fields": ["price_from_pence"]}
+    ok, out = tool(
+        "update_service", name="fade", new_name=None, duration_minutes=40, price_from_gbp=None, category=None
+    )
+    assert not ok and "could be Low, mid or high fade, Skin fade" in out["error"]
+    ok, out = tool(
+        "update_service",
+        name="Skin fade",
+        new_name="Classic men's cut",
+        duration_minutes=None,
+        price_from_gbp=None,
+        category=None,
+    )
+    assert not ok and "already exists" in out["error"]
+    assert not tool(
+        "update_service", name="Skin fade", new_name=None, duration_minutes=None, price_from_gbp=None, category=None
+    )[0]
+
+    ok, out = tool("remove_services", names=["Low, mid or high fade", "Perm"])
+    assert ok and out["removed"] == ["Low, mid or high fade"] and "no service called" in out["problems"][0]
+    prices = {s["name"]: s["price_from_pence"] for s in a.get(a.o("/services")).json()}
+    assert prices == {"Classic men's cut": 2000, "Skin fade": 2500}
+
+    # Split days (a lunch break) are two intervals on the same weekday.
+    days = [{"weekday": 0, "opens": "09:00", "closes": "13:00"}, {"weekday": 0, "opens": "14:00", "closes": "17:00"}]
+    assert tool("set_opening_hours", days=days)[0]
+    assert len(a.get(a.o("/office-hours")).json()["intervals"]) == 2
+
+
+def test_barbershop_is_a_business_type():
+    assert "barbershop" in setup_agent.SECTORS
+    assert "barbershop" in json.dumps(setup_agent.TOOLS)
+    assert setup_agent.template("../secrets") is None

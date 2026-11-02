@@ -1,0 +1,254 @@
+{
+  "sector": "barbershop",
+  "label": "Barbershop",
+  "services": [
+    {
+      "name": "Classic men's cut",
+      "category": "Haircuts",
+      "duration_min": 30,
+      "buffer_min": 5,
+      "price_from_pence": 2000
+    },
+    {
+      "name": "Skin fade",
+      "category": "Haircuts",
+      "duration_min": 45,
+      "buffer_min": 5,
+      "price_from_pence": 2400
+    },
+    {
+      "name": "Low, mid or high fade",
+      "category": "Haircuts",
+      "duration_min": 40,
+      "buffer_min": 5,
+      "price_from_pence": 2200
+    },
+    {
+      "name": "Taper fade",
+      "category": "Haircuts",
+      "duration_min": 35,
+      "buffer_min": 5,
+      "price_from_pence": 2200
+    },
+    {
+      "name": "Scissor cut",
+      "category": "Haircuts",
+      "duration_min": 45,
+      "buffer_min": 5,
+      "price_from_pence": 2600
+    },
+    {
+      "name": "Clipper cut (one grade all over)",
+      "category": "Haircuts",
+      "duration_min": 20,
+      "buffer_min": 5,
+      "price_from_pence": 1200
+    },
+    {
+      "name": "Long hair cut or restyle",
+      "category": "Haircuts",
+      "duration_min": 60,
+      "buffer_min": 5,
+      "price_from_pence": 3000
+    },
+    {
+      "name": "Kids' cut (under 12)",
+      "category": "Haircuts",
+      "duration_min": 25,
+      "buffer_min": 5,
+      "price_from_pence": 1400
+    },
+    {
+      "name": "Senior cut (65+)",
+      "category": "Haircuts",
+      "duration_min": 30,
+      "buffer_min": 5,
+      "price_from_pence": 1500
+    },
+    {
+      "name": "Student cut",
+      "category": "Haircuts",
+      "duration_min": 30,
+      "buffer_min": 5,
+      "price_from_pence": 1600
+    },
+    {
+      "name": "Flat top or high-top",
+      "category": "Haircuts",
+      "duration_min": 45,
+      "buffer_min": 5,
+      "price_from_pence": 2500
+    },
+    {
+      "name": "Beard trim and shape",
+      "category": "Beard & shaving",
+      "duration_min": 20,
+      "buffer_min": 5,
+      "price_from_pence": 1000
+    },
+    {
+      "name": "Beard sculpt and line-up",
+      "category": "Beard & shaving",
+      "duration_min": 25,
+      "buffer_min": 5,
+      "price_from_pence": 1500
+    },
+    {
+      "name": "Hot towel cut-throat shave",
+      "category": "Beard & shaving",
+      "duration_min": 40,
+      "buffer_min": 5,
+      "price_from_pence": 2200
+    },
+    {
+      "name": "Head shave",
+      "category": "Beard & shaving",
+      "duration_min": 30,
+      "buffer_min": 5,
+      "price_from_pence": 1800
+    },
+    {
+      "name": "Line-up / edge-up",
+      "category": "Beard & shaving",
+      "duration_min": 15,
+      "buffer_min": 5,
+      "price_from_pence": 800
+    },
+    {
+      "name": "Beard colour",
+      "category": "Beard & shaving",
+      "duration_min": 20,
+      "buffer_min": 5,
+      "price_from_pence": 1500
+    },
+    {
+      "name": "Cut and beard trim",
+      "category": "Combos",
+      "duration_min": 50,
+      "buffer_min": 5,
+      "price_from_pence": 3000
+    },
+    {
+      "name": "Fade and hot towel beard sculpt",
+      "category": "Combos",
+      "duration_min": 60,
+      "buffer_min": 5,
+      "price_from_pence": 3800
+    },
+    {
+      "name": "Father and son (adult and kids' cut)",
+      "category": "Combos",
+      "duration_min": 50,
+      "buffer_min": 5,
+      "price_from_pence": 3200
+    },
+    {
+      "name": "The Works (cut, hot towel shave, wash, mask, style)",
+      "category": "Combos",
+      "duration_min": 90,
+      "buffer_min": 5,
+      "price_from_pence": 5000
+    },
+    {
+      "name": "Hair wash and style",
+      "category": "Extras",
+      "duration_min": 10,
+      "buffer_min": 0,
+      "price_from_pence": 500
+    },
+    {
+      "name": "Hair design / razor pattern",
+      "category": "Extras",
+      "duration_min": 15,
+      "buffer_min": 0,
+      "price_from_pence": 500
+    },
+    {
+      "name": "Eyebrow tidy",
+      "category": "Extras",
+      "duration_min": 10,
+      "buffer_min": 0,
+      "price_from_pence": 500
+    },
+    {
+      "name": "Nose and ear wax",
+      "category": "Extras",
+      "duration_min": 10,
+      "buffer_min": 0,
+      "price_from_pence": 800
+    },
+    {
+      "name": "Face mask",
+      "category": "Extras",
+      "duration_min": 15,
+      "buffer_min": 0,
+      "price_from_pence": 800
+    },
+    {
+      "name": "Grey blending or hair colour",
+      "category": "Extras",
+      "duration_min": 45,
+      "buffer_min": 5,
+      "price_from_pence": 2000
+    },
+    {
+      "name": "Perm or texturising",
+      "category": "Extras",
+      "duration_min": 90,
+      "buffer_min": 5,
+      "price_from_pence": 5000
+    },
+    {
+      "name": "Scalp treatment",
+      "category": "Extras",
+      "duration_min": 20,
+      "buffer_min": 0,
+      "price_from_pence": 1000
+    }
+  ],
+  "week": [
+    [
+      {
+        "opens": "09:00",
+        "closes": "19:00"
+      }
+    ],
+    [
+      {
+        "opens": "09:00",
+        "closes": "19:00"
+      }
+    ],
+    [
+      {
+        "opens": "09:00",
+        "closes": "19:00"
+      }
+    ],
+    [
+      {
+        "opens": "09:00",
+        "closes": "20:00"
+      }
+    ],
+    [
+      {
+        "opens": "09:00",
+        "closes": "19:00"
+      }
+    ],
+    [
+      {
+        "opens": "08:30",
+        "closes": "17:00"
+      }
+    ],
+    [
+      {
+        "opens": "10:00",
+        "closes": "16:00"
+      }
+    ]
+  ],
+  "description": "We're a barbershop offering men's and kids' haircuts, fades, beard trims, hot towel shaves and grooming extras.\n\nBooking: appointments come first. Walk-ins are welcome when a chair is free, but booking is the only way to guarantee a time. Callers can ask for a specific barber.\nPrices: the prices quoted are starting prices. Long or thick hair, big restyles and designs can cost more; the barber confirms before starting. Senior and master barbers may charge a little more than junior barbers.\nLate arrivals: we hold the appointment for 10 minutes. After that we may need to shorten the service or move the booking.\nCancellations: please give at least 24 hours' notice. Missed appointments without notice may be charged 50% of the service.\nDeposits: none for haircuts. Longer services (The Works, colour, perms) may need a deposit to secure the booking.\nPayment: card, contactless, Apple Pay and Google Pay. Tips are optional and always appreciated.\nKids: children under 12 should come with an adult.\nReference photos: clients are welcome to bring a photo of the style they want.\nProducts: we sell styling products and beard care (pomade, clay, matte paste, beard oil and balm).\nAnything not covered here (parking, accessibility, a particular barber's days off): take a message and the team will call back."
+}

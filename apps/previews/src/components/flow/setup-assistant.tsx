@@ -82,7 +82,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
         return "Saved to your business details";
       }
       case "hours":
-        await api(`${base}/office-hours`, { method: "PUT", body: { intervals: a.week.flatMap((d, weekday) => (d ? [{ weekday, opens_at: d.opens, closes_at: d.closes }] : [])) } });
+        await api(`${base}/office-hours`, { method: "PUT", body: { intervals: a.week.flatMap((periods, weekday) => periods.map((p) => ({ weekday, opens_at: p.opens, closes_at: p.closes }))) } });
         return "Opening hours saved";
       case "services": {
         let added = 0, existed = 0;
