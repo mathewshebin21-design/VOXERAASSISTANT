@@ -69,7 +69,9 @@ class KnowledgeSettings(S):
 class Rule(S):
     id: Id
     variable: Var
-    op: Literal["equals", "not_equals", "contains", "is_set", "is_not_set", "in", "is_yes", "is_no"]
+    op: Literal[
+        "equals", "not_equals", "contains", "is_set", "is_not_set", "in", "is_yes", "is_no", "time_after", "time_before"
+    ]
     value: ShortText = ""
     label: ShortText = ""
 
@@ -97,6 +99,14 @@ class ServiceLookupSettings(S):
 class AvailabilitySettings(S):
     part_of_day: Literal["any", "morning", "afternoon", "evening", "from_caller"] = "from_caller"
     offer: int = Field(3, ge=1, le=5)
+    exclude_weekdays: list[int] = Field(default_factory=list, max_length=7)  # 0 = Monday … 6 = Sunday
+
+    @field_validator("exclude_weekdays")
+    @classmethod
+    def weekdays(cls, v: list[int]) -> list[int]:
+        if any(not 0 <= d <= 6 for d in v):
+            raise ValueError("weekdays are 0 (Monday) to 6 (Sunday)")
+        return sorted(set(v))
 
 
 class BookingSettings(S):

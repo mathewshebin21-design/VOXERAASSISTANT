@@ -7,6 +7,7 @@ the published version only, so an unpublished draft never changes what callers h
 
 import copy
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -17,7 +18,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from .. import audit
 from ..deps import DB, OrgContext, client_meta, require
-from ..flows import engine, testing
+from ..flows import engine, insights, instruct, testing
 from ..flows.schema import Flow
 from ..flows.templates import default_flow
 from ..flows.validate import validate
@@ -535,3 +536,90 @@ def run_tests(agent_id: uuid.UUID, body: RunIn, ctx: Reader, db: DB) -> dict:
     out = run_suite(db, ctx, agent, flow, tests)
     db.rollback()  # belt and braces: test runs never leave anything behind
     return out
+
+
+# ---------- plain-English editing ----------
+
+
+class InstructIn(Strict):
+    text: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/instructions")
+def propose_change(agent_id: uuid.UUID, body: InstructIn, ctx: Writer, db: DB) -> dict:
+    """Turn an instruction into a proposed draft change. Nothing is saved: the Studio shows the
+    before → after and saves the proposal's graph only when the owner confirms."""
+    agent = _agent(db, ctx.org_id, agent_id)
+    f = _flow(db, ctx.org_id, agent)
+    db.commit()
+    try:
+        proposal = instruct.interpret(body.text, f.draft)
+    except instruct.NotUnderstood as e:
+        return {"understood": False, "message": str(e), "examples": instruct.EXAMPLES}
+    return {"understood": True, "base_revision": f.draft_revision, **proposal.as_dict(f.draft)}
+
+
+@router.get("/diff")
+def diff_versions(agent_id: uuid.UUID, ctx: Reader, db: DB, base: int | None = None) -> dict:
+    """What the draft changes compared with a version (default: the published one)."""
+    agent = _agent(db, ctx.org_id, agent_id)
+    f = _flow(db, ctx.org_id, agent)
+    db.commit()
+    version = base or f.published_version
+    if version is None:
+        return {"base": None, "changes": instruct.diff({"nodes": [], "edges": []}, f.draft)}
+    g = db.scalar(
+        select(AgentFlowVersion.graph).where(AgentFlowVersion.flow_id == f.id, AgentFlowVersion.version == version)
+    )
+    if g is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such version")
+    return {"base": version, "changes": instruct.diff(g, f.draft)}
+
+
+# ---------- call intelligence ----------
+
+
+@router.get("/insights")
+def flow_insights(
+    agent_id: uuid.UUID, ctx: Reader, db: DB, mode: Literal["simulation", "live"] = "simulation", days: int = 30
+) -> dict:
+    """Analytics for one kind of data. Simulated and real calls are never mixed."""
+    _agent(db, ctx.org_id, agent_id)
+    since = datetime.now(UTC) - timedelta(days=max(1, min(days, 365)))
+    rows = list(
+        db.scalars(
+            select(FlowSession).where(
+                FlowSession.agent_id == agent_id,
+                FlowSession.organization_id == ctx.org_id,
+                FlowSession.mode == mode,
+                FlowSession.created_at >= since,
+            )
+        )
+    )
+    return {"days": days, **insights.report(rows, mode)}
+
+
+@router.get("/sessions")
+def list_sessions(
+    agent_id: uuid.UUID, ctx: Reader, db: DB, mode: Literal["simulation", "live"] = "simulation", limit: int = 25
+) -> list[dict]:
+    _agent(db, ctx.org_id, agent_id)
+    rows = db.scalars(
+        select(FlowSession)
+        .where(FlowSession.agent_id == agent_id, FlowSession.organization_id == ctx.org_id, FlowSession.mode == mode)
+        .order_by(FlowSession.created_at.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    return [
+        {
+            "session_id": str(s.id),
+            "mode": s.mode,
+            "source": s.source,
+            "version": s.version,
+            "outcome": s.outcome,
+            "ended": s.ended,
+            "created_at": s.created_at.isoformat(),
+            "summary": insights.summarise(s.transcript),
+        }
+        for s in rows
+    ]

@@ -310,7 +310,17 @@ class Engine:
         intent = classify(text)
         state["vars"]["intent"] = intent
         if intent == "human" and node.type != "transfer":  # a caller asking for a person is always heard
-            target = next((n for n in self.flow.nodes if n.type == "transfer"), None)
+            transfers = [n for n in self.flow.nodes if n.type == "transfer"]
+            managers = [n for n in transfers if self.settings[n.id].target == "managers"]
+            wants_manager = re.search(r"\b(manager|owner|boss|in charge)\b", text, re.I)
+            target = (
+                (managers or transfers)[0]
+                if wants_manager and transfers
+                else next(
+                    (n for n in transfers if self.settings[n.id].target != "managers"),
+                    transfers[0] if transfers else None,
+                )
+            )
             if target is not None:
                 t.guard("asked_for_person", "Caller asked for a person; going to the transfer step.", node.id)
                 state.update(node=target.id, waiting=False, sub={})
@@ -503,10 +513,18 @@ class Engine:
                 "in": val in [x.strip() for x in want.split(",")],
                 "is_yes": affirmed(val),
                 "is_no": denied(val),
+                "time_after": self._clock(r.variable, state) >= want,
+                "time_before": self._clock(r.variable, state) < want,
             }[r.op]
             if ok:
                 return r.id
         return "else"
+
+    def _clock(self, variable: str, state: dict) -> str:
+        """HH:MM for time conditions: the call's local time, or a time the caller gave."""
+        if variable == "now_local":
+            return self.rt.local_now().strftime("%H:%M")
+        return str(state["vars"].get(variable, "") or "")[:5]
 
     def _knowledge(self, state: dict, t: Turn, node: Node, s: KnowledgeSettings) -> None:
         found = self._answer(state["vars"].get("last_message", ""), s.topics)
@@ -604,7 +622,11 @@ class Engine:
             t.tool("check_availability", node.id, False, {"service": svc.name}, "diary unavailable (test)", 0, False)
             t.say("I'm sorry, I can't see the diary right now.", node.id)
             return self._go(state, node, "none")
-        slots = reception.available_slots(self.rt.db, self.rt.desk, svc, on, part, self.rt.now, limit=s.offer)
+        slots = reception.available_slots(
+            self.rt.db, self.rt.desk, svc, on, part, self.rt.now, limit=s.offer + 6 * bool(s.exclude_weekdays)
+        )
+        if s.exclude_weekdays:  # the flow's own booking rule, e.g. "no appointments on Sundays"
+            slots = [x for x in slots if x.weekday() not in s.exclude_weekdays][: s.offer]
         ms = (clock.perf_counter() - started) * 1000
         t.tool(
             "check_availability",
