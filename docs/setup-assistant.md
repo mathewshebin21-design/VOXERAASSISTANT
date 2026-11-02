@@ -19,6 +19,18 @@ Only owners and admins can run it, because it changes business settings and crea
 - The business-type picker still sets the wording (appointments, jobs, reservations…).
 - **Explore with demo data** is in the workspace menu and on Pulse, as a separate, labelled mode, with "Back to my workspace".
 
+## Business templates
+
+Some business types come with a ready-made starting point. In step-by-step mode, once the business type is set, say “template” at the **Opening hours** or **Services** step. The assistant shows the whole template first and saves only after a yes. Every part can be edited in Workspace afterwards.
+
+**Barbershop** (`barbershop` sector, uses the Salon dashboard), defined in `apps/previews/src/lib/setup/templates.ts`:
+
+- **29 services** in four categories (Haircuts, Beard & shaving, Combos, Extras), each with a length, a 5-minute clean-down buffer (none for quick add-ons) and a "from" price at typical UK high-street rates for 2026. Examples: classic cut 30 min from £20, skin fade 45 min from £24, cut and beard 50 min from £30, hot towel shave 40 min from £22.
+- **Hours:** Mon–Fri 09:00–19:00 (Thu until 20:00), Sat 08:30–17:00, Sun 10:00–16:00.
+- **Booking policies** saved to the business description, which the receptionist reads when callers ask questions: walk-ins, 10-minute late grace, 24-hour cancellation, deposits, payment, kids, reference photos and products. Anything it doesn't cover (parking, accessibility) becomes a message for the team. If the business already has a description, it is left alone.
+
+"Barber" or "barbers" in the business-type answer now selects Barbershop instead of Hair & beauty. The Claude setup agent accepts the new sector too, but only the step-by-step mode offers the template.
+
 ## Verification (2026-11-01)
 - **Unit tests: 97.**
   - 34 for the parsers: days, time ranges ("9-5", "1-5pm", "9 to noon"), weekly hours with overrides and closed days, services ("1h30", "3 hours", "£75.50", patch test), UK phone and postcode, business type, yes and skip.

@@ -66,7 +66,7 @@ describe("contact details and business type", () => {
     expect(parseAddress("12 High Street, Bristol, bs1 4dj")).toEqual({ address_line1: "12 High Street", city: "Bristol", postcode: "BS1 4DJ" });
     expect(parseAddress("Leeds")).toEqual({ address_line1: null, city: "Leeds", postcode: null });
   });
-  it.each([["We're a barbers in town", "hair_beauty"], ["EW SALOON", "hair_beauty"], ["sports physio clinic", "clinic"], ["emergency plumbing", "trades"], ["Italian restaurant", "hospitality"], ["yoga studio", "fitness"], ["solicitors", "professional"], ["a shop", null]])(
+  it.each([["We're a barbers in town", "barbershop"], ["Barber shop", "barbershop"], ["EW SALOON", "hair_beauty"], ["sports physio clinic", "clinic"], ["emergency plumbing", "trades"], ["Italian restaurant", "hospitality"], ["yoga studio", "fitness"], ["solicitors", "professional"], ["a shop", null]])(
     "%s → %s", (t, s) => expect(parseSector(t as string)).toBe(s));
   it("yes / skip", () => {
     expect(isYes("yes that's right")).toBe(true);

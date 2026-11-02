@@ -19,6 +19,7 @@ from ..schemas import AgentIn, BusinessProfileIO, HoursIn, ServiceIn
 
 SECTORS = [
     "hair_beauty",
+    "barbershop",
     "aesthetics",
     "wellness",
     "clinic",

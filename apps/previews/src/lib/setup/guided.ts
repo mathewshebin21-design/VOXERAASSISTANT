@@ -3,7 +3,8 @@
 // performs the returned actions against the API and reports back.
 
 import { SECTORS } from "../dashboards";
-import { describeWeek, isSkip, isYes, parseAddress, parseHours, parsePhone, parseSector, parseServices, type ParsedService, type Week } from "./parse";
+import { describeWeek, isSkip, isYes, parseAddress, parseHours, parsePhone, parseSector, parseServices, type Week } from "./parse";
+import { templateFor } from "./templates";
 
 export const STEPS = ["type", "phone", "address", "hours", "services", "capacity", "receptionist", "done"] as const;
 export type StepId = (typeof STEPS)[number];
@@ -12,24 +13,46 @@ export const STEP_LABEL: Record<StepId, string> = {
   capacity: "Capacity", receptionist: "Receptionist", done: "Done",
 };
 
+/** A service ready to save. Templates also give a category and a clean-down buffer. */
+export interface ServiceDraft {
+  name: string;
+  duration_min: number;
+  price_from_pence: number | null;
+  requires_patch_test: boolean;
+  category?: string;
+  buffer_min?: number;
+}
+
 export type SetupAction =
   | { type: "profile"; patch: { sector?: string; phone?: string; address_line1?: string | null; city?: string | null; postcode?: string | null } }
   | { type: "hours"; week: Week }
-  | { type: "services"; services: (ParsedService & { duration_min: number })[] }
+  /** `description` (house policies from a template) is saved only if the business has none yet. */
+  | { type: "services"; services: ServiceDraft[]; description?: string }
   | { type: "capacity"; capacity: number }
   | { type: "agent"; name: string; greeting: string };
 
 export interface GuidedState {
   step: StepId;
   businessName: string;
-  pending: { kind: "hours"; week: Week } | { kind: "services"; services: (ParsedService & { duration_min: number })[] } | null;
+  /** The business type, once known: it unlocks that type's ready-made template. */
+  sector?: string | null;
+  pending: { kind: "hours"; week: Week } | { kind: "services"; services: ServiceDraft[]; description?: string } | null;
 }
 
 export interface Turn { state: GuidedState; say: string[]; action?: SetupAction }
 
 const DEFAULT_MINUTES = 30;
+const USE_TEMPLATE = /^\s*(use\s+)?(the\s+|a\s+)?(template|standard|default|typical)\b/i;
+const pounds = (p: number) => `£${(p / 100).toFixed(p % 100 ? 2 : 0)}`;
 
-export function prompt(step: StepId, businessName: string): string {
+export function prompt(step: StepId, businessName: string, sector?: string | null): string {
+  const tpl = templateFor(sector);
+  if (tpl && step === "hours") return `${basePrompt(step, businessName)}\nOr say “template” to start from typical ${tpl.label.toLowerCase()} hours.`;
+  if (tpl && step === "services") return `${basePrompt(step, businessName)}\nOr say “template” to load a ready-made ${tpl.label.toLowerCase()} menu (${tpl.services.length} services with times and prices, plus booking policies) that you can edit afterwards.`;
+  return basePrompt(step, businessName);
+}
+
+function basePrompt(step: StepId, businessName: string): string {
   switch (step) {
     case "type": return `What kind of business is ${businessName}? For example: hair salon, barbers, physio clinic, plumbing, restaurant, gym…`;
     case "phone": return "What's the phone number customers should call? (Say “skip” if you'd rather add it later.)";
@@ -53,24 +76,31 @@ const sectorLabel = (v: string) => SECTORS.find((s) => s.value === v)?.label ?? 
 /** Handles one message from the person setting up. */
 export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepId> = new Set()): Turn {
   const text = input.trim();
+  if ((state.step === "hours" || state.step === "services") && USE_TEMPLATE.test(text) && !templateFor(state.sector)) {
+    return { state: { ...state, pending: null }, say: ["I don't have a ready-made template for this type of business yet, so please type yours in.", basePrompt(state.step, state.businessName)] };
+  }
   const move = (say: string[], action?: SetupAction): Turn => ({ state: { ...state, pending: null, step: state.step }, say, action });
-  if (!text) return { state, say: [prompt(state.step, state.businessName)] };
+  if (!text) return { state, say: [prompt(state.step, state.businessName, state.sector)] };
 
   // A pending interpretation waits for a yes; anything else is taken as a corrected answer.
   if (state.pending && isYes(text)) {
     if (state.pending.kind === "hours") return move(["Saving your opening hours…"], { type: "hours", week: state.pending.week });
-    return move([`Saving ${state.pending.services.length} service${state.pending.services.length === 1 ? "" : "s"}…`], { type: "services", services: state.pending.services });
+    const { services, description } = state.pending;
+    return move([`Saving ${services.length} service${services.length === 1 ? "" : "s"}…`], { type: "services", services, ...(description ? { description } : {}) });
   }
   if (isSkip(text) && state.step !== "done") {
     const step = next(state.step, skip);
-    return { state: { ...state, step, pending: null }, say: ["No problem — you can add that later.", prompt(step, state.businessName)] };
+    return { state: { ...state, step, pending: null }, say: ["No problem — you can add that later.", prompt(step, state.businessName, state.sector)] };
   }
 
   switch (state.step) {
     case "type": {
       const sector = parseSector(text) ?? SECTORS.find((s) => s.label.toLowerCase() === text.toLowerCase())?.value ?? null;
       if (!sector) return { state, say: [`I didn't quite catch the type of business. Is it closest to: ${SECTORS.map((s) => s.label).join(", ")}?`] };
-      return move([`Got it — ${sectorLabel(sector)}. That also sets your dashboard layout.`], { type: "profile", patch: { sector } });
+      const tpl = templateFor(sector);
+      const say = [`Got it — ${sectorLabel(sector)}. That also sets your dashboard layout.`];
+      if (tpl) say.push(`I've got a ready-made ${tpl.label.toLowerCase()} template — when we get to hours and services, just say “template”.`);
+      return { state: { ...state, pending: null, sector }, say, action: { type: "profile", patch: { sector } } };
     }
     case "phone": {
       const phone = parsePhone(text);
@@ -84,6 +114,10 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
       return move([`Noted: ${shown}.`], { type: "profile", patch: a });
     }
     case "hours": {
+      const tpl = templateFor(state.sector);
+      if (tpl && USE_TEMPLATE.test(text)) {
+        return { state: { ...state, pending: { kind: "hours", week: tpl.week } }, say: [`Typical ${tpl.label.toLowerCase()} hours:`, describeWeek(tpl.week).join("\n"), "Shall I save these hours? (yes, or type your own)"] };
+      }
       const r = parseHours(text);
       if (!r.understood) return { state, say: ["I couldn't work out the days and times from that. Try something like “Tue–Sat 9–5:30, Sun and Mon closed”."] };
       const say = ["Here's what I understood:", describeWeek(r.week).join("\n")];
@@ -93,6 +127,19 @@ export function reply(state: GuidedState, input: string, skip: ReadonlySet<StepI
       return { state: { ...state, pending: { kind: "hours", week: r.week } }, say };
     }
     case "services": {
+      const tpl = templateFor(state.sector);
+      if (tpl && USE_TEMPLATE.test(text)) {
+        const services: ServiceDraft[] = tpl.services.map((s) => ({ ...s, requires_patch_test: false }));
+        const groups = [...new Set(tpl.services.map((s) => s.category))].map((c) =>
+          `${c}:\n${tpl.services.filter((s) => s.category === c).map((s) => `• ${s.name} — ${s.duration_min} min, from ${pounds(s.price_from_pence)}`).join("\n")}`);
+        return {
+          state: { ...state, pending: { kind: "services", services, description: tpl.description } },
+          say: [`Here's the ${tpl.label.toLowerCase()} menu:`, groups.join("\n\n"),
+            "I'll also add standard booking policies (walk-ins, 10-minute late grace, 24-hour cancellation, payment) to your business description so the receptionist can answer those questions — unless you've already written one.",
+            "Prices are starting prices at typical UK high-street rates. You can change any of it in Workspace afterwards.",
+            "Shall I save these? (yes, or type your own list)"],
+        };
+      }
       const { services, unparsed } = parseServices(text);
       if (!services.length) return { state, say: ["I couldn't find any services in that. Put one per line, like “Women's cut, 60 min, £45”."] };
       const filled = services.map((s) => ({ ...s, duration_min: s.duration_min ?? DEFAULT_MINUTES }));
@@ -125,6 +172,6 @@ export function advance(state: GuidedState, skip: ReadonlySet<StepId> = new Set(
   const step = next(state.step, skip);
   const say = step === "done"
     ? ["🎉 That's the essentials done. Next: go Available on the Desk so transferred callers reach you, invite your team, and try a test call in the Voice lab."]
-    : [prompt(step, state.businessName)];
+    : [prompt(step, state.businessName, state.sector)];
   return { state: { ...state, step, pending: null }, say };
 }

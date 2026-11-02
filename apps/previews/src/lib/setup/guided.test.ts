@@ -59,3 +59,45 @@ describe("guided setup assistant", () => {
     expect(t.state.step).toBe("services");
   });
 });
+
+describe("barbershop template", () => {
+  const barber: GuidedState = { step: "type", businessName: "Kings Barbers", pending: null };
+
+  it("recognises a barbers and offers the template", () => {
+    const t = reply(barber, "we're a barber shop");
+    expect(t.action).toEqual({ type: "profile", patch: { sector: "barbershop" } });
+    expect(t.state.sector).toBe("barbershop");
+    expect(t.say.join("\n")).toMatch(/template/);
+    const hours = advance(t.state, new Set(["phone", "address"]));
+    expect(hours.state.step).toBe("hours");
+    expect(hours.say[0]).toMatch(/say “template”/);
+  });
+
+  it("loads template hours and only saves after a yes", () => {
+    let t = reply({ ...barber, step: "hours", sector: "barbershop" }, "use the template");
+    expect(t.action).toBeUndefined();
+    expect(t.say.join("\n")).toContain("Thursday: 09:00–20:00");
+    t = reply(t.state, "yes");
+    expect(t.action?.type === "hours" && t.action.week[3]).toEqual({ opens: "09:00", closes: "20:00" });
+  });
+
+  it("loads the menu with categories, buffers and policies", () => {
+    let t = reply({ ...barber, step: "services", sector: "barbershop" }, "template");
+    const text = t.say.join("\n");
+    expect(text).toContain("Skin fade — 45 min, from £24");
+    expect(text).toContain("Beard & shaving:");
+    t = reply(t.state, "yes");
+    expect(t.action?.type).toBe("services");
+    if (t.action?.type !== "services") return;
+    expect(t.action.services.length).toBeGreaterThan(20);
+    expect(t.action.services[0]).toMatchObject({ name: "Classic men's cut", category: "Haircuts", duration_min: 30, buffer_min: 5, price_from_pence: 2000 });
+    expect(t.action.description).toMatch(/24 hours' notice/);
+  });
+
+  it("doesn't offer a template to businesses without one", () => {
+    expect(prompt("services", "EW Saloon", "hair_beauty")).not.toMatch(/template/);
+    const t = reply({ ...start, step: "services", sector: "hair_beauty" }, "template");
+    expect(t.state.pending).toBeNull();
+    expect(t.say[0]).toMatch(/don't have a ready-made template/);
+  });
+});

@@ -64,7 +64,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
       if (cancelled) return;
       setAiAvailable(status.ai);
       const done = doneSteps(s);
-      const start: GuidedState = { step: "type", businessName: s.profile.display_name, pending: null };
+      const start: GuidedState = { step: "type", businessName: s.profile.display_name, sector: s.profile.sector, pending: null };
       setGuided(start);
       say("assistant", `Hi ${firstName}! I'll help you set up ${s.profile.display_name} so your receptionist knows your business. I'll ask one thing at a time — say “skip” for anything you'd rather do later.`);
       if (done.size) say("assistant", `Already done: ${[...done].map((d) => STEP_LABEL[d]).join(", ")}.`);
@@ -87,10 +87,17 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
       case "services": {
         let added = 0, existed = 0;
         for (const s of a.services) {
-          try { await api(`${base}/services`, { method: "POST", body: { name: s.name, duration_min: s.duration_min, price_from_pence: s.price_from_pence, requires_patch_test: s.requires_patch_test } }); added++; }
+          const extra = { ...(s.category ? { category: s.category } : {}), ...(s.buffer_min !== undefined ? { buffer_min: s.buffer_min } : {}) };
+          try { await api(`${base}/services`, { method: "POST", body: { name: s.name, duration_min: s.duration_min, price_from_pence: s.price_from_pence, requires_patch_test: s.requires_patch_test, ...extra } }); added++; }
           catch (e) { if (e instanceof ApiError && e.status === 409) existed++; else throw e; }
         }
-        return `${added} service${added === 1 ? "" : "s"} saved${existed ? ` (${existed} already existed)` : ""}`;
+        let policies = "";
+        if (a.description) {
+          const p = await api<BusinessProfile>(`${base}/business-profile`);
+          if (p.description?.trim()) policies = "; kept your existing business description";
+          else { await api(`${base}/business-profile`, { method: "PUT", body: { ...p, description: a.description } }); policies = "; booking policies added to your business description"; }
+        }
+        return `${added} service${added === 1 ? "" : "s"} saved${existed ? ` (${existed} already existed)` : ""}${policies}`;
       }
       case "capacity":
         await api(`${base}/settings`, { method: "PATCH", body: { booking_capacity: a.capacity } });
