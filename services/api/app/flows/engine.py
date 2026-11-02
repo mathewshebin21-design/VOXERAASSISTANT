@@ -203,6 +203,8 @@ class Runtime:
     now: datetime | None = None
     caller_phone: str | None = None
     fail_tools: bool = False  # tests: make every action fail, to check recovery paths
+    force_hours: str | None = None  # tests: "open" / "closed" regardless of the clock
+    no_staff: bool = False  # tests: behave as if nobody on the team is available
     ctx: BusinessContext | None = None
 
     def __post_init__(self) -> None:
@@ -314,9 +316,29 @@ class Engine:
                 state.update(node=target.id, waiting=False, sub={})
                 self._run(state, t)
                 return t.events
+        if state.get("waiting") and intent == "question" and self._side_question(state, t, node, text):
+            return t.events
         self._resume(state, t, node, text)
         self._run(state, t)
         return t.events
+
+    def _side_question(self, state: dict, t: Turn, node: Node, text: str) -> bool:
+        """A question asked in the middle of something else is answered, then we carry on."""
+        if node.type not in ("availability", "booking") and not (
+            node.type == "ask" and self.settings[node.id].kind not in ("text", "service")
+        ):
+            return False
+        found = self._answer(text, KnowledgeSettings().topics)
+        if not found:
+            return False
+        answer, source = found
+        t.evidence(source, answer, node.id)
+        back = {
+            "availability": "Now, which of those times suits you?",
+            "booking": "Shall I go ahead and book it?",
+        }.get(node.type) or self.settings[node.id].question
+        t.say(f"{answer} {back}", node.id)
+        return True
 
     # -- waiting nodes ----------------------------------------------------------------------
 
@@ -339,6 +361,13 @@ class Engine:
             t.say(f"Sorry, I didn't catch that. {s.question}", node.id)
             return None
         if node.type == "availability":
+            switched = match_services(text, self._active_services())
+            if len(switched) == 1 and str(switched[0].id) != state["vars"].get("service_id"):
+                # "Actually, make it a beard trim": change the service and look again.
+                state["vars"].update(service=switched[0].name, service_id=str(switched[0].id))
+                t.guard("changed_request", f"Caller switched to {switched[0].name}.", node.id)
+                state.update(waiting=False, sub={})
+                return None
             choice = self._pick(sub.get("offered", []), text)
             if choice:
                 state["vars"]["slot"] = choice
@@ -415,7 +444,11 @@ class Engine:
             elif node.type == "condition":
                 self._go(state, node, self._condition(state, s))
             elif node.type == "hours_check":
-                is_open = reception.is_open(self.rt.db, self.rt.desk, self.rt.now)
+                is_open = (
+                    self.rt.force_hours == "open"
+                    if self.rt.force_hours
+                    else reception.is_open(self.rt.db, self.rt.desk, self.rt.now)
+                )
                 t.evidence("opening_hours", "open now" if is_open else "closed now", node.id)
                 self._go(state, node, "open" if is_open else "closed")
             elif node.type == "service_lookup":
@@ -476,29 +509,42 @@ class Engine:
         return "else"
 
     def _knowledge(self, state: dict, t: Turn, node: Node, s: KnowledgeSettings) -> None:
-        q = state["vars"].get("last_message", "").lower()
+        found = self._answer(state["vars"].get("last_message", ""), s.topics)
+        if found:
+            answer, source = found
+            t.evidence(source, answer, node.id)
+            t.say(answer, node.id)
+            self._go(state, node, "answered")
+        else:
+            t.guard("unsupported_answer", "Nothing in the workspace's details answers that. Not guessing.", node.id)
+            t.say("I don't have that information to hand, and I'd rather not guess.", node.id)
+            self._go(state, node, "not_found")
+
+    def _answer(self, question: str, topics: list[str]) -> tuple[str, str] | None:
+        """An answer built only from the workspace's own data, and where it came from."""
+        q = question.lower()
         c = self.rt.ctx
         info, hours, services = c.info, c.hours.get("weekly", {}), c.services
         answer, source = None, None
         named = [x for x in services if any(w in words(q) for w in words(x["name"]) if len(w) > 3)]
-        if "prices" in s.topics and re.search(r"how much|price|cost|£", q) and (named or services):
+        if "prices" in topics and re.search(r"how much|price|cost|£", q) and (named or services):
             pick = named or services
             parts = [f"{x['name']} is from £{x['price_from_gbp']}" for x in pick[:5] if x["price_from_gbp"]]
             if parts:
                 answer, source = "; ".join(parts) + ".", "services.price_from"
-        elif "hours" in s.topics and re.search(r"open|close|hours|what time", q):
+        elif "hours" in topics and re.search(r"open|close|hours|what time", q):
             open_days = [f"{d} {', '.join(v)}" for d, v in hours.items() if v]
             if open_days:
                 answer, source = "We're open " + "; ".join(open_days) + ".", "office_hours"
         elif (
-            "address" in s.topics
+            "address" in topics
             and re.search(r"where|address|located|find you|postcode|parking", q)
             and info.get("address")
         ):
             answer, source = f"We're at {info['address']}.", "business_profile.address"
-        elif "phone" in s.topics and re.search(r"phone|number|call you", q) and info.get("phone"):
+        elif "phone" in topics and re.search(r"phone|number|call you", q) and info.get("phone"):
             answer, source = f"You can reach us on {info['phone']}.", "business_profile.phone"
-        elif "services" in s.topics and (re.search(r"what (services|do you (do|offer))|services|menu", q) or named):
+        elif "services" in topics and (re.search(r"what (services|do you (do|offer))|services|menu", q) or named):
             pick = named or services
             if pick:
                 answer = "We offer " + ", ".join(x["name"] for x in pick[:10]) + "."
@@ -508,19 +554,12 @@ class Engine:
                     )
                 source = "services"
         elif (
-            "description" in s.topics
+            "description" in topics
             and re.search(r"who are you|what is this|about (you|the business)", q)
             and info.get("description")
         ):
             answer, source = info["description"], "business_profile.description"
-        if answer:
-            t.evidence(source, answer, node.id)
-            t.say(answer, node.id)
-            self._go(state, node, "answered")
-        else:
-            t.guard("unsupported_answer", "Nothing in the workspace's details answers that. Not guessing.", node.id)
-            t.say("I don't have that information to hand, and I'd rather not guess.", node.id)
-            self._go(state, node, "not_found")
+        return (answer, source) if answer else None
 
     def _active_services(self) -> list[Service]:
         return list(
@@ -753,6 +792,8 @@ class Engine:
 
     def _transfer(self, state: dict, t: Turn, node: Node, s: TransferSettings) -> None:
         roles = (Role.owner, Role.admin, Role.manager) if s.target == "managers" else None
+        if self.rt.no_staff:
+            roles = ()
         outcome = self._handoff(state, t, node, "caller asked for a person", urgent=False, kind="transfer", roles=roles)
         if outcome == "transferred":
             staff = state["vars"].get("handoff_staff") or "the team"

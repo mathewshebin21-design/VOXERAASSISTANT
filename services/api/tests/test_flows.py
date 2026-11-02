@@ -20,6 +20,12 @@ GREETING = "Hi, you're through to Halden & Rye. I'm Rye, the AI receptionist. Ho
 @pytest.fixture
 def studio(make_account):
     a = make_account("ada@example.com", "Halden & Rye")
+    # A realistic workspace, so the standard test scenarios (run before every publish) can pass.
+    week = {"intervals": [{"weekday": d, "opens_at": "00:00", "closes_at": "23:59"} for d in range(7)]}
+    a.put(a.o("/office-hours"), json=week)
+    a.put(a.o("/business-profile"), json={"display_name": "Halden & Rye", "address_line1": "1 Mill Lane"})
+    for name, mins, pence in [("Skin fade", 30, 2000), ("Beard trim", 15, 1000)]:
+        a.post(a.o("/services"), json={"name": name, "duration_min": mins, "price_from_pence": pence})
     agent = a.post(a.o("/agents"), json={"name": "Rye", "greeting": GREETING}).json()
     a.agent_id = agent["id"]
     a.flow = lambda p="": a.o(f"/agents/{agent['id']}/flow{p}")

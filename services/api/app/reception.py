@@ -323,7 +323,7 @@ def pick_available_agent(db: Session, org_id: uuid.UUID, roles=None) -> tuple[uu
         .where(
             DeskAgent.organization_id == org_id,
             DeskAgent.status == DeskStatus.available,
-            Membership.role.in_(roles or DESK_ROLES),
+            Membership.role.in_(DESK_ROLES if roles is None else roles),
         )
         .order_by(func.coalesce(open_cases.c.n, 0), DeskAgent.last_assigned_at.asc().nulls_first())
         .limit(1)

@@ -17,11 +17,12 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from .. import audit
 from ..deps import DB, OrgContext, client_meta, require
-from ..flows import engine
+from ..flows import engine, testing
 from ..flows.schema import Flow
 from ..flows.templates import default_flow
 from ..flows.validate import validate
-from ..models import Agent, AgentFlow, AgentFlowVersion, FlowSession
+from ..live.receptionist import load_context
+from ..models import Agent, AgentFlow, AgentFlowVersion, FlowSession, FlowTest, Service
 from ..permissions import Perm
 from ..schemas import Strict
 
@@ -168,6 +169,7 @@ def _publish(
     source: str,
     restored_from: int | None,
     request: Request,
+    suite: dict | None = None,
 ) -> dict:
     flow = Flow.model_validate(graph)
     report = validate(flow)
@@ -186,6 +188,9 @@ def _publish(
         source=source,
         restored_from=restored_from,
         validation=report.as_dict(),
+        test_report={"summary": suite["summary"], "failed": [r["name"] for r in suite["results"] if not r["passed"]]}
+        if suite
+        else None,
         created_by=ctx.user.id,
     )
     db.add(v)
@@ -216,7 +221,21 @@ def publish(agent_id: uuid.UUID, body: PublishIn, ctx: Writer, db: DB, request: 
                 "revision": f.draft_revision,
             },
         )
-    return _publish(db, ctx, agent, f, f.draft, body.note, "publish", None, request)
+    # Regression gate: every saved scenario must pass against this exact draft.
+    flow = Flow.model_validate(f.draft)
+    if validate(flow).ok:
+        tests = _tests(db, ctx, agent, f)
+        suite = run_suite(db, ctx, agent, flow, tests)
+        db.rollback()
+        f = _flow(db, ctx.org_id, agent, lock=True)
+        if suite["summary"]["failed"]:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                {"message": "Some tests failed. Fix the flow or the tests, then publish.", "tests": suite},
+            )
+    else:
+        suite = None
+    return _publish(db, ctx, agent, f, f.draft, body.note, "publish", None, request, suite)
 
 
 @router.get("/versions/{version}")
@@ -367,3 +386,152 @@ def get_session(agent_id: uuid.UUID, session_id: uuid.UUID, ctx: Reader, db: DB)
         "outcome": s.outcome,
         "created_at": s.created_at.isoformat(),
     }
+
+
+# ---------- Agent Testing Lab ----------
+
+
+class TestIn(Strict):
+    scenario: testing.Scenario
+
+
+class RunIn(Strict):
+    source: Literal["draft", "published"] = "draft"
+    test_ids: list[uuid.UUID] | None = Field(None, max_length=100)
+
+
+def _tests(db: Session, ctx: OrgContext, agent: Agent, f: AgentFlow) -> list[FlowTest]:
+    if not f.tests_seeded:  # every agent starts with the standard twelve scenarios
+        for i, sc in enumerate(testing.default_suite()):
+            db.add(
+                FlowTest(
+                    organization_id=ctx.org_id,
+                    agent_id=agent.id,
+                    scenario=sc.model_dump(mode="json"),
+                    position=i,
+                    created_by=ctx.user.id,
+                )
+            )
+        f.tests_seeded = True
+        db.flush()
+    return list(
+        db.scalars(
+            select(FlowTest)
+            .where(FlowTest.agent_id == agent.id, FlowTest.organization_id == ctx.org_id)
+            .order_by(FlowTest.position, FlowTest.created_at)
+        )
+    )
+
+
+def _test_out(t: FlowTest) -> dict:
+    return {"id": str(t.id), "scenario": t.scenario}
+
+
+@router.get("/tests")
+def list_tests(agent_id: uuid.UUID, ctx: Reader, db: DB) -> list[dict]:
+    agent = _agent(db, ctx.org_id, agent_id)
+    tests = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent))
+    db.commit()
+    return [_test_out(t) for t in tests]
+
+
+@router.post("/tests", status_code=status.HTTP_201_CREATED)
+def add_test(agent_id: uuid.UUID, body: TestIn, ctx: Writer, db: DB) -> dict:
+    agent = _agent(db, ctx.org_id, agent_id)
+    existing = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent))
+    t = FlowTest(
+        organization_id=ctx.org_id,
+        agent_id=agent.id,
+        scenario=body.scenario.model_dump(mode="json"),
+        position=len(existing),
+        created_by=ctx.user.id,
+    )
+    db.add(t)
+    db.commit()
+    return _test_out(t)
+
+
+def _one_test(db: Session, ctx: OrgContext, agent_id: uuid.UUID, test_id: uuid.UUID) -> FlowTest:
+    t = db.scalar(
+        select(FlowTest).where(
+            FlowTest.id == test_id, FlowTest.agent_id == agent_id, FlowTest.organization_id == ctx.org_id
+        )
+    )
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such test")
+    return t
+
+
+@router.put("/tests/{test_id}")
+def update_test(agent_id: uuid.UUID, test_id: uuid.UUID, body: TestIn, ctx: Writer, db: DB) -> dict:
+    _agent(db, ctx.org_id, agent_id)
+    t = _one_test(db, ctx, agent_id, test_id)
+    t.scenario = body.scenario.model_dump(mode="json")
+    db.commit()
+    return _test_out(t)
+
+
+@router.delete("/tests/{test_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_test(agent_id: uuid.UUID, test_id: uuid.UUID, ctx: Writer, db: DB) -> None:
+    _agent(db, ctx.org_id, agent_id)
+    db.delete(_one_test(db, ctx, agent_id, test_id))
+    db.commit()
+
+
+def run_suite(db: Session, ctx: OrgContext, agent: Agent, flow: Flow, tests: list[FlowTest]) -> dict:
+    services = sorted(
+        db.scalars(select(Service.name).where(Service.organization_id == ctx.org_id, Service.active.is_(True)))
+    )
+    fill = {
+        "service": services[0] if services else "{service}",
+        "service2": services[1 if len(services) > 1 else 0] if services else "{service2}",
+    }
+    business = load_context(db, ctx.org_id)
+
+    def factory(sc: testing.Scenario) -> engine.Runtime:
+        return engine.Runtime(
+            db,
+            ctx.org_id,
+            "test",
+            caller_phone=sc.caller_phone,
+            fail_tools=sc.fail_tools,
+            force_hours=None if sc.hours == "actual" else sc.hours,
+            no_staff=sc.staff == "unavailable",
+            ctx=business,
+        )
+
+    results = []
+    for t in tests:
+        r = testing.run_scenario(flow, factory, testing.Scenario.model_validate(t.scenario), fill)
+        r["test_id"] = str(t.id)
+        results.append(r)
+    return {"summary": testing.summary(results), "results": results, "filled": fill}
+
+
+@router.post("/tests/run")
+def run_tests(agent_id: uuid.UUID, body: RunIn, ctx: Reader, db: DB) -> dict:
+    """Run the saved scenarios against the draft (default) or the published version. Text
+    simulation only: nothing is saved, and voice is not part of the test."""
+    agent = _agent(db, ctx.org_id, agent_id)
+    f = _flow(db, ctx.org_id, agent)
+    tests = _tests(db, ctx, agent, f)
+    db.commit()
+    if body.test_ids is not None:
+        wanted = {str(x) for x in body.test_ids}
+        tests = [t for t in tests if str(t.id) in wanted]
+    if body.source == "published":
+        pub = published_flow(db, ctx.org_id, agent_id)
+        if pub is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Nothing is published yet")
+        flow = pub[1]
+    else:
+        flow = Flow.model_validate(f.draft)
+        report = validate(flow)
+        if not report.ok:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                {"message": "Fix the flow's errors before testing it.", "validation": report.as_dict()},
+            )
+    out = run_suite(db, ctx, agent, flow, tests)
+    db.rollback()  # belt and braces: test runs never leave anything behind
+    return out

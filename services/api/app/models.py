@@ -465,6 +465,7 @@ class AgentFlow(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     published_version: Mapped[int | None] = mapped_column(Integer)
+    tests_seeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = _created()
 
 
@@ -520,3 +521,20 @@ class FlowSession(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     __table_args__ = (Index("ix_flow_sessions_org_created", "organization_id", "created_at"),)
+
+
+class FlowTest(Base):
+    """A saved caller scenario with its expected results (Agent Testing Lab)."""
+
+    __tablename__ = "flow_tests"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    scenario: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()

@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column("draft_updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         sa.Column("draft_updated_by", sa.UUID(), sa.ForeignKey("users.id", ondelete="SET NULL")),
         sa.Column("published_version", sa.Integer()),
+        sa.Column("tests_seeded", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
     op.create_index("ix_agent_flows_organization_id", "agent_flows", ["organization_id"])
@@ -73,8 +74,19 @@ def upgrade() -> None:
     )
     op.create_index("ix_flow_sessions_org_created", "flow_sessions", ["organization_id", "created_at"])
     op.create_index("ix_flow_sessions_organization_id", "flow_sessions", ["organization_id"])
+    op.create_table(
+        "flow_tests",
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column("organization_id", sa.UUID(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("agent_id", sa.UUID(), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("scenario", postgresql.JSONB(), nullable=False),
+        sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("created_by", sa.UUID(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+    )
+    op.create_index("ix_flow_tests_organization_id", "flow_tests", ["organization_id"])
     role = _role()
-    for t in ("agent_flows", "agent_flow_versions", "flow_sessions"):
+    for t in ("agent_flows", "agent_flow_versions", "flow_sessions", "flow_tests"):
         op.execute(f"""
             ALTER TABLE {t} ENABLE ROW LEVEL SECURITY;
             CREATE POLICY tenant_isolation ON {t} USING (organization_id = app_org()) WITH CHECK (organization_id = app_org());
@@ -83,9 +95,11 @@ def upgrade() -> None:
     # Published versions are a record: the API may add them, never change or remove them.
     op.execute(f"GRANT SELECT, INSERT ON agent_flow_versions TO {role}")
     op.execute(f"GRANT SELECT, INSERT, UPDATE ON flow_sessions TO {role}")
+    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON flow_tests TO {role}")
 
 
 def downgrade() -> None:
+    op.drop_table("flow_tests")
     op.drop_table("flow_sessions")
     op.drop_table("agent_flow_versions")
     op.drop_table("agent_flows")
