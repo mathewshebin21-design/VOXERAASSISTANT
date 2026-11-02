@@ -114,4 +114,27 @@ def default_flow(greeting: str | None = None) -> Flow:
         _e("done", "else", "route"),
         _e("more", "no_answer", "bye"),
     ]
+    # A tidy layered layout: branches side by side, in the same order as the router's outcomes.
+    layout = {
+        "start": (0, 0),
+        "hours": (0, 170),
+        "closed": (420, 170),
+        "route": (0, 340),
+        "svc": (-640, 540),
+        "ask-svc": (-960, 720),
+        "svc2": (-960, 900),
+        "slots": (-640, 900),
+        "book": (-640, 1080),
+        "booked": (-640, 1260),
+        "transfer": (-300, 540),
+        "change": (40, 540),
+        "kb": (420, 540),
+        "more": (420, 720),
+        "done": (420, 900),
+        "msg": (40, 900),
+        "bye": (240, 1260),
+    }
+    for n in nodes:
+        x, y = layout[n["id"]]
+        n["position"] = {"x": x, "y": y}
     return Flow.model_validate({"nodes": nodes, "edges": edges})

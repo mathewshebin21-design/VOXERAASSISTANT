@@ -2,7 +2,7 @@
 
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Rocket, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
+import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Rocket, Plug, Plus, Search, Sparkles, Users, Waypoints, Workflow, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +19,7 @@ export const FLOW_NAV = [
   { href: "/flow/app/calls", label: "Calls", icon: MessagesSquare, key: "4" },
   { href: "/flow/app/calendar", label: "Calendar", icon: CalendarRange, key: "5" },
   { href: "/flow/app/canvas", label: "Canvas", icon: Waypoints, key: "6" },
+  { href: "/flow/app/studio", label: "Agent Studio", icon: Workflow, key: "" },
   { href: "/flow/app/agent", label: "Agent", icon: Bot, key: "7" },
   { href: "/flow/app/simulate", label: "Simulate", icon: Sparkles, key: "8" },
   { href: "/flow/app/voice", label: "Voice lab", icon: Mic, key: "" },
@@ -92,6 +93,8 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const agent = usePreview((s) => s.draft.persona.agentName);
+  const crumbMode = useDataMode();
+  const crumb = crumbMode.mode === "live" && crumbMode.org ? crumbMode.org.organization.name : `Halden & Rye · ${agent}`;
   const [palette, setPalette] = useState(false);
   const [q, setQ] = useState("");
   const on = (h: string, exact?: boolean) => (exact ? path === h : path === h || path.startsWith(h + "/"));
@@ -129,7 +132,7 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
       </aside>
       <header className="relative z-30 flex items-center gap-3 px-5 py-4 md:pl-24">
         <span className="font-display text-sm font-semibold tracking-wide">VOXERA <span className="bg-gradient-to-r from-flw-violet to-flw-cyan bg-clip-text text-transparent">FLOW</span></span>
-        <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline">Halden &amp; Rye · {agent}</span>
+        <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline">{crumb}</span>
         <button onClick={() => setPalette(true)} className="ml-auto hidden items-center gap-2 rounded-xl border border-flw-line bg-flw-surface/60 px-3 py-1.5 text-xs text-flw-mute hover:border-flw-violet/60 sm:flex" aria-label="Jump to a page"><Search size={13} /> Jump to… <kbd>Ctrl K</kbd></button>
         <div className="ml-auto sm:ml-0"><WorkspaceMenu /></div>
       </header>

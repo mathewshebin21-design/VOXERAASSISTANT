@@ -3,7 +3,7 @@
 // Browser → Next.js proxy (/api/v1/*) → VOXERA API. Tokens never reach this code.
 
 export class ApiError extends Error {
-  constructor(public status: number, public detail: string) {
+  constructor(public status: number, public detail: string, public data?: unknown) {
     super(detail);
   }
 }
@@ -12,6 +12,7 @@ function detailOf(body: unknown): string {
   if (!body || typeof body !== "object") return "Something went wrong";
   const d = (body as { detail?: unknown }).detail;
   if (typeof d === "string") return d;
+  if (d && typeof d === "object" && typeof (d as { message?: unknown }).message === "string") return (d as { message: string }).message;
   // FastAPI validation errors: [{loc, msg}, …]
   if (Array.isArray(d) && d.length) return d.map((e: { loc?: unknown[]; msg?: string }) => `${(e.loc ?? []).slice(-1)[0] ?? "field"}: ${e.msg}`).join("; ");
   return "Something went wrong";
@@ -27,7 +28,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   });
   if (r.status === 204) return undefined as T;
   const data = await r.json().catch(() => null);
-  if (!r.ok) throw new ApiError(r.status, detailOf(data));
+  if (!r.ok) throw new ApiError(r.status, detailOf(data), (data as { detail?: unknown } | null)?.detail);
   return data as T;
 }
 
