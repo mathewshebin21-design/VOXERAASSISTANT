@@ -31,7 +31,7 @@ function doneSteps(s: Snapshot | null): Set<StepId> {
   return d;
 }
 
-/** Sets a workspace up by conversation. Uses Claude when it's configured, otherwise a free guided mode. */
+/** Sets a workspace up by conversation. Uses the AI model when one is configured (Claude, Gemini, Groq…), otherwise a free guided mode. */
 export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName: string }) {
   const base = `/orgs/${orgId}`;
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -241,7 +241,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
           title={<span className="flex items-center gap-2"><Wand2 size={14} /> Setup assistant</span>}
           right={aiAvailable ? (
             <div className="flex rounded-lg border border-flw-line p-0.5 text-[11px]" role="radiogroup" aria-label="Assistant mode">
-              {(["guided", "ai"] as const).map((m) => <button key={m} role="radio" aria-checked={mode === m} onClick={() => setMode(m)} className={clsx("rounded-md px-2 py-0.5", mode === m ? "bg-flw-violet/25 text-flw-text" : "text-flw-mute")}>{m === "ai" ? "Claude" : "Step by step"}</button>)}
+              {(["guided", "ai"] as const).map((m) => <button key={m} role="radio" aria-checked={mode === m} onClick={() => setMode(m)} className={clsx("rounded-md px-2 py-0.5", mode === m ? "bg-flw-violet/25 text-flw-text" : "text-flw-mute")}>{m === "ai" ? "AI chat" : "Step by step"}</button>)}
             </div>
           ) : <Chip tone="cyan">step by step · free</Chip>}
         />
@@ -279,7 +279,7 @@ export function SetupAssistant({ orgId, firstName }: { orgId: string; firstName:
           ))}
         </ul>
         <div className="space-y-1.5 border-t border-flw-line/70 p-4 text-xs text-flw-mute">
-          <p className="flex items-center gap-1.5"><Sparkles size={12} /> {aiAvailable ? "Claude can take free-form answers." : "Free guided mode. With a Claude key on the server, the assistant also understands free-form chat."}</p>
+          <p className="flex items-center gap-1.5"><Sparkles size={12} /> {aiAvailable ? "AI chat takes free-form answers." : "Free guided mode. With an AI model connected on the server (Claude, Gemini, Groq…), the assistant also understands free-form chat."}</p>
           <p>Everything is saved straight to your workspace. To change something later, just tell the assistant (“we&rsquo;re closed on Mondays now”) and say “undo” if it&rsquo;s wrong — or edit it in <Link href="/flow/app/workspace" className="text-flw-cyan hover:underline">Workspace</Link>.</p>
         </div>
       </Glass>

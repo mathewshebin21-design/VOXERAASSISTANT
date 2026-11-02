@@ -61,8 +61,8 @@ export function useSimulator() {
     setClaude(null);
     if (!practice.orgId) return;
     let cancelled = false;
-    void api<{ llm: { available: boolean; model: string } }>(`/orgs/${practice.orgId}/live/status`)
-      .then((st) => { if (!cancelled && st.llm.available) setClaude(new ApiBrain(practice.orgId!, `Claude (${st.llm.model})`)); })
+    void api<{ llm: { available: boolean; model: string; provider: string } }>(`/orgs/${practice.orgId}/live/status`)
+      .then((st) => { if (!cancelled && st.llm.available) setClaude(new ApiBrain(practice.orgId!, `${st.llm.provider === "Anthropic" ? "Claude" : st.llm.provider} (${st.llm.model})`)); })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [practice.orgId]);
@@ -205,11 +205,11 @@ export function useSimulator() {
         } catch (e) {
           // Claude unavailable (cap reached, switched off, no permission): carry on with the free brain.
           const why = e instanceof ProviderError || e instanceof Error ? e.message : "unavailable";
-          if (!(e instanceof ProviderError) || !e.retryable) { setClaude(null); setBrainNote(`Claude isn't available right now (${why}), so the free practice brain is answering.`); }
+          if (!(e instanceof ProviderError) || !e.retryable) { setClaude(null); setBrainNote(`The AI brain isn't available right now (${why}), so the free practice brain is answering.`); }
           const { events: ev, state: p1 } = await practiceReply(text, pStateRef.current, setup.catalog, practice.findSlots);
           setPState(p1);
           pStateRef.current = p1;
-          enqueue([...barge, { kind: "state", label: `Claude unavailable (${why}) — free practice brain answered` }, ...ev]);
+          enqueue([...barge, { kind: "state", label: `AI brain unavailable (${why}) — free practice brain answered` }, ...ev]);
         }
       })();
       return;
@@ -291,7 +291,7 @@ export function useSimulator() {
     /** "workspace" when answering from the signed-in workspace's real details. */
     source: setup ? ("workspace" as const) : ("demo" as const),
     business: setup?.catalog.business ?? null,
-    /** Which brain answers: Claude when switched on for the workspace, else the free rule-based one. */
+    /** Which brain answers: the AI model when switched on for the workspace, else the free rule-based one. */
     brain: setup && claude ? ({ kind: "claude", name: claude.name } as const) : ({ kind: "free", name: "Free practice brain" } as const),
     brainNote,
     voiceName,

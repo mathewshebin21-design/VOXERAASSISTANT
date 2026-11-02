@@ -46,7 +46,38 @@ Speech recognition stays in the browser for now. Server-side STT arrives with te
 - `VOXERA_LLM_MODEL=claude-haiku-5-5` ($0.10 / $0.50) is faster and much cheaper, but less capable. The same cap then costs at most **$0.10**. Haiku 5.5 has no server-side refusal fallback, so VOXERA leaves that parameter off for it. `claude-sonnet-5-5` ($2 / $10) sits in between, at most $2.00. Which model to use is your decision.
 - I haven't checked ElevenLabs prices. Work out the cost from your plan's price per character × the character cap.
 
-## Hosting
+## Other AI models: Groq, Google Gemini, OpenRouter, Qwen on your own machine
+
+Claude is the default, but the brain can be any provider with an OpenAI-compatible chat API. The receptionist, the setup assistant's AI chat and the practice calls in Simulate all use whichever is configured. They all keep the same tools over the workspace's own data, the same monthly caps, and the same rule of never making up prices or times.
+
+Set these on the **voxera-api** project in Vercel (Settings → Environment Variables), then redeploy it:
+
+| Setting | Groq | Google Gemini | OpenRouter | Ollama (e.g. Qwen on your own computer) |
+|---|---|---|---|---|
+| `VOXERA_LLM_PROVIDER` | `groq` | `gemini` | `openrouter` | `ollama` |
+| `VOXERA_LLM_API_KEY` | key from console.groq.com | key from Google AI Studio | key from openrouter.ai | not needed |
+| `VOXERA_LLM_MODEL` | a model ID from Groq's model list | a Gemini model ID from Google's model list | a model ID from OpenRouter's list | the model you pulled, e.g. `qwen3.5:27b` |
+| Caps (as for Claude) | `VOXERA_LIVE_LLM_TOKENS_PER_ORG_MONTH`, `VOXERA_LIVE_LLM_TOKENS_GLOBAL_MONTH` | same | same | same |
+
+- **Model IDs change often**, so there's no default for these providers. Copy the exact ID from the provider's model page. Without one, the status shows "not set" and the free practice brain carries on.
+- **Any other compatible endpoint** (a rented GPU server running vLLM, for example): set `VOXERA_LLM_PROVIDER=openai_compatible` and `VOXERA_LLM_BASE_URL` to its address ending in `/v1`.
+- **Ollama only works where the API runs.** On your own computer (`http://localhost:11434/v1`) it's for development. The hosted API on Vercel can't reach your laptop.
+- **Gemini** gets its tool definitions in the narrower format it accepts (nullable fields, no empty objects). This is converted automatically.
+- **Reasoning models** (some Qwen versions) may "think out loud" in `<think>` tags. VOXERA hides that text from callers. Thinking uses up output tokens, so if replies come back empty or cut off, raise `VOXERA_LLM_MAX_OUTPUT_TOKENS` (default 400) or choose a non-thinking variant.
+- **Token counts:** Groq and OpenRouter report exact usage. When a provider doesn't (Gemini's and Ollama's compatible endpoints may not), VOXERA estimates from the characters sent and received, about 3 characters per token, which errs high. The caps still hold.
+
+**Free tiers: what to know before real callers use them**
+
+- **Groq** and **Gemini** both have free tiers with per-minute and per-day limits. The limits apply to your whole account, shared by every business on VOXERA, and providers change them without notice.
+- **Gemini's free tier** may use what's sent to improve Google's products, and people may review it. Some guides also say it can't be used to serve people in the UK or EU. Check Google's current terms before real customer conversations go through it; the paid tier doesn't use your data this way.
+- Smaller open models are more likely to slip on a receptionist's job, such as misreading a time or skipping the availability check. Try any model in the Voice lab and Simulate before giving it to customers.
+
+What's been verified (2026-11-02):
+- **Automated tests** fake each provider at the HTTP level. They cover tool rounds, streaming, metering and estimates, errors, Gemini's schema format, hiding `<think>` text, the setup assistant, and the settings each provider needs.
+- **Full site run:** in a real browser, the site ran against a local OpenAI-compatible stand-in, including a Simulate call that looked up the workspace's services.
+- **Not verified here:** real Groq, Gemini, OpenRouter or Ollama accounts, which this environment can't reach. The first real test is setting a key and model, then trying the Voice lab.
+
+
 The public demo on Vercel has no API behind it, so these switches only appear when the web app is connected to a running API (local Docker, or a hosted API). Hosting the API and database costs money and needs your approval.
 
 ## Verification (2026-10-26)

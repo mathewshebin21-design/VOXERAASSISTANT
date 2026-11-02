@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 import anthropic
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
@@ -56,7 +57,7 @@ class TtsIn(Strict):
 
 
 def _llm_ready() -> bool:
-    return get_settings().anthropic_api_key is not None
+    return providers.llm_ready()
 
 
 def _tts_ready() -> bool:
@@ -107,7 +108,7 @@ def live_status(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB)
         }
 
     return {
-        "llm": info(_llm_ready(), UsageKind.llm_tokens, "Anthropic", s.llm_model),
+        "llm": info(_llm_ready(), UsageKind.llm_tokens, providers.llm_label(), s.model or "not set"),
         "tts": info(_tts_ready(), UsageKind.tts_characters, "ElevenLabs", s.elevenlabs_model),
     }
 
@@ -143,8 +144,6 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
     require_budget(db, ctx.org_id, UsageKind.llm_tokens, (est_input + s.llm_max_output_tokens) * MAX_ROUNDS)
     bctx = load_context(db, ctx.org_id)
     org_id, user_id = ctx.org_id, ctx.user.id
-    client = providers.llm_client()
-
     msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
     if msgs[0]["role"] == "assistant":  # the conversation must open with a user turn
         msgs.insert(0, {"role": "user", "content": "(The call has just connected.)"})
@@ -161,8 +160,7 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
             h = turn.handoff
             yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
 
-    gen = _agent_stream(
-        client=client,
+    gen = _llm_stream(
         system=system_prompt(bctx),
         tools=TOOLS,
         msgs=msgs,
@@ -174,6 +172,155 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
         reference="voice lab brain",
     )
     return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
+
+
+def _llm_stream(**kw) -> Iterator[str]:
+    """The configured provider's tool-using conversation, as server-sent events."""
+    if get_settings().llm_provider == "anthropic":
+        return _agent_stream(client=providers.llm_client(), **kw)
+    return _openai_stream(**kw)
+
+
+class _HideThinking:
+    """Drops <think>…</think> reasoning that some open models (e.g. Qwen) put in their reply text."""
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.inside = False
+
+    def feed(self, text: str) -> str:
+        self.buf += text
+        out = ""
+        while self.buf:
+            tag = "</think>" if self.inside else "<think>"
+            i = self.buf.find(tag)
+            if i >= 0:
+                out += "" if self.inside else self.buf[:i]
+                self.buf = self.buf[i + len(tag) :]
+                self.inside = not self.inside
+                continue
+            keep = next((n for n in range(len(tag) - 1, 0, -1) if self.buf.endswith(tag[:n])), 0)
+            out += "" if self.inside else self.buf[: len(self.buf) - keep]
+            self.buf = self.buf[len(self.buf) - keep :]
+            break
+        return out
+
+
+def _openai_stream(
+    *,
+    system: str,
+    tools: list[dict],
+    msgs: list[dict],
+    run: Callable[[Session, str, object], tuple[bool, str, str]],
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    usage_key: str,
+    reference: str,
+    after: Callable[[], Iterator[str]] | None = None,
+) -> Iterator[str]:
+    """The same conversation as _agent_stream, through an OpenAI-compatible chat API (Groq,
+    Gemini, OpenRouter, Ollama…). Uses the provider's token counts when it sends them, and
+    otherwise a conservative estimate, so the monthly caps still hold."""
+    s = get_settings()
+    convo: list[dict] = [{"role": "system", "content": system}, *msgs]
+    fn_tools = providers.openai_tools(tools, s.llm_provider)
+    used = 0
+    sent_chars = 0
+    http = providers.openai_http()
+    tdb = SessionLocal()
+    set_tenant(tdb, org_id=org_id, user_id=user_id)
+    try:
+        for _ in range(MAX_ROUNDS):
+            body: dict = {
+                "model": s.model,
+                "messages": convo,
+                "tools": fn_tools,
+                "stream": True,
+                "max_tokens": s.llm_max_output_tokens,
+            }
+            if s.llm_provider in ("groq", "openrouter", "openai_compatible"):
+                body["stream_options"] = {"include_usage": True}
+            prompt_chars = len(json.dumps(convo)) + len(json.dumps(fn_tools))
+            text_out, calls, finish, usage = "", {}, None, 0
+            hide = _HideThinking()
+            sent_chars = prompt_chars
+            r = http.send(providers.openai_request(http, body), stream=True)
+            try:
+                if r.status_code != 200:
+                    r.read()
+                    raise httpx.HTTPStatusError("provider error", request=r.request, response=r)
+                for line in r.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    u = chunk.get("usage") or {}
+                    usage = max(usage, int(u.get("total_tokens") or 0))
+                    for ch in chunk.get("choices") or []:
+                        d = ch.get("delta") or {}
+                        if d.get("content"):
+                            shown = hide.feed(d["content"])
+                            text_out += d["content"]
+                            if shown:
+                                yield _sse({"type": "text", "text": shown})
+                        for n, tc in enumerate(d.get("tool_calls") or []):
+                            slot = calls.setdefault(tc.get("index", n), {"id": None, "name": "", "args": ""})
+                            slot["id"] = tc.get("id") or slot["id"]
+                            f = tc.get("function") or {}
+                            slot["name"] += f.get("name") or ""
+                            slot["args"] += f.get("arguments") or ""
+                        finish = ch.get("finish_reason") or finish
+            finally:
+                r.close()
+            used += usage or (prompt_chars + len(text_out) + sum(len(c["args"]) for c in calls.values())) // 3
+            sent_chars = 0
+            if not calls:
+                break
+            if finish == "length":
+                yield _sse({"type": "error", "message": "Reply was cut off before a tool call finished."})
+                break
+            ordered = [calls[k] for k in sorted(calls)]
+            for i, c in enumerate(ordered):
+                c["id"] = c["id"] or f"call_{i}"
+            convo.append(
+                {
+                    "role": "assistant",
+                    "content": text_out or None,
+                    "tool_calls": [
+                        {
+                            "id": c["id"],
+                            "type": "function",
+                            "function": {"name": c["name"], "arguments": c["args"] or "{}"},
+                        }
+                        for c in ordered
+                    ],
+                }
+            )
+            for c in ordered:
+                args = json.loads(c["args"]) if c["args"].strip() else {}
+                ok, out, shown = run(tdb, c["name"], args)
+                yield _sse({"type": "tool", "name": c["name"], "ok": ok, "result": shown})
+                convo.append({"role": "tool", "tool_call_id": c["id"], "content": out})
+        if after:
+            yield from after()
+        yield _sse({"type": "done", "llm_tokens": used})
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        log.warning("llm provider error", extra={"status": code, "provider": s.llm_provider})
+        msg = "Language model is rate limited." if code == 429 else f"Language model error (HTTP {code})."
+        yield _sse({"type": "error", "message": msg})
+    except httpx.HTTPError:
+        yield _sse({"type": "error", "message": "Could not reach the language model."})
+    except ValueError:  # unparseable stream or tool arguments
+        yield _sse({"type": "error", "message": "The model produced an invalid tool call."})
+    finally:
+        tdb.close()
+        http.close()
+        used += sent_chars // 3  # an interrupted request still counts what was sent
+        if used:
+            _record(org_id, user_id, UsageKind.llm_tokens, used, usage_key, reference)
 
 
 def _agent_stream(
@@ -192,7 +339,7 @@ def _agent_stream(
     """Streams a tool-using Claude conversation as server-sent events (text, tool, error, done),
     running tools in a fresh tenant-scoped session and metering the tokens it used."""
     s = get_settings()
-    fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.llm_model in FALLBACK_MODELS else {}
+    fallback = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if s.model in FALLBACK_MODELS else {}
     used = 0
     partial_in = partial_chars = 0
     tdb = SessionLocal()  # the request's session is closed once streaming starts
@@ -201,7 +348,7 @@ def _agent_stream(
         for _ in range(MAX_ROUNDS):
             partial_in = partial_chars = 0
             with client.beta.messages.stream(
-                model=s.llm_model,
+                model=s.model,
                 max_tokens=s.llm_max_output_tokens,
                 system=system,
                 tools=tools,
@@ -297,8 +444,7 @@ def setup_assistant(body: SetupIn, ctx: Annotated[OrgContext, Depends(_setup_per
         ok, out = setup_agent.run_tool(tdb, sctx, tool, args)
         return ok, out, out[:300]
 
-    gen = _agent_stream(
-        client=providers.llm_client(),
+    gen = _llm_stream(
         system=setup_agent.system_prompt(name),
         tools=setup_agent.TOOLS,
         msgs=msgs,

@@ -97,7 +97,7 @@ await step("Command: real bookings and desk cases appear after they're created",
   return /4\/6 done/.test(await p.locator("main").innerText());
 });
 
-await step("Flow Simulate: practice receptionist answers from the workspace's real details (Claude when switched on)", async () => {
+await step("Flow Simulate: practice receptionist answers from the workspace's real details (AI model when switched on)", async () => {
   await p.goto(`${BASE}/flow/app/simulate`, { waitUntil: "networkidle" });
   await p.getByTestId("sim-source").getByText(/real services, hours and availability/).waitFor({ timeout: 10000 });
   const ask = async (text, expect) => {
@@ -105,13 +105,15 @@ await step("Flow Simulate: practice receptionist answers from the workspace's re
     await p.getByRole("button", { name: "Send" }).click();
     await p.getByText(expect).last().waitFor({ timeout: 15000 });
   };
-  // With Claude switched on for the workspace (CI runs a local stand-in), the call uses it;
+  // With an AI model switched on for the workspace (CI runs a local Claude stand-in), the call uses it;
   // otherwise the free practice brain answers.
   const brain = p.getByTestId("sim-brain");
   await brain.waitFor({ timeout: 10000 });
-  if (/Claude/.test(await brain.innerText())) {
+  if (/Brain: AI/.test(await brain.innerText())) {
     await ask("Hiya, what services do you do?", /We offer .*Gents cut/);
-    return (await p.getByText("list_services").count()) > 0 && (await p.getByText("unsupported_answer").count()) === 0;
+    // Reasoning some open models put in <think> tags must never reach the caller.
+    const hidden = (await p.getByText(/The caller wants the list|<think>/).count()) === 0;
+    return hidden && (await p.getByText("list_services").count()) > 0 && (await p.getByText("unsupported_answer").count()) === 0;
   }
   await ask("heyy", /Hi there!/);
   await ask("what do you know", /AI receptionist for/);
