@@ -5,20 +5,23 @@ each other). Publishing validates the draft and stores an immutable numbered ver
 the published version only, so an unpublished draft never changes what callers hear.
 """
 
+import copy
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from .. import audit
 from ..deps import DB, OrgContext, client_meta, require
+from ..flows import engine
 from ..flows.schema import Flow
 from ..flows.templates import default_flow
 from ..flows.validate import validate
-from ..models import Agent, AgentFlow, AgentFlowVersion
+from ..models import Agent, AgentFlow, AgentFlowVersion, FlowSession
 from ..permissions import Perm
 from ..schemas import Strict
 
@@ -260,3 +263,107 @@ def published_flow(db: Session, org_id: uuid.UUID, agent_id: uuid.UUID) -> tuple
         return None
     g = _published_graph(db, f)
     return (f.published_version, Flow.model_validate(g)) if g else None
+
+
+# ---------- simulated conversations ----------
+
+
+class SessionIn(Strict):
+    source: Literal["draft", "published"] = "draft"
+    caller_phone: str | None = Field(None, max_length=20)
+    fail_tools: bool = False
+
+
+class TurnIn(Strict):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+def _session(db: Session, org_id: uuid.UUID, agent_id: uuid.UUID, session_id: uuid.UUID) -> FlowSession:
+    s = db.scalar(
+        select(FlowSession).where(
+            FlowSession.id == session_id, FlowSession.organization_id == org_id, FlowSession.agent_id == agent_id
+        )
+    )
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such conversation")
+    return s
+
+
+def _runtime(db: Session, org_id: uuid.UUID, s: FlowSession) -> engine.Runtime:
+    opts = s.state.get("options", {})
+    return engine.Runtime(
+        db, org_id, s.mode, caller_phone=opts.get("caller_phone"), fail_tools=opts.get("fail_tools", False)
+    )
+
+
+@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+def start_session(agent_id: uuid.UUID, body: SessionIn, ctx: Reader, db: DB) -> dict:
+    """Start a simulated call against the draft or the published version. Nothing it does is saved
+    (bookings and hand-overs are validated for real, then rolled back)."""
+    agent = _agent(db, ctx.org_id, agent_id)
+    f = _flow(db, ctx.org_id, agent)
+    if body.source == "published":
+        pub = published_flow(db, ctx.org_id, agent_id)
+        if pub is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Nothing is published yet")
+        version, flow = pub
+    else:
+        version, flow = None, Flow.model_validate(f.draft)
+    report = validate(flow)
+    if not report.ok:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"message": "Fix the flow's errors before testing it.", "validation": report.as_dict()},
+        )
+    state = engine.new_state()
+    state["options"] = {"caller_phone": body.caller_phone, "fail_tools": body.fail_tools}
+    s = FlowSession(
+        organization_id=ctx.org_id,
+        agent_id=agent.id,
+        mode="simulation",
+        source=body.source,
+        version=version,
+        graph=flow.model_dump(mode="json"),
+        state=copy.deepcopy(state),
+        transcript=[],
+        created_by=ctx.user.id,
+    )
+    db.add(s)
+    db.flush()
+    state["session"] = str(s.id)
+    events = engine.Engine(flow, _runtime(db, ctx.org_id, s)).start(state)
+    s.state, s.transcript = copy.deepcopy(state), events
+    flag_modified(s, "state")
+    db.commit()
+    return {"session_id": str(s.id), "events": events, "ended": False, "version": version, "source": body.source}
+
+
+@router.post("/sessions/{session_id}/turn")
+def session_turn(agent_id: uuid.UUID, session_id: uuid.UUID, body: TurnIn, ctx: Reader, db: DB) -> dict:
+    s = _session(db, ctx.org_id, agent_id, session_id)
+    if s.ended:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This conversation has ended")
+    flow = Flow.model_validate(s.graph)
+    state = copy.deepcopy(s.state)
+    events = engine.Engine(flow, _runtime(db, ctx.org_id, s)).turn(state, body.text)
+    s.state = state
+    flag_modified(s, "state")
+    s.transcript = [*s.transcript, {"type": "caller", "text": body.text}, *events]
+    s.ended, s.outcome = bool(state.get("ended")), state.get("outcome")
+    db.commit()
+    return {"events": events, "ended": s.ended, "outcome": s.outcome, "node": state.get("node")}
+
+
+@router.get("/sessions/{session_id}")
+def get_session(agent_id: uuid.UUID, session_id: uuid.UUID, ctx: Reader, db: DB) -> dict:
+    s = _session(db, ctx.org_id, agent_id, session_id)
+    return {
+        "session_id": str(s.id),
+        "mode": s.mode,
+        "source": s.source,
+        "version": s.version,
+        "transcript": s.transcript,
+        "ended": s.ended,
+        "outcome": s.outcome,
+        "created_at": s.created_at.isoformat(),
+    }

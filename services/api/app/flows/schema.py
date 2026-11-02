@@ -69,7 +69,7 @@ class KnowledgeSettings(S):
 class Rule(S):
     id: Id
     variable: Var
-    op: Literal["equals", "not_equals", "contains", "is_set", "is_not_set", "in"]
+    op: Literal["equals", "not_equals", "contains", "is_set", "is_not_set", "in", "is_yes", "is_no"]
     value: ShortText = ""
     label: ShortText = ""
 

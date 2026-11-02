@@ -71,7 +71,15 @@ def default_flow(greeting: str | None = None) -> Flow:
             140,
             message="We're closed right now, but I can take a message and the team will call you back.",
         ),
-        _n("bye", "end", "Goodbye", 560, 820, message="Thanks for calling. Goodbye!"),
+        _n("bye", "end", "Goodbye", 560, 960, message="Thanks for calling. Goodbye!"),
+        _n(
+            "done",
+            "condition",
+            "Finished?",
+            560,
+            800,
+            rules=[{"id": "done", "variable": "anything_else", "op": "is_no", "label": "Nothing else"}],
+        ),
     ]
     edges = [
         _e("start", "next", "hours"),
@@ -101,7 +109,9 @@ def default_flow(greeting: str | None = None) -> Flow:
         _e("change", "handed_off", "bye"),
         _e("kb", "answered", "more"),
         _e("kb", "not_found", "msg"),
-        _e("more", "answered", "route"),
+        _e("more", "answered", "done"),
+        _e("done", "done", "bye"),
+        _e("done", "else", "route"),
         _e("more", "no_answer", "bye"),
     ]
     return Flow.model_validate({"nodes": nodes, "edges": edges})

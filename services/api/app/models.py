@@ -489,3 +489,34 @@ class AgentFlowVersion(Base):
     )
     created_at: Mapped[datetime] = _created()
     __table_args__ = (UniqueConstraint("flow_id", "version", name="uq_flow_version"),)
+
+
+class FlowSession(Base):
+    """One conversation run through a flow: simulated, an automated test, or (later) a real call.
+
+    Keeps the exact graph it ran (so later edits don't rewrite history), the engine state, the
+    full transcript with every tool call and the evidence behind each answer, and its outcome.
+    """
+
+    __tablename__ = "flow_sessions"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)  # simulation | test | live
+    source: Mapped[str] = mapped_column(String(20), nullable=False)  # draft | published
+    version: Mapped[int | None] = mapped_column(Integer)
+    graph: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    state: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    transcript: Mapped[list] = mapped_column(JSONB, nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(40))
+    ended: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (Index("ix_flow_sessions_org_created", "organization_id", "created_at"),)
