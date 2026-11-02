@@ -8,7 +8,7 @@ and refuses to deploy (non-zero exit, so Vercel keeps the current deployment) wh
    production the production database (see app/deploy_env.py); or
 2. the database schema is not at this code's migration head: run the migrations first.
 
-With no database attached it skips, and the API reports not-ready until one is connected.
+A local build may skip when no database is attached. A hosted build refuses.
 """
 
 import sys
@@ -27,11 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> int:
+    want = deploy_env.expected()
     overrides = hosted_overrides()
     if not overrides:
+        if want:
+            print("vercel_build: REFUSING TO DEPLOY: missing database configuration.")
+            return 1
         print("vercel_build: no database attached (DATABASE_URL not set) — skipping the database preflight.")
         return 0
-    want = deploy_env.expected()
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     head = ScriptDirectory.from_config(cfg).get_current_head()

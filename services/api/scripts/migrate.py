@@ -32,7 +32,7 @@ from sqlalchemy import create_engine, pool, text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 
 from app import deploy_env  # noqa: E402
-from app.platform import APP_ROLE, app_role_password, hosted_overrides  # noqa: E402
+from app.platform import APP_ROLE, app_role_password, migration_owner_url  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,16 +55,15 @@ def current_revision(conn) -> str | None:
     return conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
 
 
-def ensure_runtime_role(engine, database: str) -> None:
+def ensure_runtime_role(c, database: str) -> None:
     password = app_role_password()
     assert password and re.fullmatch(r"[0-9a-f]{64}", password)  # hex only: safe to inline in DDL
     assert re.fullmatch(r"[A-Za-z0-9_-]+", database)
-    with engine.begin() as c:
-        exists = c.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE}).scalar()
-        verb = "ALTER" if exists else "CREATE"
-        # New roles default to NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS.
-        c.execute(text(f"{verb} ROLE {APP_ROLE} LOGIN PASSWORD '{password}'"))
-        c.execute(text(f'GRANT CONNECT ON DATABASE "{database}" TO {APP_ROLE}'))
+    exists = c.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE}).scalar()
+    verb = "ALTER" if exists else "CREATE"
+    # New roles default to NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS.
+    c.execute(text(f"{verb} ROLE {APP_ROLE} LOGIN PASSWORD '{password}'"))
+    c.execute(text(f'GRANT CONNECT ON DATABASE "{database}" TO {APP_ROLE}'))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,11 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yes", action="store_true", help="confirm a downgrade")
     a = ap.parse_args(argv)
 
-    overrides = hosted_overrides()
-    if not overrides:
+    owner_url = migration_owner_url()
+    if not owner_url:
         say("no database connection (DATABASE_URL_UNPOOLED / DATABASE_URL) in the environment")
         return 2
-    owner_url = overrides["migration_database_url"]
     url = make_url(owner_url)
     host, database = url.host or "", url.database or ""
     say(f"target {a.env}: host {host}, database {database}")
@@ -96,54 +94,58 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = create_engine(owner_url, poolclass=pool.NullPool)
     try:
-        with engine.connect() as c:
+        with engine.begin() as c:
+            # Hold this transaction through role setup, Alembic and the final claim.
+            # The lock also coordinates manual runs outside GitHub Actions.
+            if not c.execute(text("SELECT pg_try_advisory_xact_lock(1448040517, 1)")).scalar():
+                say("STOP: another migration is running on this database. Retry when it finishes.")
+                return 3
+            cfg.attributes["connection"] = c
             have = deploy_env.claimed(c)
             rev = current_revision(c)
             empty = not c.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")).scalar()
-        say(f"claimed for: {have or 'nobody yet'}; schema at {rev or 'empty'}; code head {head}")
+            say(f"claimed for: {have or 'nobody yet'}; schema at {rev or 'empty'}; code head {head}")
 
-        if have is not None and have != a.env:
-            say(f"STOP: this database belongs to {have}, not {a.env}. Nothing was changed.")
-            return 3
-        if have is None and not a.check and not (a.claim_if_empty and empty):
-            if not a.claim:
-                say(
-                    f"STOP: this database is not claimed yet. If {host} is the {a.env} database, rerun with "
-                    f"--claim --confirm-host {host}. Nothing was changed."
+            if have is not None and have != a.env:
+                say(f"STOP: this database belongs to {have}, not {a.env}. Nothing was changed.")
+                return 3
+            if have is None and not a.check and not (a.claim_if_empty and empty):
+                if not a.claim:
+                    say(
+                        f"STOP: this database is not claimed yet. If {host} is the {a.env} database, rerun with "
+                        f"--claim --confirm-host {host}. Nothing was changed."
+                    )
+                    return 3
+                if a.confirm_host != host:
+                    say("STOP: --confirm-host must equal the target host exactly. Nothing was changed.")
+                    return 3
+            if a.check:
+                pending = (
+                    []
+                    if rev == head
+                    else [s.revision for s in ScriptDirectory.from_config(cfg).iterate_revisions(head, rev or "base")][::-1]
                 )
-                return 3
-            if a.confirm_host != host:
-                say("STOP: --confirm-host must equal the target host exactly. Nothing was changed.")
-                return 3
-        if a.check:
-            pending = (
-                []
-                if rev == head
-                else [s.revision for s in ScriptDirectory.from_config(cfg).iterate_revisions(head, rev or "base")][::-1]
-            )
-            say(f"pending migrations: {', '.join(pending) or 'none'} (check only; nothing was changed)")
-            return 0
+                say(f"pending migrations: {', '.join(pending) or 'none'} (check only; nothing was changed)")
+                return 0
 
-        if a.downgrade_to:
-            if not a.yes:
-                say("STOP: a downgrade needs --yes. Nothing was changed.")
-                return 3
-            if a.downgrade_to == "base" or (a.downgrade_to.isdigit() and int(a.downgrade_to) < 7):
-                say("note: below 0007 the environment marker is dropped; claim the database again after upgrading")
-            command.downgrade(cfg, a.downgrade_to)
-            say(f"schema rolled back to {a.downgrade_to}")
-            return 0
+            if a.downgrade_to:
+                if not a.yes:
+                    say("STOP: a downgrade needs --yes. Nothing was changed.")
+                    return 3
+                if a.downgrade_to == "base" or (a.downgrade_to.isdigit() and int(a.downgrade_to) < 7):
+                    say("note: below 0007 the environment marker is dropped; claim the database again after upgrading")
+                command.downgrade(cfg, a.downgrade_to)
+                say(f"schema rolled back to {a.downgrade_to}")
+                return 0
 
-        ensure_runtime_role(engine, database)
-        say(f"runtime role {APP_ROLE} ready")
-        command.upgrade(cfg, "head")
-        if have is None:
-            with engine.begin() as c:
+            ensure_runtime_role(c, database)
+            say(f"runtime role {APP_ROLE} ready")
+            command.upgrade(cfg, "head")
+            if have is None:
                 c.execute(text("INSERT INTO deployment_environment (id, environment) VALUES (1, :e)"), {"e": a.env})
-            say(f"database claimed for {a.env}")
-        with engine.connect() as c:
+                say(f"database claimed for {a.env}")
             say(f"done: schema at {current_revision(c)}, claimed for {deploy_env.claimed(c)}")
-        return 0
+            return 0
     finally:
         engine.dispose()
 

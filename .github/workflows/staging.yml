@@ -65,7 +65,7 @@ jobs:
       - name: Wait for this commit's staging deployments
         run: node scripts/wait-for-deploy.mjs "$STAGING_API" "$STAGING_WEB" "${GITHUB_SHA::7}"
       - name: Isolation checks (staging API uses the staging database)
-        run: node scripts/staging-isolation.mjs "$STAGING_API" "$STAGING_WEB"
+        run: node scripts/staging-isolation.mjs "$STAGING_API" "$STAGING_WEB" "$GITHUB_SHA"
       - name: Browser tests against staging (sign-up, sign-in, real data, setup assistant, undo)
         run: BASE_URL="$STAGING_WEB" node scripts/e2e-designs-live.mjs
       - name: Demo designs A, B and C
