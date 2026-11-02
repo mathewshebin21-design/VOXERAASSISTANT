@@ -66,5 +66,5 @@ export function usePracticeSetup() {
     return r.slots;
   }, [orgId]);
 
-  return { mode, setup, error, findSlots, reload: load };
+  return { mode, orgId: setup ? orgId : undefined, setup, error, findSlots, reload: load };
 }

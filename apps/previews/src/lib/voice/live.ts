@@ -23,6 +23,9 @@ export class ApiBrain implements BrainAdapter {
 
   reset() { this.history = []; this.conversationId = `call-${crypto.randomUUID()}`; }
 
+  /** Records what the receptionist already said (e.g. the saved greeting) without a model call. */
+  prime(text: string) { this.history.push({ role: "assistant", text }); }
+
   async *greet(signal: AbortSignal): AsyncIterable<BrainChunk> {
     const r = await fetch(`/api/v1/orgs/${this.orgId}/live/greeting`, { signal });
     if (!r.ok) throw await failure("brain", r);

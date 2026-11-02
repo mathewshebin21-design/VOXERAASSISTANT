@@ -39,6 +39,8 @@ export interface PracticeState {
   node: string;
   turn: number;
   frustration: number;
+  /** Messages in a row it couldn't follow; the second one offers a person. */
+  misses?: number;
 }
 
 export const practiceInitial = (): PracticeState => ({ stage: "open", offered: [], node: "greet", turn: 0, frustration: 0 });
@@ -70,7 +72,13 @@ const RX = {
   no: /^(no|nope|not really|neither|none|nah)\b/i,
   bye: /\b(bye|that'?s all|nothing else|no thanks|that'?s everything)\b|^(thanks|thank you|cheers)[.! ]*$/i,
   thanks: /\b(thanks|thank you|cheers)\b/i,
-  greet: /^(hi|hello|hey|good (morning|afternoon|evening))[!. ]*$/i,
+  // "hi", "heyy", "hiii", "helloo", "yo", "hiya", "hey there", "good morning!", "morning"
+  greet: /^(?:h+i+y*a*|he+y+|hel+o+|hallo|yo+|howdy|hiya|greetings|good (?:morning|afternoon|evening)|(?:morning|afternoon|evening))(?:\s+(?:there|again|you|all|guys|mate|love))?[\s!.,]*$/i,
+  greetStart: /^(?:h+i+y*a*|he+y+|hel+o+|yo+|hiya|good (?:morning|afternoon|evening))\b[\s!.,]*/i,
+  howAreYou: /\b(how (?:are|r) (?:you|u|ya)(?: doing| today)?|how'?s it going|how are things|how do you do|how'?s your day|you (?:ok|alright|good)\??$|what'?s up|wh?at'?s good|wassup|sup\b)/i,
+  capabilities: /\b(what (?:do|can) (?:you|u) (?:know|do|help(?: me)? with|tell me)|what can i ask|what are you able|how can you help|what is this|what'?s this|who am i (?:speaking|talking) (?:to|with)|who (?:are|r) (?:you|u)|are (?:you|u) (?:a )?(?:robot|bot|ai|human|real|person|machine|computer)|what are you)\b|^(?:help|menu|options)[?!. ]*$/i,
+  ack: /^(?:ok(?:ay)?|k|cool|nice|great|alright|right|hmm+|um+|ah+|oh+|i see|got it|fair enough|lol|haha+|wow|interesting|sure)[\s!.]*$/i,
+  offTopic: /\b(weather|joke|football|soccer|cricket|news|politic|recipe|sing (?:me|a)|tell me a story|meaning of life|your favourite|do you like|are you (?:married|single)|bitcoin|crypto|stock|homework|maths?|capital of)\b/i,
 };
 
 const T = { agent: 560, tool: 220 };
@@ -175,7 +183,8 @@ function describeWeek(c: Catalog): string {
 // ── The receptionist ──────────────────────────────────────────────────────
 
 export async function practiceReply(input: string, state: PracticeState, c: Catalog, findSlots: SlotFinder, now = new Date()): Promise<{ events: SimEvent[]; state: PracticeState }> {
-  const s: PracticeState = { ...state, offered: [...state.offered], turn: state.turn + 1 };
+  const s: PracticeState = { ...state, offered: [...state.offered], turn: state.turn + 1, misses: 0 };
+  const missedBefore = state.misses ?? 0;
   const ev: SimEvent[] = [];
   const text = input.trim();
   const done = () => ({ events: ev, state: s });
@@ -208,6 +217,36 @@ export async function practiceReply(input: string, state: PracticeState, c: Cata
   if (RX.frustrated.test(text)) s.frustration++;
   if ((RX.human.test(text) && !RX.book.test(text) && !isQ) || /\b(can|could) i (speak|talk) to\b/i.test(text) || s.frustration >= 2) return transfer(s, ev, c, s.frustration ? "caller frustrated" : "caller asked for a person");
   if (RX.frustrated.test(text)) { ev.push(say("I'm really sorry about that. I'll do my best to sort it out now, or I can put you through to the team. Which would you prefer?")); return done(); }
+
+  // Small talk: a greeting or "how are you" gets a human answer, and anything else in the same
+  // message is still handled ("hi, how much is a skin fade?").
+  const greeted = RX.greetStart.test(text) || RX.greet.test(text);
+  const howAreYou = RX.howAreYou.test(text);
+  const rest = text.replace(RX.greetStart, "").replace(RX.howAreYou, "").replace(/^[\s,!.?]+|[\s,!.?]+$/g, "");
+  if ((greeted || howAreYou) && (!rest || RX.greet.test(rest) || /^(there|again|mate|you|today)$/i.test(rest))) {
+    const hello = s.turn <= 1 ? "Hi there!" : "Hello again!";
+    ev.push(say(howAreYou
+      ? `${greeted ? `${hello} ` : ""}I'm doing really well, thanks for asking. How can I help you today?`
+      : `${hello} ${pick(s, ["What can I help you with today?", "How can I help?", "What can I do for you today?"])}`));
+    s.node = "greet"; return done();
+  }
+  if (rest && (greeted || howAreYou) && rest !== text) {
+    // Greeting plus a real request: answer the request, warmly.
+    const inner = await practiceReply(rest, { ...s, turn: s.turn - 1 }, c, findSlots, now);
+    const first = inner.events.findIndex((e) => e.kind === "agent");
+    if (first >= 0) {
+      const e = inner.events[first] as Extract<SimEvent, { kind: "agent" }>;
+      inner.events[first] = say(`${howAreYou ? "I'm good, thanks for asking! " : "Hi! "}${e.text}`);
+    }
+    return { events: inner.events, state: { ...inner.state, turn: s.turn } };
+  }
+  if (RX.offTopic.test(text) && !matched.length && !RX.book.test(text) && !RX.price.test(text) && !RX.hours.test(text)) {
+    ev.push(say(`Ha, I wish I could help with that! I'm just the receptionist for ${c.business}, so I'm best with bookings, prices and opening hours. Anything I can help with there?`));
+    s.node = "kb"; return done();
+  }
+  if (RX.capabilities.test(text) && !matched.length && !RX.book.test(text)) {
+    ev.push(say(capabilities(c, text))); s.node = "kb"; return done();
+  }
 
   // Questions are answered first, wherever we are in a booking, and the booking picks up after.
   if (isQ || RX.listServices.test(text)) {
@@ -287,13 +326,43 @@ export async function practiceReply(input: string, state: PracticeState, c: Cata
     return done();
   }
   if (RX.yes.test(text) && s.stage === "open") { ev.push(say("Lovely. What can I help you with?")); return done(); }
+  if (RX.ack.test(text)) { ev.push(say(s.stage === "open" || s.stage === "booked" ? pick(s, ["Is there anything else I can help with?", "Anything else I can do for you?", "What else can I help with?"]) : resumeLine(s, c) || "What would you like to do next?")); return done(); }
+  if (RX.thanks.test(text)) { ev.push(say(`You're very welcome! ${pick(s, ["Is there anything else I can help with?", "Anything else today?"])}`)); return done(); }
 
-  return dontKnow(s, ev, c, text);
+  // A real question it can't answer from the workspace: say so and offer a person. Anything
+  // else it didn't follow: say so plainly and say what it can do; offer a person the second time.
+  if (isQ && !RX.capabilities.test(text)) return dontKnow(s, ev, c, text);
+  s.misses = missedBefore + 1;
+  if (s.misses >= 2) {
+    s.offeredTransfer = c.allowTransfer;
+    ev.push(say(c.allowTransfer ? "Sorry, I'm still not quite following. Would you like me to put you through to someone on the team?" : "Sorry, I'm still not quite following. Can I take a message so someone from the team can call you back?"));
+    s.node = "fallback"; return done();
+  }
+  ev.push(say(`Sorry, I didn't quite follow that. I can help with booking an appointment, prices, opening hours or finding us. What would you like to do?`));
+  s.node = "clarify";
+  return done();
 }
+
+/** "Who are you / what do you know / what can you do": who it is and what it can actually help with. */
+function capabilities(c: Catalog, text = ""): string {
+  const bits: string[] = [];
+  if (c.services.length) bits.push(`what we offer and how much it costs, like ${listOf(c.services.slice(0, 3).map((x) => x.name.toLowerCase()))}`);
+  if (c.hours.length) bits.push("our opening hours");
+  if (c.address) bits.push("where to find us");
+  const can = c.services.some((x) => x.bookable) ? "and I can book you in or check what times are free" : "and I can take a message for the team";
+  const robot = /\b(robot|bot|ai|human|real|person|machine|computer)\b/i.test(text);
+  return `${robot ? `Yes, I'm an AI — ${c.agentName}, the receptionist for ${c.business}. ` : `I'm ${c.agentName}, the AI receptionist for ${c.business}. `}I can tell you ${bits.length ? listOf(bits) : "about the business"}, ${can}. What would you like to know?`;
+}
+
+/** Varies short acknowledgements so it doesn't sound scripted. */
+const pick = (s: PracticeState, xs: string[]) => xs[s.turn % xs.length];
 
 function answerQuestion(text: string, s: PracticeState, c: Catalog, matched: CatalogService[]): { events: SimEvent[] } | null {
   const ev: SimEvent[] = [];
   const t = text.toLowerCase();
+  if (RX.capabilities.test(text) && !matched.length && !RX.listServices.test(text.replace(/\bwhat (?:do|can) you (?:do|help(?: me)? with)\b/i, ""))) {
+    ev.push(say(capabilities(c, text))); s.node = "kb"; return { events: ev };
+  }
   const topic = matched.length === 1 ? matched[0] : !matched.length ? c.services.find((x) => x.id === (s.serviceId ?? s.topic)) : undefined;
   const refersBack = /\b(it|that|this one|that one)\b/.test(t);
 

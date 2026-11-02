@@ -40,6 +40,10 @@ export default function Simulate() {
         </div>
         <div className="border-b border-flw-line/70 px-4 py-2 text-[11px] text-flw-mute" data-testid="sim-source">
           {sim.source === "workspace" ? <>Answering from <span className="text-flw-cyan">{sim.business}</span>&apos;s real services, hours and availability. Practice bookings aren&apos;t added to your diary.</> : <>Demo salon data. Sign in to practise with your own workspace.</>}
+          {sim.source === "workspace" && (sim.brain.kind === "claude"
+            ? <span className="block" data-testid="sim-brain">Brain: <span className="text-flw-lime">{sim.brain.name}</span> — natural conversation, answering only from your workspace. Uses your monthly AI allowance.</span>
+            : <span className="block" data-testid="sim-brain">Brain: free practice brain (rule-based). For natural, human-like conversation, switch on Claude for the workspace — see Voice lab.</span>)}
+          {sim.brainNote && <span className="block text-flw-amber">{sim.brainNote}</span>}
           {sim.tts && <span className="block">Voice: {sim.voiceName ?? "browser default"}. For a more natural voice, install an “Enhanced” or “Natural” voice in your device settings, or use the Voice lab.</span>}
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">

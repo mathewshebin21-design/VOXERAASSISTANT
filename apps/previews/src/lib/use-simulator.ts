@@ -10,7 +10,10 @@ import { greeting, initialState, respond, SCENARIOS, type SimEvent, type SimStat
 import { usePreview } from "./store";
 import { practiceGreeting, practiceInitial, practiceReply, type PracticeState } from "./live/practice";
 import { usePracticeSetup } from "./live/practice-catalog";
+import { api } from "./live/api";
 import { chosenVoiceName, speakNaturally } from "./voice/natural";
+import { ApiBrain } from "./voice/live";
+import { ProviderError } from "./voice/types";
 
 export interface SimMessage {
   id: number;
@@ -46,6 +49,23 @@ export function useSimulator() {
   const pStateRef = useRef(pState);
   pStateRef.current = pState;
   const [voiceName, setVoiceName] = useState<string | null>(null);
+
+  // When the workspace has Claude switched on, the practice call uses the same Claude
+  // receptionist as the Voice lab (natural conversation, answers only from the workspace's
+  // details, metered against its monthly cap). Otherwise, or if Claude fails, the free brain.
+  const [claude, setClaude] = useState<ApiBrain | null>(null);
+  const [brainNote, setBrainNote] = useState<string | null>(null);
+  const claudeRef = useRef<ApiBrain | null>(null);
+  claudeRef.current = claude;
+  useEffect(() => {
+    setClaude(null);
+    if (!practice.orgId) return;
+    let cancelled = false;
+    void api<{ llm: { available: boolean; model: string } }>(`/orgs/${practice.orgId}/live/status`)
+      .then((st) => { if (!cancelled && st.llm.available) setClaude(new ApiBrain(practice.orgId!, `Claude (${st.llm.model})`)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [practice.orgId]);
 
   const [messages, setMessages] = useState<SimMessage[]>([]);
   const [state, setState] = useState<SimState>(initialState);
@@ -144,7 +164,13 @@ export function useSimulator() {
     const p0 = practiceInitial();
     setPState(p0);
     pStateRef.current = p0;
-    enqueue(setup ? practiceGreeting(setup.catalog, setup.greeting, setup.recording) : greeting(draft.persona));
+    const hello = setup ? practiceGreeting(setup.catalog, setup.greeting, setup.recording) : greeting(draft.persona);
+    if (claudeRef.current) {
+      claudeRef.current.reset();
+      const said = hello.find((e) => e.kind === "agent");
+      if (said?.kind === "agent") claudeRef.current.prime(said.text);
+    }
+    enqueue(hello);
   }, [enqueue, draft.persona, ttsSupported, setup]);
 
   /** Caller speaks. If the agent is mid-sentence this is a barge-in: stop and truncate. */
@@ -161,6 +187,33 @@ export function useSimulator() {
     }
     setMessages((m) => [...m, { id: idRef.current++, event: { kind: "caller", text } }]);
     const barge: SimEvent[] = bargeIn ? [{ kind: "state", label: "Barge-in detected — agent stopped speaking" }] : [];
+    if (setup && claudeRef.current && !failTools) {
+      const brain = claudeRef.current;
+      setThinking(true);
+      void (async () => {
+        const events: SimEvent[] = [];
+        let said = "";
+        const started = Date.now();
+        try {
+          const ctl = new AbortController();
+          for await (const ch of brain.respond(text, ctl.signal)) {
+            if (ch.type === "text") said += ch.text;
+            else if (ch.type === "tool") events.push({ kind: "tool", name: ch.name, args: {}, ok: ch.ok, result: ch.result, latencyMs: 0 });
+            else if (ch.type === "handoff") events.push({ kind: "state", label: ch.outcome === "transferred" ? `Put through to ${ch.staff ?? "the team"}` : ch.outcome === "queued" ? "Waiting for the next free team member" : "The team will call back" });
+          }
+          enqueue([...barge, ...events, { kind: "agent", text: said.trim() || "Sorry, could you say that again?", latencyMs: Math.min(400, Date.now() - started) }]);
+        } catch (e) {
+          // Claude unavailable (cap reached, switched off, no permission): carry on with the free brain.
+          const why = e instanceof ProviderError || e instanceof Error ? e.message : "unavailable";
+          if (!(e instanceof ProviderError) || !e.retryable) { setClaude(null); setBrainNote(`Claude isn't available right now (${why}), so the free practice brain is answering.`); }
+          const { events: ev, state: p1 } = await practiceReply(text, pStateRef.current, setup.catalog, practice.findSlots);
+          setPState(p1);
+          pStateRef.current = p1;
+          enqueue([...barge, { kind: "state", label: `Claude unavailable (${why}) — free practice brain answered` }, ...ev]);
+        }
+      })();
+      return;
+    }
     if (setup) {
       setThinking(true);
       const failing = failTools ? async () => { throw new Error("Availability lookup failed (simulated failure)"); } : practice.findSlots;
@@ -177,6 +230,7 @@ export function useSimulator() {
     if (s1.bookings.length) addSimBookings(s1.bookings);
     enqueue([...barge, ...events]);
   }, [opts, enqueue, addSimBookings, ttsSupported, setup, failTools, practice.findSlots]);
+  // (claudeRef is read at call time, so switching brains doesn't need a new send.)
 
   /** Runs `fn` once the agent has been silent for a moment (no queued speech or tools). */
   const afterIdle = useCallback((fn: () => void) => {
@@ -237,6 +291,9 @@ export function useSimulator() {
     /** "workspace" when answering from the signed-in workspace's real details. */
     source: setup ? ("workspace" as const) : ("demo" as const),
     business: setup?.catalog.business ?? null,
+    /** Which brain answers: Claude when switched on for the workspace, else the free rule-based one. */
+    brain: setup && claude ? ({ kind: "claude", name: claude.name } as const) : ({ kind: "free", name: "Free practice brain" } as const),
+    brainNote,
     voiceName,
     messages, state: shownState, speaking, thinking, level, timings,
     failTools, setFailTools, tts, setTts, ttsSupported,
