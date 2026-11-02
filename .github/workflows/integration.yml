@@ -62,7 +62,7 @@ jobs:
           npm ci
           npm run build
           VOXERA_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > web.log 2>&1 &
-          npx wait-on -t 60000 http://localhost:3000 http://127.0.0.1:8000/healthz
+          npx wait-on -t 60000 http://localhost:3000 http-get://127.0.0.1:8000/healthz
       - name: Live end-to-end
         working-directory: apps/previews
         run: |
