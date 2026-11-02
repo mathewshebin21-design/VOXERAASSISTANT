@@ -72,3 +72,10 @@ jobs:
           BASE_URL=http://localhost:3000 node scripts/e2e-studio.mjs
       - if: failure()
         run: tail -n 100 services/api/api.log apps/previews/web.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failures
+          path: apps/previews/e2e-failures/
+          if-no-files-found: ignore
+          retention-days: 7

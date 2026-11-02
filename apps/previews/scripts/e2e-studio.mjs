@@ -1,18 +1,36 @@
 // Agent Studio against the real VOXERA API and PostgreSQL, in a real browser.
-// Usage: BASE_URL=http://localhost:3100 [SHOTS=dir] node scripts/e2e-studio.mjs
+// Usage: BASE_URL=http://localhost:3100 [SHOTS=dir] [FAILURES=dir] node scripts/e2e-studio.mjs
+// On a failed step the full error (with stack), a screenshot and the visible page text are kept
+// in FAILURES (default: e2e-failures/) so an intermittent failure can be diagnosed afterwards.
+import { mkdirSync, writeFileSync } from "fs";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const SHOTS = process.env.SHOTS;
+const FAILURES = process.env.FAILURES ?? "e2e-failures";
 const run = Date.now().toString(36);
 const PW = "correct horse battery staple";
 const me = { name: "Ewa Wright", email: `ewa-${run}@e2e.example`, org: `EW Saloon ${run}` };
 
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
-const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 240)); } };
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
+const keepFailure = async (name, e) => {
+  console.log(String(e?.stack ?? e)); // the whole error, including Playwright's call log
+  try {
+    mkdirSync(FAILURES, { recursive: true });
+    const base = `${FAILURES}/studio-${run}-${slug(name)}`;
+    await p.screenshot({ path: `${base}.png`, fullPage: true });
+    writeFileSync(`${base}.txt`, `${String(e?.stack ?? e)}\n\n--- visible page text ---\n${await p.locator("body").innerText()}`);
+    console.log(`      kept: ${base}.png, ${base}.txt`);
+  } catch (err) { console.log(`      (couldn't keep failure details: ${err})`); }
+};
+const step = async (name, fn) => {
+  try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); if (r === false || typeof r === "string") await keepFailure(name, r || "check returned false"); }
+  catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 240)); await keepFailure(name, e); }
+};
 const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false }); };
 
 const browser = await chromium.launch();
@@ -23,6 +41,33 @@ const call = (method, path, body) => p.evaluate(async ([m, u, b]) => {
   return { status: r.status, json: await r.json().catch(() => null) };
 }, [method, path, body]);
 let orgId;
+
+// Waits for a real state, not a fixed time: the API holds a draft matching `ok`, and the page's
+// save badge reports that draft as saved. (Waiting for the badge text alone can match the badge
+// from before the edit, before the page has even noticed the change.)
+const draftSaved = async (ok, label) => {
+  const agent = (await call("GET", `/orgs/${orgId}/agents`)).json[0].id;
+  const deadline = Date.now() + 15000;
+  let last = "";
+  while (Date.now() < deadline) {
+    const flow = (await call("GET", `/orgs/${orgId}/agents/${agent}/flow`)).json;
+    last = (await p.getByTestId("save-state").innerText()).trim();
+    if (ok(flow.draft) && last === "draft saved") return flow;
+    await p.waitForTimeout(150);
+  }
+  throw new Error(`${label}: the saved draft never matched with the badge on "draft saved" (badge: "${last}")`);
+};
+// Clicks only once the control is enabled, and says why if it never becomes enabled.
+const clickEnabled = async (locator, what) => {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (await locator.isEnabled()) return locator.click();
+    await p.waitForTimeout(150);
+  }
+  const badge = (await p.getByTestId("save-state").innerText().catch(() => "?")).trim();
+  throw new Error(`${what} stayed disabled for 15s (save badge: "${badge}", title: "${await locator.getAttribute("title")}")`);
+};
+const closedMessage = (draft) => draft.nodes.find((n) => n.id === "closed").settings.message;
 
 await step("set up a workspace with services, hours and a receptionist", async () => {
   await p.goto(`${BASE}/flow/enter?mode=signup`, { waitUntil: "networkidle" });
@@ -53,10 +98,9 @@ await step("selecting a step opens its settings; edits autosave", async () => {
   await p.getByTestId("node-closed").click();
   const msg = p.getByTestId("inspector").getByLabel("Message");
   await msg.fill("We're closed right now. I can take a message and the team will call you back first thing.");
-  await p.getByTestId("save-state").getByText("draft saved").waitFor({ timeout: 10000 });
+  const flow = await draftSaved((d) => closedMessage(d).includes("first thing"), "edit autosave");
   await shot(p, "2-inspector");
-  const flow = (await call("GET", `/orgs/${orgId}/agents/${(await call("GET", `/orgs/${orgId}/agents`)).json[0].id}/flow`)).json;
-  return flow.draft.nodes.find((n) => n.id === "closed").settings.message.includes("first thing") && flow.revision > 1;
+  return flow.revision > 1;
 });
 
 await step("undo and redo", async () => {
@@ -83,13 +127,8 @@ await step("change by asking: proposal with before → after, applied only on co
   await p.getByText("high impact").waitFor();
   await shot(p, "3-change-by-asking");
   await p.getByRole("button", { name: "Apply to draft" }).click();
-  const agent = (await call("GET", `/orgs/${orgId}/agents`)).json[0].id;
-  for (let i = 0; i < 40; i++) { // wait for the autosave to reach the API
-    const flow = (await call("GET", `/orgs/${orgId}/agents/${agent}/flow`)).json;
-    if (JSON.stringify(flow.draft.nodes.find((n) => n.type === "availability").settings.exclude_weekdays) === "[6]") return true;
-    await p.waitForTimeout(250);
-  }
-  return "the change never reached the saved draft";
+  await draftSaved((d) => JSON.stringify(d.nodes.find((n) => n.type === "availability").settings.exclude_weekdays) === "[6]", "applied proposal");
+  return true;
 });
 
 await step("test call: books through the draft, path lights up, nothing saved", async () => {
@@ -119,7 +158,7 @@ await step("testing lab: the twelve standard scenarios pass on the draft", async
 });
 
 await step("publish runs the tests and makes v1 live", async () => {
-  await p.getByRole("button", { name: "Publish", exact: true }).click();
+  await clickEnabled(p.getByRole("button", { name: "Publish", exact: true }), "Publish");
   await p.getByLabel("What changed").fill("First version");
   await p.getByRole("button", { name: "Run tests and publish" }).click();
   await p.getByText("live v1").waitFor({ timeout: 30000 });
@@ -129,17 +168,16 @@ await step("publish runs the tests and makes v1 live", async () => {
 await step("a failing test blocks publishing and shows why", async () => {
   const agent = (await call("GET", `/orgs/${orgId}/agents`)).json[0].id;
   const t = await call("POST", `/orgs/${orgId}/agents/${agent}/flow/tests`, { scenario: { name: "Mentions parking", lines: ["is there parking?"], assertions: [{ type: "says", value: "free parking" }] } });
-  await p.getByTestId("node-greeting").count(); // no-op: keep the page alive
   await p.getByTestId("node-closed").click();
   await p.getByTestId("inspector").getByLabel("Message").fill("We're closed right now, but I can take a message.");
-  await p.getByTestId("save-state").getByText("draft saved").waitFor({ timeout: 10000 });
-  await p.getByRole("button", { name: "Publish", exact: true }).click();
+  await draftSaved((d) => closedMessage(d) === "We're closed right now, but I can take a message.", "second edit autosave");
+  await clickEnabled(p.getByRole("button", { name: "Publish", exact: true }), "Publish");
   await p.getByRole("button", { name: "Run tests and publish" }).click();
   await p.getByText("Not published: some tests failed.").waitFor({ timeout: 30000 });
   await shot(p, "6-publish-blocked");
   await p.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await call("DELETE", `/orgs/${orgId}/agents/${agent}/flow/tests/${t.json.id}`);
-  await p.getByRole("button", { name: "Publish", exact: true }).click();
+  await clickEnabled(p.getByRole("button", { name: "Publish", exact: true }), "Publish");
   await p.getByRole("button", { name: "Run tests and publish" }).click();
   await p.getByText("live v2").waitFor({ timeout: 30000 });
   return true;
