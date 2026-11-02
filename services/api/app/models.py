@@ -444,3 +444,48 @@ class DeskAgent(Base):
     status: Mapped[DeskStatus] = mapped_column(Enum(DeskStatus, name="desk_status"), nullable=False)
     status_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentFlow(Base):
+    """An agent's conversation flow: one mutable draft, and a pointer to the published version.
+
+    Edits only ever touch the draft. Calls only ever run a published version.
+    """
+
+    __tablename__ = "agent_flows"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    draft: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    draft_revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    draft_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    draft_updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    published_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created()
+
+
+class AgentFlowVersion(Base):
+    """An immutable published snapshot. Rolling back publishes an old snapshot as a new version."""
+
+    __tablename__ = "agent_flow_versions"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    flow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_flows.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    graph: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    note: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(20), default="publish", nullable=False)
+    restored_from: Mapped[int | None] = mapped_column(Integer)
+    validation: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    test_report: Mapped[dict | None] = mapped_column(JSONB)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (UniqueConstraint("flow_id", "version", name="uq_flow_version"),)
