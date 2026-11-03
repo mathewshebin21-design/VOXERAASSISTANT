@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-03 (branch `claude/agent-studio`; this update is local, not pushed).
+Last updated: 2026-11-03 (branch `claude/agent-studio`; this update is local, not pushed). Release review documents: `docs/pr1-review.md`, `docs/production-release-runbook.md`; plan correction M1 in `docs/production-release-plan.md`.
 
 > **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
@@ -193,7 +193,7 @@ Safest cleanup, in this order, each needing approval:
 | Workspace signup, business profile, services, hours | ✅ | API tests, e2e-live |
 | Staff desk, hand-overs, least-busy routing | ✅ | `test_desk.py`, e2e |
 | Availability and booking against the real diary | ✅ | `reception.py`, tests |
-| Rescheduling | 🟡 | Hand-over to staff only. No automatic move. |
+| Rescheduling | 🟡 | Only the AI receptionist (paid provider) can move a booking, through `reception.reschedule()`, which creates a new booking, changes the reference and can block itself. No REST endpoint, no desk action; the Agent Studio tool always fails. Spec and tests: `docs/phase-1-rescheduling-spec.md` (not implemented). |
 | Data export and account deletion | ✅ | `test_privacy.py`, e2e clean-up |
 
 ### Phase 2: AI receptionist and setup assistant

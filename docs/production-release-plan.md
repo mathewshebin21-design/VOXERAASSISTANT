@@ -21,8 +21,9 @@ Prepared 2026-11-02 after staging run #1 passed (staging at 94dae66: claimed, mi
 Each finding was proven against the real commits on throwaway databases (40/40 compatibility checks):
 - **Production is already one revision ahead of its code.** `767c0f2` ships migrations 0001–0005, but the database is at 0006. The 0006 migration was applied by the PR #1 preview build `dpl_3mGpaVh2…` ("Running upgrade 0005 -> 0006"). `767c0f2` runs normally on 0006, 0007 and 0008.
 - **`767c0f2` cannot be rebuilt.** Its build runs `alembic upgrade head` and fails with "Can't locate revision 0006", changing nothing. Roll back to it **only with Instant Rollback** (no rebuild), never with "Redeploy".
-- **PR #1's code (`a7ba2f0`) runs on 0008 but refuses to *build* there** ("schema is at 0008, this code needs 0007"). Between steps 6 and 7, go back to PR #1 only with Instant Rollback, and merge PR #2 promptly after 0008.
-- **`--claim` and `upgrade` migrate to the head of the code they run.** In steps 2, 3 and 6, run `db-migrate` with **"Use workflow from: `claude/confident-shannon-7nb05f`"**. Running it from `claude/agent-studio` in step 3 would jump straight to 0008, and step 4's build would then refuse.
+- **PR #1's code (`a7ba2f0`) runs on 0008 but refuses to *build* there** ("schema is at 0008, this code needs 0007"). After 0008, go back to PR #1 only with Instant Rollback.
+- **`--claim` and `upgrade` migrate to the head of the code they run.** Always run `db-migrate` with **"Use workflow from: `claude/confident-shannon-7nb05f`"** (the production branch), and restrict the GitHub `production` environment to that branch. Running from `claude/agent-studio` in step 3 would jump straight to 0008, and step 4's build would then refuse.
+- **Correction (2026-11-03 review, finding M1):** the 0008 upgrade can't run from the production branch *before* PR #2 merges, because that branch's head is still 0007. So steps 6 and 7 are reordered: merge PR #2 first (its build refuses and PR #1 stays live), then upgrade from the production branch and redeploy. Every production migration then comes from reviewed, merged code.
 - **Neon Free plan:** a 6-hour point-in-time restore window (capped at 1 GB of history) and **1 manual snapshot**. Take the snapshot or branch in step 0, immediately before step 3.
 
 ## 0. Prerequisites ⛔ (owner, dashboards; free)
@@ -68,13 +69,14 @@ Each finding was proven against the real commits on throwaway databases (40/40 c
 - After PR #1 merges, GitHub retargets PR #2 onto the production branch. If GitHub reports a conflict, merge the production branch into `claude/agent-studio` (no rebase) and re-run CI.
 - Optionally push PR #2's head to `staging` and run the staging workflow again to re-verify. That's an approval of its own, and the staging database is already at 0008, so no migration would change.
 
-## 6. Migrate production to 0008 ⛔ (before merging PR #2)
-- `db-migrate` production **check**, expecting "schema at 0007; pending 0008". Then action **upgrade**.
-- 0008 is additive: four new Agent Studio tables with row-level security. The PR #1 code now live ignores them.
-- **Check:** **check** again, expecting "schema at 0008; pending none".
+## 6. Merge PR #2 ⛔ (merge commit; the build is expected to refuse)
+- Merge with a merge commit. **Expected:** the production build refuses ("schema is at 0007, this code needs 0008"). PR #1's deployment stays live.
 
-## 7. Merge PR #2 and deploy ⛔
-- Merge with a merge commit. The production build's preflight should pass ("production, schema at 0008") and deploy.
+## 7. Migrate production to 0008, then deploy PR #2 ⛔
+- `db-migrate` production **check**, from the production branch, expecting "schema at 0007; code head 0008; pending 0008". Then action **upgrade**.
+- 0008 is additive: four new Agent Studio tables with row-level security. The PR #1 code still live ignores them (verified on a disposable copy).
+- Run **check** again, expecting "schema at 0008; pending none".
+- Redeploy the refused production build from step 6. The preflight should pass ("production, schema at 0008").
 - **Checks:**
   - `/healthz` → the new commit;
   - `/readyz` → 200;
@@ -85,7 +87,7 @@ Each finding was proven against the real commits on throwaway databases (40/40 c
 
 ## 8. After the release ⛔ (separately): revoke the old previews' production credentials
 Rotation must come **after** PR #1 is live. `767c0f2` cannot be rebuilt, so rotating while it is still production would leave no way to redeploy it with the new password.
-1. **Optional first:** set `VOXERA_JWT_SECRET` (Production only, random 64-hex) and redeploy. Sessions then no longer depend on the database password, so this rotation and later ones don't sign everyone out. The change itself signs everyone out once.
+1. **Optional first:** set `VOXERA_JWT_SECRET` (Production only, random 64-hex) and redeploy. Sessions then no longer depend on the database password, so this rotation and later ones don't affect them. The change itself only forces one silent refresh per signed-in browser, because refresh tokens are opaque and stored in the database. See `docs/production-release-runbook.md` §5.
 2. Rotate voxera-db's owner password in Neon. The Vercel integration updates voxera-api's Production variables, but running deployments keep the old password until redeployed.
 3. Update the GitHub `production` environment secret `DATABASE_URL_UNPOOLED` to the new value.
 4. Run `db-migrate` production **upgrade**. This resets the `voxera_app` role's password to the value derived from the new owner password. **From here until step 5 completes, the live API cannot connect** (expect about 1–3 minutes of 503 responses).
