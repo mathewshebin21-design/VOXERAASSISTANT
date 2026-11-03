@@ -222,3 +222,104 @@ def test_invalid_hosted_identity_never_skips(monkeypatch, variables):
         monkeypatch.setenv(key, value)
     with pytest.raises(ValueError):
         expected()
+
+
+def _role_logs_in(role: str, password: str, database: str = "voxera_build_test") -> bool:
+    eng = create_engine(f"postgresql+psycopg://{role}:{password}@localhost:5432/{database}")
+    try:
+        with eng.connect() as c:
+            return c.execute(text("SELECT 1")).scalar() == 1
+    except Exception:
+        return False
+    finally:
+        eng.dispose()
+
+
+def test_migration_never_locks_out_running_deployments(fresh_db, owner_engine):
+    """The runtime role's password is only changed when it already matches, or on an explicit rotation."""
+    env, eng = fresh_db
+    derived = platform.derive("owner-dev-only", "app-role")
+    with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(
+            text("DO $$ BEGIN CREATE ROLE voxera_app_buildtest LOGIN; EXCEPTION WHEN duplicate_object THEN END $$")
+        )
+        c.execute(text("ALTER ROLE voxera_app_buildtest LOGIN PASSWORD 'what-running-deployments-use'"))
+        c.execute(text("GRANT CONNECT ON DATABASE voxera_build_test TO voxera_app_buildtest"))
+
+    # The check reports the mismatch and changes nothing.
+    r = run("migrate.py", env, "--env", "staging", "--check")
+    assert r.returncode == 0 and "uses a different password" in r.stdout
+    assert "owner-dev-only" not in r.stdout + r.stderr and derived not in r.stdout + r.stderr  # no secrets printed
+    # A claim or upgrade stops before touching anything: no schema, no claim, password unchanged.
+    for args in (["--claim-if-empty"], ["--claim", "--confirm-host", "localhost"]):
+        r = run("migrate.py", env, "--env", "staging", *args)
+        assert r.returncode == 3 and "not changing the password" in r.stdout, r.stdout
+        assert tables(eng) == set()
+        assert _role_logs_in("voxera_app_buildtest", "what-running-deployments-use")
+        assert not _role_logs_in("voxera_app_buildtest", derived)
+
+    # A deliberate rotation may change it.
+    r = run("migrate.py", env, "--env", "staging", "--claim-if-empty", "--reset-runtime-role")
+    assert r.returncode == 0 and "claimed for staging" in r.stdout, r.stdout
+    assert _role_logs_in("voxera_app_buildtest", derived)
+    assert not _role_logs_in("voxera_app_buildtest", "what-running-deployments-use")
+
+    # Once it matches, check and upgrade say so and proceed without the flag.
+    r = run("migrate.py", env, "--env", "staging", "--check")
+    assert r.returncode == 0 and "already logs in with the password this run would set" in r.stdout
+    r = run("migrate.py", env, "--env", "staging")
+    assert r.returncode == 0 and "runtime role voxera_app_buildtest ready" in r.stdout
+    assert _role_logs_in("voxera_app_buildtest", derived)
+
+
+def test_migration_creates_a_missing_runtime_role(fresh_db, owner_engine):
+    env, eng = fresh_db
+    role = f"voxera_app_probe_{os.getpid()}"
+    env = env | {"VOXERA_APP_ROLE": role}
+    try:
+        r = run("migrate.py", env, "--env", "staging", "--check")
+        assert r.returncode == 0 and "does not exist yet" in r.stdout and tables(eng) == set()
+        r = run("migrate.py", env, "--env", "staging", "--claim-if-empty")
+        assert r.returncode == 0 and "claimed for staging" in r.stdout, r.stdout
+        assert _role_logs_in(role, platform.derive("owner-dev-only", "app-role"))
+    finally:
+        eng.dispose()
+        with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text("DROP DATABASE IF EXISTS voxera_build_test WITH (FORCE)"))
+            c.execute(text(f"DROP ROLE IF EXISTS {role}"))
+
+
+def test_workflow_inputs_cannot_bypass_the_runtime_role_safeguard(fresh_db, owner_engine):
+    """The workflow passes confirm_host as one quoted argument, so flags hidden in it stay text."""
+    env, eng = fresh_db
+    with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(
+            text("DO $$ BEGIN CREATE ROLE voxera_app_buildtest LOGIN; EXCEPTION WHEN duplicate_object THEN END $$")
+        )
+        c.execute(text("ALTER ROLE voxera_app_buildtest LOGIN PASSWORD 'what-running-deployments-use'"))
+    r = run("migrate.py", env, "--env", "staging", "--claim", "--confirm-host", "localhost --reset-runtime-role")
+    assert r.returncode == 3 and "--confirm-host must equal the target host" in r.stdout
+    r = run("migrate.py", env, "--env", "staging", "--claim", "--confirm-host", "localhost")
+    assert r.returncode == 3 and "not changing the password" in r.stdout
+    assert tables(eng) == set() and _role_logs_in("voxera_app_buildtest", "what-running-deployments-use")
+    wf = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "db-migrate.yml").read_text()
+    assert "reset-runtime-role" not in wf and '--confirm-host "$CONFIRM_HOST"' in wf
+    with owner_engine.connect().execution_options(
+        isolation_level="AUTOCOMMIT"
+    ) as c:  # leave the role as other tests expect
+        c.execute(text(f"ALTER ROLE voxera_app_buildtest PASSWORD '{platform.derive('owner-dev-only', 'app-role')}'"))
+
+
+def test_runtime_role_that_cannot_log_in_is_never_touched(fresh_db, owner_engine):
+    env, eng = fresh_db
+    role = f"voxera_app_nologin_{os.getpid()}"
+    with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+    try:
+        r = run("migrate.py", env | {"VOXERA_APP_ROLE": role}, "--env", "staging", "--claim-if-empty")
+        assert r.returncode == 3 and "could not be verified" in r.stdout and "not changing" in r.stdout
+        assert tables(eng) == set()
+    finally:
+        eng.dispose()
+        with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text(f"DROP ROLE IF EXISTS {role}"))

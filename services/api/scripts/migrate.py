@@ -15,7 +15,11 @@ Safety:
   before touching anything;
 - claiming a new database requires typing its host name back (--confirm-host), so the wrong
   connection string can't be claimed by accident;
-- --check never writes.
+- --check never writes;
+- before changing the runtime role's password, the run logs in as that role with the password it
+  would set. If the role already uses a different password (running deployments derived it from a
+  different owner password), it stops: changing it would lock those deployments out. Pass
+  --reset-runtime-role only for a deliberate credential rotation.
 """
 
 import argparse
@@ -30,6 +34,7 @@ from alembic.config import Config  # noqa: E402
 from alembic.script import ScriptDirectory  # noqa: E402
 from sqlalchemy import create_engine, pool, text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from app import deploy_env  # noqa: E402
 from app.platform import APP_ROLE, app_role_password, migration_owner_url  # noqa: E402
@@ -66,6 +71,37 @@ def ensure_runtime_role(c, database: str) -> None:
     c.execute(text(f'GRANT CONNECT ON DATABASE "{database}" TO {APP_ROLE}'))
 
 
+ROLE_STATUS = {
+    "absent": "does not exist yet; it will be created",
+    "match": "already logs in with the password this run would set, so running deployments are unaffected",
+    "mismatch": "uses a different password from the one this run would set. Running deployments were "
+    "configured from a different owner password, and changing it would lock them out",
+    "unknown": "could not be verified (the login attempt failed for another reason)",
+}
+
+
+def runtime_role_status(c, owner_url: str) -> str:
+    """Whether the runtime role already has the password this run would give it. Changes nothing:
+    one login attempt as that role, on its own connection. Never prints connection details."""
+    can_login = c.execute(text("SELECT rolcanlogin FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE}).scalar()
+    if can_login is None:
+        return "absent"
+    if not can_login:
+        return "unknown"  # exists but can't log in: not a state this script creates, so don't touch it
+    as_role = make_url(owner_url).set(username=APP_ROLE, password=app_role_password())
+    probe = create_engine(as_role, poolclass=pool.NullPool, connect_args={"connect_timeout": 10})
+    try:
+        with probe.connect() as p:
+            p.execute(text("SELECT 1"))
+        return "match"
+    except OperationalError as e:
+        return "mismatch" if "password authentication failed" in str(e.orig or e) else "unknown"
+    except Exception:  # anything unexpected: not verified, so the caller fails closed
+        return "unknown"
+    finally:
+        probe.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--env", required=True, choices=deploy_env.ENVIRONMENTS)
@@ -80,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--downgrade-to", help="roll the schema back to this revision")
     ap.add_argument("--yes", action="store_true", help="confirm a downgrade")
+    ap.add_argument(
+        "--reset-runtime-role",
+        action="store_true",
+        help="set the runtime role's password even if it currently differs (deliberate credential rotation only: "
+        "deployments built before the rotation lose database access)",
+    )
     a = ap.parse_args(argv)
 
     owner_url = migration_owner_url()
@@ -119,11 +161,15 @@ def main(argv: list[str] | None = None) -> int:
                 if a.confirm_host != host:
                     say("STOP: --confirm-host must equal the target host exactly. Nothing was changed.")
                     return 3
+            role = runtime_role_status(c, owner_url)
+            say(f"runtime role {APP_ROLE}: {ROLE_STATUS[role]}")
             if a.check:
                 pending = (
                     []
                     if rev == head
-                    else [s.revision for s in ScriptDirectory.from_config(cfg).iterate_revisions(head, rev or "base")][::-1]
+                    else [s.revision for s in ScriptDirectory.from_config(cfg).iterate_revisions(head, rev or "base")][
+                        ::-1
+                    ]
                 )
                 say(f"pending migrations: {', '.join(pending) or 'none'} (check only; nothing was changed)")
                 return 0
@@ -138,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
                 say(f"schema rolled back to {a.downgrade_to}")
                 return 0
 
+            if role not in ("absent", "match") and not a.reset_runtime_role:
+                say(
+                    f"STOP: not changing the password of {APP_ROLE}, because running deployments may depend on it. "
+                    "Check that this run's owner connection is the one the deployments use. Nothing was changed."
+                )
+                return 3
             ensure_runtime_role(c, database)
             say(f"runtime role {APP_ROLE} ready")
             command.upgrade(cfg, "head")

@@ -33,6 +33,11 @@ python scripts/migrate.py --env production --downgrade-to 0006 --yes       # sch
 - A run for the wrong environment stops before changing anything.
 - A database must be claimed once. Claiming needs its host typed back. Without the host, `--claim-if-empty` claims only a database that is still completely empty: a new staging database qualifies, and production never does.
 - The connection comes from `DATABASE_URL_UNPOOLED`, the owner connection that Vercel's Neon integration provides.
+- **Running deployments are never locked out.** Every run first logs in as the runtime role (`voxera_app`) with the password it would set, and reports the result (`--check` included).
+  - The role is missing: it's created.
+  - The password already matches: the role is left as it is, so deployments already running keep their database access.
+  - It doesn't match, or can't be verified: the run stops before changing anything. This happens, for example, when the deployments were built from a different owner password than this run's connection. Fix the connection rather than overriding.
+  - `--reset-runtime-role` overrides this, for a deliberate credential rotation only (deployments built before it lose access). The `db-migrate` workflow doesn't offer it.
 
 Where it runs:
 - **Staging:** automatically, in the `staging` GitHub workflow, whenever the `staging` branch is pushed. That workflow then waits for the staging deployments of the commit and runs the isolation check and the browser tests against staging.
