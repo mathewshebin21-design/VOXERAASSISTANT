@@ -55,7 +55,7 @@ Decision authority: the owner. This record recommends; it authorises nothing.
 | 2 | Code review approved, no open high findings | ✅ (M1 fixed in the plan; M2 → criterion 5) | ✅ (R2-M1 accepted with a deadline) |
 | 3 | Migrations rehearsed on a production copy, data kept, rollback proven | ✅ 51/51 | ✅ 51/51 |
 | 4 | **Owner approval on the PR (GitHub review)** | ❌ | ❌ |
-| 5 | **GitHub `production` environment:** secret, required reviewer, default-branch-only | ❓ **verification blocked** (HTTP 403 from this session, checked 3 times); **not confirmed configured** | same |
+| 5 | **GitHub `production` environment:** secret, required reviewer, default-branch-only | ✅ configured (owner screenshots plus a GitHub API read of the settings, 2026-11-03; admin bypass off). First real run still to prove the approval prompt (SF-1) | same |
 | 6 | **Fresh Neon backup branch and snapshot, T0 recorded** (`docs/production-release-runbook.md` §2a) | ❌ (taken just before the claim) | ✅ if within the same session; otherwise a new one before the 0008 upgrade |
 | 7 | Rollback target identified and tested | ✅ `dpl_EEBq…`, Instant Rollback only | ✅ RC-1's deployment |
 | 8 | Quiet window agreed, validation checklist ready | ❌ owner to choose / ✅ runbook §3 | same |
