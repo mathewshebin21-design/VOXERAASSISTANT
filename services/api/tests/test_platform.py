@@ -287,3 +287,39 @@ def test_migration_creates_a_missing_runtime_role(fresh_db, owner_engine):
         with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
             c.execute(text("DROP DATABASE IF EXISTS voxera_build_test WITH (FORCE)"))
             c.execute(text(f"DROP ROLE IF EXISTS {role}"))
+
+
+def test_workflow_inputs_cannot_bypass_the_runtime_role_safeguard(fresh_db, owner_engine):
+    """The workflow passes confirm_host as one quoted argument, so flags hidden in it stay text."""
+    env, eng = fresh_db
+    with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(
+            text("DO $$ BEGIN CREATE ROLE voxera_app_buildtest LOGIN; EXCEPTION WHEN duplicate_object THEN END $$")
+        )
+        c.execute(text("ALTER ROLE voxera_app_buildtest LOGIN PASSWORD 'what-running-deployments-use'"))
+    r = run("migrate.py", env, "--env", "staging", "--claim", "--confirm-host", "localhost --reset-runtime-role")
+    assert r.returncode == 3 and "--confirm-host must equal the target host" in r.stdout
+    r = run("migrate.py", env, "--env", "staging", "--claim", "--confirm-host", "localhost")
+    assert r.returncode == 3 and "not changing the password" in r.stdout
+    assert tables(eng) == set() and _role_logs_in("voxera_app_buildtest", "what-running-deployments-use")
+    wf = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "db-migrate.yml").read_text()
+    assert "reset-runtime-role" not in wf and '--confirm-host "$CONFIRM_HOST"' in wf
+    with owner_engine.connect().execution_options(
+        isolation_level="AUTOCOMMIT"
+    ) as c:  # leave the role as other tests expect
+        c.execute(text(f"ALTER ROLE voxera_app_buildtest PASSWORD '{platform.derive('owner-dev-only', 'app-role')}'"))
+
+
+def test_runtime_role_that_cannot_log_in_is_never_touched(fresh_db, owner_engine):
+    env, eng = fresh_db
+    role = f"voxera_app_nologin_{os.getpid()}"
+    with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+    try:
+        r = run("migrate.py", env | {"VOXERA_APP_ROLE": role}, "--env", "staging", "--claim-if-empty")
+        assert r.returncode == 3 and "could not be verified" in r.stdout and "not changing" in r.stdout
+        assert tables(eng) == set()
+    finally:
+        eng.dispose()
+        with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text(f"DROP ROLE IF EXISTS {role}"))

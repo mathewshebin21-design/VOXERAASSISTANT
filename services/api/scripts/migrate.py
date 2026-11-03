@@ -83,8 +83,11 @@ ROLE_STATUS = {
 def runtime_role_status(c, owner_url: str) -> str:
     """Whether the runtime role already has the password this run would give it. Changes nothing:
     one login attempt as that role, on its own connection. Never prints connection details."""
-    if not c.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE}).scalar():
+    can_login = c.execute(text("SELECT rolcanlogin FROM pg_roles WHERE rolname = :r"), {"r": APP_ROLE}).scalar()
+    if can_login is None:
         return "absent"
+    if not can_login:
+        return "unknown"  # exists but can't log in: not a state this script creates, so don't touch it
     as_role = make_url(owner_url).set(username=APP_ROLE, password=app_role_password())
     probe = create_engine(as_role, poolclass=pool.NullPool, connect_args={"connect_timeout": 10})
     try:
@@ -93,6 +96,8 @@ def runtime_role_status(c, owner_url: str) -> str:
         return "match"
     except OperationalError as e:
         return "mismatch" if "password authentication failed" in str(e.orig or e) else "unknown"
+    except Exception:  # anything unexpected: not verified, so the caller fails closed
+        return "unknown"
     finally:
         probe.dispose()
 
