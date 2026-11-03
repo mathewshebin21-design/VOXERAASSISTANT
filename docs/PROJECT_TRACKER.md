@@ -85,6 +85,10 @@ Last updated: 2026-11-03 (branch `claude/agent-studio`; this update is local, no
   - PR #2 previews;
   - all previews built after the switch to staging.
 - **Deployment Protection:** not verifiable with read-only access. Evidence (an unauthenticated CI runner read preview JSON) indicates Preview protection is **off**.
+- **Open production-release risks (owner decision 2026-11-03; kept open until each is resolved):**
+  1. Historical production credentials may stay valid until voxera-db's password is rotated (release plan step 8, after PR #1 is live).
+  2. Preview Deployment Protection is not yet enabled or confirmed.
+  3. Production migration compatibility, backup and recovery each need release-specific approval (`docs/production-release-plan.md`).
 - **Residual risks (tracked, not blocking Phase 0):**
   - credentials copied from the deleted previews stay valid until voxera-db's password is rotated (release plan step 8, after PR #1 is live). **Medium.**
   - Preview Deployment Protection appears off. **Medium**; optional owner setting.
