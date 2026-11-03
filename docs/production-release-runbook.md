@@ -4,6 +4,24 @@ Companion to `docs/production-release-plan.md` (the order of steps) and `docs/pr
 **Status: prepared, not executed.** Every ⛔ step needs the owner's explicit approval at the time.
 Prepared 2026-11-03.
 
+## 0. Release sequence (authoritative order; owner instruction of 2026-11-03)
+Each step needs its own explicit owner approval. Run `db-migrate` only from the production branch `claude/confident-shannon-7nb05f`.
+
+**RC-1: PR #1, schema 0006 → 0007**
+1. ⛔ **Merge PR #1** (merge commit) after separate owner approval.
+2. **Confirm the new production build fails closed:** Vercel shows "REFUSING TO DEPLOY … not been claimed for production", and `/healthz` still shows `767c0f2` (no commit field). Validation D1.
+3. ⛔ **Run the read-only production migration check** (`db-migrate`, environment `production`, action `check`). Expect "claimed for: nobody yet; schema at 0006; code head 0007". Anything else: stop.
+4. ⛔ **Claim and migrate production 0006 → 0007** after separate approval. First take the Neon backup (§2a, T0 recorded). Then action `claim` with `confirm_host` typed back. Run `check` again and expect "claimed for: production; schema at 0007; pending none".
+5. ⛔ **Redeploy and verify** production health (`/healthz` shows the merge commit, `/readyz` 200), database identity (preflight "production, schema at 0007"; no 503 guard), authentication (real sign-in), and existing customer data (workspace, services, hours, desk intact). Validation D2.
+
+**RC-2: PR #2, schema 0007 → 0008**
+1. **Confirm RC-1 is healthy in production:** D2 checks pass and there are no new runtime errors since the RC-1 redeploy.
+2. ⛔ **Merge PR #2** (merge commit) after separate owner approval.
+3. **Confirm its new build fails closed** while production stays on 0007: "schema is at 0007, this code needs 0008", and `/healthz` still shows PR #1's merge commit. Validation D3.
+4. ⛔ **Run the production migration check.** Expect "claimed for: production; schema at 0007; code head 0008; pending 0008".
+5. ⛔ **Upgrade 0007 → 0008** after separate approval (action `upgrade`). Take a new Neon backup first if the RC-1 backup is more than about an hour old. Run `check` again: "schema at 0008; pending none".
+6. ⛔ **Redeploy and verify** Agent Studio (opens, default flow shown), the Testing Lab (12/12, publish gate) and existing business operations (sign-in, desk, bookings, setup assistant, practice receptionist). Validation D4.
+
 ## 1. Prerequisite status (2026-11-03)
 | Prerequisite | Status | How it was checked / what's needed |
 |---|---|---|
@@ -15,10 +33,12 @@ Prepared 2026-11-03.
 | Production health | ✅ `dpl_EEBq…` at `767c0f2`, READY, 0 runtime errors in 24 h | Vercel, read-only |
 | Production credentials isolated | ✅ 16 voxera-db variables Production only; `VOXERA_ENV` Production only | Vercel variable listing (names and targets only) |
 | `VOXERA_JWT_SECRET` | ⚠️ not set (signing secret derived from the database password) | Vercel variable listing |
-| **GitHub `production` environment** | ❓ **unverified**. This session's GitHub access can't read environments or secret names (HTTP 403 from the proxy). | Owner checks: Settings → Environments → `production` exists; secret **`DATABASE_URL_UNPOOLED`** present; **Required reviewers**: the owner; **Deployment branches**: "Selected branches", default branch `claude/confident-shannon-7nb05f` only; *Prevent self-review* off (a single owner must be able to approve). |
+| **GitHub `production` environment** | ❓ **verification blocked**: this session's GitHub access gets HTTP 403 for environments and secret names (checked twice, 2026-11-03). **Not confirmed configured.** | Owner checks: Settings → Environments → `production` exists; secret **`DATABASE_URL_UNPOOLED`** present; **Required reviewers**: the owner; **Deployment branches**: "Selected branches", default branch `claude/confident-shannon-7nb05f` only; *Prevent self-review* off (a single owner must be able to approve). |
 | **Neon backup point** | ❌ not taken | Section 2 |
 | **PR #1 approved by the owner** | ❌ no review yet | GitHub |
-| Preview Deployment Protection | ❓ unconfirmed (optional) | Vercel → each project → Settings → Deployment Protection |
+| Preview Deployment Protection | ❌ **confirmed off** on both projects (Vercel project settings, read 2026-11-03: Vercel Authentication off, password protection off, trusted IPs off) | Owner decision: enable Vercel Authentication for preview deployments, or accept the risk. This doesn't block RC-1 |
+| Production database schema | ⚪ **inferred 0006, unclaimed**, from the build log of `dpl_3mGp…` ("Running upgrade 0005 -> 0006") | Not read directly: that needs the production credentials. RC-1 step 3 (read-only check) confirms it |
+| Production deployments / rollback target | ✅ voxera-api `dpl_EEBq…` and voxera-flow `dpl_9HL5…` at `767c0f2`, READY, both rollback candidates | Vercel, read-only, 2026-11-03 |
 
 `db-migrate.yml` only becomes runnable once PR #1 has merged, because manually triggered workflows must exist on the default branch.
 

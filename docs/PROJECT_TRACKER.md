@@ -84,11 +84,20 @@ Last updated: 2026-11-03 (branch `claude/agent-studio`; this update is local, no
   - staging: `dpl_CEjtPzeC6MzYNv3zLZyF38KqMC3y` and `dpl_6LddL7Zny7eZSNGyRjMAHAhpWxN2` (94dae66);
   - PR #2 previews;
   - all previews built after the switch to staging.
-- **Deployment Protection:** not verifiable with read-only access. Evidence (an unauthenticated CI runner read preview JSON) indicates Preview protection is **off**.
+- **Deployment Protection:** **confirmed off** on voxera-api and voxera-flow (Vercel project settings, read-only, 2026-11-03: Vercel Authentication, password protection and trusted IPs all disabled). Tracked as SF-5.
 - **Open production-release risks (owner decision 2026-11-03; kept open until each is resolved):**
   1. Historical production credentials may stay valid until voxera-db's password is rotated (release plan step 8, after PR #1 is live).
-  2. Preview Deployment Protection is not yet enabled or confirmed.
+  2. Preview Deployment Protection is not enabled (confirmed off 2026-11-03).
   3. Production migration compatibility, backup and recovery each need release-specific approval (`docs/production-release-plan.md`).
+- **Open security findings register (none may be marked resolved without evidence; owner decision 2026-11-03):**
+  | # | Finding | Severity | Status | Closes when |
+  |---|---|---|---|---|
+  | SF-1 | PR #1 M2: `db-migrate.yml` doesn't restrict which branch it runs from | Medium | Open. Owner setting (default-branch-only `production` environment) **not verified**: HTTP 403. Code guard not written | The environment rule is confirmed, **and** a workflow guard rejects non-default branches for production (defence in depth) |
+  | SF-2 | PR #2 R2-M1: the workspace data export omits `agent_flows`, `agent_flow_versions`, `flow_sessions`, `flow_tests`, `case_notes`, `desk_agents` | Medium | Open. **Required fix before processing real customer conversations** | The export covers every table with `organization_id`, enforced by a test |
+  | SF-3 | No independent `VOXERA_JWT_SECRET`: signing is derived from the database password | Low–Medium | Open. Confirmed absent (Vercel variable names, 2026-11-03) | Set for Production and verified (runbook §5) |
+  | SF-4 | Historical production credentials (copied from the deleted previews) still valid | Medium | Open. Rotation possible only after RC-1 is live | voxera-db password rotated, GitHub secret updated, role reset, redeployed (release plan step 8) |
+  | SF-5 | Preview Deployment Protection | Medium | Open. **Confirmed off** on voxera-api and voxera-flow (Vercel project settings, 2026-11-03) | Enabled, or risk formally accepted by the owner |
+  | SF-6 | The demo Integrations pages (Command, Flow) say secrets are in a "server-side vault, per tenant". No vault exists | Low (honesty) | Open | Text changed to "planned" or the vault exists |
 - **Residual risks (tracked, not blocking Phase 0):**
   - credentials copied from the deleted previews stay valid until voxera-db's password is rotated (release plan step 8, after PR #1 is live). **Medium.**
   - Preview Deployment Protection appears off. **Medium**; optional owner setting.

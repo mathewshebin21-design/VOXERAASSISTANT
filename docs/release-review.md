@@ -6,7 +6,7 @@ Decision authority: the owner. This record recommends; it authorises nothing.
 | Release | Change | Commit | Target | Schema |
 |---|---|---|---|---|
 | RC-1 | PR #1: environment isolation, explicit migrations, read-only build, AI path hardening, setup assistant | `a7ba2f0` | production branch `claude/confident-shannon-7nb05f` (`767c0f2`) | 0006 → **0007** (claim) |
-| RC-2 | PR #2: Agent Studio (flows, engine, Testing Lab, plain-English edits, insights) | `359aa31` (+ `bc828cc` docs, local) | production branch after RC-1 | 0007 → **0008** |
+| RC-2 | PR #2: Agent Studio (flows, engine, Testing Lab, plain-English edits, insights) | code `359aa31`; PR head `20b5ed9` (only `docs/` changed after `359aa31`) | production branch after RC-1 | 0007 → **0008** |
 
 ## 1. Recommendation
 - **RC-1: GO on engineering. Not executable until the four prerequisites in §4 are met.**
@@ -19,6 +19,7 @@ Decision authority: the owner. This record recommends; it authorises nothing.
 |---|---|
 | PR #1 GitHub CI at `a7ba2f0` | 7/7 green (the Vercel API preview status is red by design: it needs 0007, and staging is at 0008) |
 | PR #2 GitHub CI at `359aa31` | `test`, `live-e2e`, `check`, Vercel ×2: all green |
+| PR #2 GitHub CI at `20b5ed9` (current head, docs-only change) | `test` ✅, `check` ✅, Vercel ×2 ✅. `live-e2e` ✅ on re-run: the first attempt failed in `next build` while downloading Google Fonts (`next/font` loader), before any test ran, so it was a runner network failure, not the app |
 | Merge simulation | PR #1 → production: clean. PR #2 → production: clean |
 | Release-path rehearsal, disposable production copy (0006 + customer data) | **51/51**: refusals before the claim, read-only check, wrong host refused, claim → 0007 with data kept, each commit's build gate, 0008 upgrade, Agent Studio and Testing Lab on 0008, the rollback code on 0008, downgrade and re-upgrade, staging migrator refused |
 | Compatibility harness | **40/40** (`767c0f2` can't be rebuilt, so Instant Rollback only) |
@@ -54,7 +55,7 @@ Decision authority: the owner. This record recommends; it authorises nothing.
 | 2 | Code review approved, no open high findings | ✅ (M1 fixed in the plan; M2 → criterion 5) | ✅ (R2-M1 accepted with a deadline) |
 | 3 | Migrations rehearsed on a production copy, data kept, rollback proven | ✅ 51/51 | ✅ 51/51 |
 | 4 | **Owner approval on the PR (GitHub review)** | ❌ | ❌ |
-| 5 | **GitHub `production` environment:** secret, required reviewer, default-branch-only | ❓ unverified (403 from this session) | same |
+| 5 | **GitHub `production` environment:** secret, required reviewer, default-branch-only | ❓ **verification blocked** (HTTP 403 from this session, checked 3 times); **not confirmed configured** | same |
 | 6 | **Fresh Neon backup branch and snapshot, T0 recorded** (`docs/production-release-runbook.md` §2a) | ❌ (taken just before the claim) | ✅ if within the same session; otherwise a new one before the 0008 upgrade |
 | 7 | Rollback target identified and tested | ✅ `dpl_EEBq…`, Instant Rollback only | ✅ RC-1's deployment |
 | 8 | Quiet window agreed, validation checklist ready | ❌ owner to choose / ✅ runbook §3 | same |
@@ -64,11 +65,13 @@ Decision authority: the owner. This record recommends; it authorises nothing.
 | Risk | Status | Owner decision needed |
 |---|---|---|
 | Historical production credentials valid until rotation | Open. Rotation possible only after RC-1 is live | Approve RC-3 (rotation) after RC-2 |
-| Preview Deployment Protection unconfirmed | Open | Enable or accept |
+| Preview Deployment Protection **confirmed off** on both projects (SF-5) | Open | Enable or accept |
 | Neon Free: 6-hour instant restore and 1 snapshot | Open. Mitigated by a backup branch taken just before | Accept, or upgrade the plan (a cost: separate approval) |
 | JWT secret derived from the database password | Open. Safe transition in runbook §5 | Approve setting `VOXERA_JWT_SECRET` before the RC-1 redeploy |
 | `767c0f2` can't be rebuilt | Mitigated (Instant Rollback to `dpl_EEBq…` only) | — |
 | Data export incomplete (R2-M1) | Open; fix before real calls | Accept for RC-2 |
+
+Findings are tracked in the tracker's open security findings register (SF-1 to SF-6); none is resolved.
 
 ## 6. Sign-off (owner)
 | Release | Decision | Date | Conditions |

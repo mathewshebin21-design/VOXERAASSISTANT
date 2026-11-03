@@ -107,3 +107,56 @@ Roadmap placement: the tracker's Phase 1 (core product) row "Rescheduling 🟡".
 - **No migration needed**, so production schema 0008 is unchanged. This can ship as a normal deployment after RC-2.
 - **Risk:** it changes shared booking code (`book()` refactor). This is covered by the existing booking, receptionist and engine tests plus the tests above.
 - **Estimate:** about 1–1.5 days of implementation and tests.
+
+## 5. Development package (prepared; not started)
+**Branch:** `claude/phase1-reschedule`, cut from the production branch after RC-2 merges (it then holds PR #1 and PR #2). If you want work to start earlier, cut it from `claude/agent-studio` and retarget it later. **No new migration.**
+
+**Commits, in order (each one green on its own):**
+1. **`reception`: shared slot checks and an atomic in-place reschedule.**
+   - `_check_slot()` extracted from `book()`, with no change in behaviour;
+   - `_booked(exclude=)`;
+   - the new `reschedule()` (§2.1).
+
+   Tests 1–8, 12, plus the existing booking tests unchanged.
+2. **REST: `POST /v1/orgs/{org_id}/appointments/{id}/reschedule`.**
+   - `RescheduleIn` schema;
+   - `calls_manage` permission;
+   - 404 / 409 mapping;
+   - audit `appointment.rescheduled` with from/to/actor.
+
+   Tests 9–11, 13.
+3. **AI receptionist on the new helper.** The same reference is returned; confirmation gating unchanged. Test 14, plus the existing `test_live*` tests.
+4. **Agent Studio `reschedule_appointment` tool.**
+   - engine `_tool` implementation;
+   - the dry-run savepoint;
+   - an optional "Move my booking" template scenario. **The standard 12 stay unchanged.**
+
+   Tests 15–17, plus all `test_flow_*`.
+5. **Desk "Move" action** (`flow/app/desk/page.tsx`): reuses the slot picker; on 409, shows the reason and refreshes the slots. Test 18 (browser), web unit tests, tsc, eslint, build.
+6. **Docs and tracker:** the rescheduling row → 🧪 with evidence. The roadmap phases aren't renamed.
+
+**Requirement → where it's met → test:**
+| Requirement | Where | Tests |
+|---|---|---|
+| Atomic in-place update | `reception.reschedule` under the `bookings:{org}` advisory lock + `FOR UPDATE` | 1, 8 |
+| Keep the original booking reference | update the same row; never insert or cancel | 1, 13, 14 |
+| No self-conflict | `_booked(exclude=a.id)` | 2 |
+| Correct audit history | one `appointment.rescheduled` row with from/to/actor; none for a no-op | 7, 11 |
+| Tenant isolation and authorisation | row-level security + `organization_id` filter; `calls_manage` | 9, 10 |
+| REST endpoint | `desk.py` | 1–13 |
+| Desk Move action | `desk/page.tsx` | 18 |
+| Working Agent Studio tool | `engine._tool` | 15–17 |
+| Regression | the existing API (207), web unit (237), browser (131 + 26 + 14 + 16) suites unchanged | all |
+
+**Gates before asking to push:**
+- ruff, pytest (full) and the migration round trip;
+- vitest, tsc, eslint, `next build`;
+- every browser suite, run locally;
+- an adversarial re-read of the diff.
+
+**Gates before production:**
+- PR CI green;
+- staging run green;
+- owner approval.
+
+It's an ordinary deployment with no schema change, after RC-2.
