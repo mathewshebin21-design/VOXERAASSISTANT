@@ -4,7 +4,7 @@ This is the single place for project status. Two sources feed it:
 - **The plan** is the master specification written in ChatGPT. That document isn't in this repository, so the phases below (0–11) come from the agreed vision list and are provisional. Replace them with the specification's 11 phase titles once it is shared.
 - **What is actually done** comes only from this repository and checked deployment evidence. Nothing is marked done just because it is documented.
 
-Last updated: 2026-11-02 19:45 UTC (branch `claude/agent-studio`; this update is local, not pushed).
+Last updated: 2026-11-03 (branch `claude/agent-studio`; this update is local, not pushed).
 
 > **Phase numbering:** you describe the roadmap as Phases 0–10 (11 phases). The provisional grouping below has 0–11 (12). It will be renumbered to match once the master specification's phase titles are shared; until then, no phase is renamed or merged on a guess.
 
@@ -41,14 +41,14 @@ Last updated: 2026-11-02 19:45 UTC (branch `claude/agent-studio`; this update is
 | **Staging verification (run #1)** | ✅ **passed**: migrate ✅, readiness ✅, isolation ✅, staging browser tests 14/14 ✅, demo designs 131/131 ✅ | GitHub Actions run 41502348420 (attempt 2), staging at 94dae66 |
 | Real phone calls, real AI provider, real voice | **never tested** | — |
 
-## Phase 0 closure status (2026-11-02): **NOT COMPLETE** (see `docs/phase-0-closure-report.md`)
+## Phase 0 closure status: ✅ **COMPLETE for engineering and staging readiness** (2026-11-03; see `docs/phase-0-closure-report.md`). Production release is tracked separately.
 | Gate | Status |
 |---|---|
-| 0.1 Preview can't read production | FAIL: only because of 8 historical previews (current config PASS, tested) |
-| 0.2 Preview can't write production | FAIL: same historical previews (current config PASS, tested) |
+| 0.1 Preview can't read production | PASS (historical previews deleted 2026-11-03; verified) |
+| 0.2 Preview can't write production | PASS (historical previews deleted 2026-11-03; verified) |
 | 0.3 Staging migrator refuses production | PASS |
 | 0.4 Production migrator refuses staging | PASS |
-| 0.5 No production credentials in Preview/Development | FAIL: deployed artifacts of the historical previews (config PASS) |
+| 0.5 No production credentials in Preview/Development | PASS (historical previews deleted 2026-11-03; verified) |
 | 0.6 Wrong identity fails closed | PASS |
 | 0.7 Hosted tests on staging only | PASS |
 | 0.8 Production unaffected | PASS |
@@ -58,7 +58,7 @@ Last updated: 2026-11-02 19:45 UTC (branch `claude/agent-studio`; this update is
 
 ### Phase 0 final cleanup (2026-11-02, owner approval "PHASE 0 FINAL CLEANUP")
 - **Docs pushed:** `23ec727` and `cf1ab39` (docs only, no secrets). PR #2 head `cf1ab39`. No GitHub workflow triggered (path filters). Last code CI: 6/6 green at `41a4a13`.
-- **Deletion: NOT DONE.** No tool in this session can delete Vercel deployments (only in-progress builds can be cancelled). These 16 READY previews are verified historical and safe to delete in the dashboard:
+- **Deletion: DONE by the owner, 2026-11-03.** Verified read-only: all 16 removed (404); production and staging unchanged; no production credentials in Preview or Development. Deleted:
 
 | Project | Deployment | Commit (branch `claude/stoic-davinci-vvk3jg`) | Alias |
 |---|---|---|---|
@@ -85,7 +85,9 @@ Last updated: 2026-11-02 19:45 UTC (branch `claude/agent-studio`; this update is
   - PR #2 previews;
   - all previews built after the switch to staging.
 - **Deployment Protection:** not verifiable with read-only access. Evidence (an unauthenticated CI runner read preview JSON) indicates Preview protection is **off**.
-- **Phase 0: still NOT COMPLETE.** Gates 0.1, 0.2 and 0.5 stay FAIL until the 8 voxera-api previews above are deleted. After deletion, the residual risk is copied credentials until voxera-db's password is rotated (release plan step 8, after PR #1 is live).
+- **Residual risks (tracked, not blocking Phase 0):**
+  - credentials copied from the deleted previews stay valid until voxera-db's password is rotated (release plan step 8, after PR #1 is live). **Medium.**
+  - Preview Deployment Protection appears off. **Medium**; optional owner setting.
 
 ## Phase 0 log: staging run #1 (2026-11-02, approved "approve staging run")
 - **Branch:** `staging` created at `94dae660d50fc356a53a48f43e2fcd63807e2377` (PR #2's head).
