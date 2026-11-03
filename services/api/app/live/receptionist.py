@@ -241,6 +241,7 @@ class Turn:
     last_caller_text: str
     handoff: "reception.Handoff | None" = None
     writes: int = 0
+    changes: int = 0  # bookings made, moved or cancelled on the caller's latest "yes"
 
 
 def _local(d: reception.Desk, s: str) -> datetime:
@@ -266,6 +267,11 @@ def _need_yes(turn: Turn) -> None:
     if not affirmed(turn.last_caller_text):
         raise reception.DeskError(
             "Not done: the caller hasn't confirmed. Read the details back and ask them to confirm first."
+        )
+    if turn.changes >= 1:  # one "yes" confirms one change, however many tool calls the model makes
+        raise reception.DeskError(
+            "Not done: one change was already made on this confirmation. Read the next change back and ask the "
+            "caller to confirm it separately."
         )
 
 
@@ -324,6 +330,7 @@ def run_tool(db: Session, ctx: BusinessContext, turn: Turn, name: str, args: obj
                 )
             db.commit()
             turn.writes += 1
+            turn.changes += 1
             return True, json.dumps({"booked": _appt(appt, d), "patch_test_reminder": svc.requires_patch_test})
 
         if name == "find_my_appointments":
@@ -342,6 +349,7 @@ def run_tool(db: Session, ctx: BusinessContext, turn: Turn, name: str, args: obj
                 )
                 db.commit()
                 turn.writes += 1
+                turn.changes += 1
                 return True, json.dumps({"cancelled": _appt(appt, d)})
             new = reception.reschedule(db, d, appt, _local(d, str(a.get("new_start", ""))))
             audit.record(
@@ -355,6 +363,7 @@ def run_tool(db: Session, ctx: BusinessContext, turn: Turn, name: str, args: obj
             )
             db.commit()
             turn.writes += 1
+            turn.changes += 1
             return True, json.dumps({"moved_to": _appt(new, d)})
 
         if name == "take_message":

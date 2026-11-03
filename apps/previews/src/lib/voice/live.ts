@@ -14,7 +14,7 @@ async function failure(stage: "brain" | "tts", r: Response): Promise<ProviderErr
   return new ProviderError(stage, detail, !(r.status === 429 || r.status === 503 || r.status === 403));
 }
 
-/** Streams replies from the server-side receptionist (Claude, with tools over the workspace's data). */
+/** Streams replies from the server-side receptionist (the configured AI model, with tools over the workspace's data). */
 export class ApiBrain implements BrainAdapter {
   readonly costPerMinGbp = null; // per-token prices are not configured in VOXERA
   private history: { role: "user" | "assistant"; text: string }[] = [];
@@ -22,6 +22,9 @@ export class ApiBrain implements BrainAdapter {
   constructor(private orgId: string, readonly name: string) {}
 
   reset() { this.history = []; this.conversationId = `call-${crypto.randomUUID()}`; }
+
+  /** Records what the receptionist already said (e.g. the saved greeting) without a model call. */
+  prime(text: string) { this.history.push({ role: "assistant", text }); }
 
   async *greet(signal: AbortSignal): AsyncIterable<BrainChunk> {
     const r = await fetch(`/api/v1/orgs/${this.orgId}/live/greeting`, { signal });

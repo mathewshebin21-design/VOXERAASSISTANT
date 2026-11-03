@@ -1,5 +1,5 @@
 def test_health_and_readiness(client):
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/healthz").json() == {"status": "ok", "commit": None}  # commit is set on Vercel
     assert client.get("/readyz").json() == {"status": "ready"}
 
 

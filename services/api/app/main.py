@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import uuid
 
@@ -6,7 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.concurrency import run_in_threadpool
 
+from . import deploy_env
 from .config import get_settings
 from .db import SessionLocal
 from .logging_setup import configure_logging, request_id_var
@@ -32,6 +35,34 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
+
+    # Refuse to serve from a database that belongs to another environment (app/deploy_env.py).
+    guard = {"ok": deploy_env.expected() is None, "checked": 0.0, "why": None}
+
+    def database_mismatch() -> str | None:
+        if guard["ok"]:
+            return None
+        if time.monotonic() - guard["checked"] < 30:
+            return guard["why"]
+        try:
+            with SessionLocal() as s:
+                why = deploy_env.mismatch(s.connection())
+        except Exception:
+            log.exception("database environment check failed")
+            why = "the database environment could not be checked"
+        guard.update(ok=why is None, checked=time.monotonic(), why=why)
+        if why:
+            log.error("refusing requests", extra={"reason": why})
+        return why
+
+    @app.middleware("http")
+    async def environment_guard(request: Request, call_next):
+        if request.url.path != "/healthz" and not guard["ok"] and (why := await run_in_threadpool(database_mismatch)):
+            return JSONResponse(
+                {"detail": "This deployment is not connected to its own environment's database.", "reason": why},
+                status_code=503,
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -64,7 +95,8 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", tags=["health"])
     def healthz() -> dict:
-        return {"status": "ok"}
+        # The deployed commit (public in the repo anyway) lets deploy checks wait for the right build.
+        return {"status": "ok", "commit": os.environ.get("VERCEL_GIT_COMMIT_SHA", "")[:7] or None}
 
     @app.get("/readyz", tags=["health"])
     def readyz() -> JSONResponse:
@@ -75,6 +107,16 @@ def create_app() -> FastAPI:
         except Exception:
             log.exception("readiness check failed")
             return JSONResponse({"status": "unavailable"}, status_code=503)
+
+    @app.get("/staging-identity", include_in_schema=False)
+    def staging_identity() -> JSONResponse:
+        if os.getenv("VERCEL_ENV") != "preview" or os.getenv("VERCEL_GIT_COMMIT_REF") != "staging":
+            return JSONResponse({}, status_code=404)
+        with SessionLocal() as session:
+            # Read the marker from the actual runtime connection on every probe.
+            if deploy_env.claimed(session.connection()) != "staging":
+                return JSONResponse({}, status_code=503)
+        return JSONResponse({"commit": os.getenv("VERCEL_GIT_COMMIT_SHA"), "environment": "staging"})
 
     for r in (
         auth.router,

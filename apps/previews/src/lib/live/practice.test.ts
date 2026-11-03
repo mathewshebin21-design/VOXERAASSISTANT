@@ -92,3 +92,40 @@ describe("natural voice", () => {
     expect(pickVoice([v("Zarvox", "en-US"), v("Kate")])?.name).toBe("Kate");
   });
 });
+
+describe("talks like a person, not a menu", () => {
+  const replies = async (lines: string[]) => {
+    let s: PracticeState = practiceInitial();
+    const out: string[] = [];
+    for (const l of lines) {
+      const r = await practiceReply(l, s, catalog, slots, NOW);
+      s = r.state;
+      out.push(r.events.filter((e): e is Extract<SimEvent, { kind: "agent" }> => e.kind === "agent").map((e) => e.text).join(" "));
+    }
+    return out;
+  };
+
+  it.each(["heyy", "hiii", "helloo", "yo", "hey there", "good morning!", "hiya"])("“%s” is a greeting", async (g) => {
+    expect((await replies([g]))[0]).toMatch(/^Hi there!/);
+  });
+
+  it("answers small talk and “what do you know” instead of giving up", async () => {
+    const [how, know, robot, can] = await replies(["how are you?", "what do you know", "are you a robot", "what can you do"]);
+    expect(how).toMatch(/doing really well, thanks for asking/);
+    expect(know).toMatch(/I'm Ray, the AI receptionist for EW Saloon\. I can tell you what we offer/);
+    expect(robot).toMatch(/^Yes, I'm an AI/);
+    expect(can).toMatch(/I can book you in/);
+  });
+
+  it("handles a greeting and a question in one message", async () => {
+    expect((await replies(["hi, how much is a skin fade?"]))[0]).toMatch(/^Hi! Skin fade starts from £20/);
+  });
+
+  it("keeps off-topic chat friendly, and asks again before offering a person", async () => {
+    const [weather, a, b] = await replies(["what's the weather like", "asdfgh", "blorp"]);
+    expect(weather).toMatch(/I wish I could help with that/);
+    expect(a).toMatch(/didn't quite follow that\. I can help with booking/);
+    expect(b).toMatch(/still not quite following\. Would you like me to put you through/);
+    expect([weather, a, b].join(" ")).not.toMatch(/good question/);
+  });
+});

@@ -98,7 +98,7 @@ export function LiveProviderPicker({ onChange, disabled }: { onChange: (c: LiveC
   }, [reload]);
   useEffect(() => {
     if (!active || !st.data) return onChange(undefined);
-    const b = brain && st.data.llm.available ? `Claude (${st.data.llm.model}) · live` : null;
+    const b = brain && st.data.llm.available ? `${st.data.llm.provider === "Anthropic" ? "Claude" : st.data.llm.provider} (${st.data.llm.model}) · live` : null;
     const v = voice && st.data.tts.available ? `ElevenLabs (${st.data.tts.model}) · live` : null;
     onChange(b || v ? { orgId: active.organization.id, brain: b, voice: v } : undefined);
   }, [active, st.data, brain, voice, onChange]);
@@ -117,7 +117,7 @@ export function LiveProviderPicker({ onChange, disabled }: { onChange: (c: LiveC
   return (
     <div className={disabled ? "pointer-events-none space-y-2 opacity-50" : "space-y-2"}>
       <div className="flex items-center gap-2 text-xs text-flw-mute"><Chip tone="pink">live · metered</Chip> paid providers, capped per month</div>
-      {row("Claude as the brain", st.data?.llm, brain, setBrain)}
+      {row(st.data?.llm.provider && st.data.llm.provider !== "Anthropic" ? `${st.data.llm.provider} as the brain` : "Claude as the brain", st.data?.llm, brain, setBrain)}
       {row("ElevenLabs voice", st.data?.tts, voice, setVoice)}
       <p className="text-[11px] text-flw-mute">With these off, the free rule-based demo receptionist (Halden &amp; Rye data) and your browser’s voice are used.</p>
       {st.data && !st.data.llm.configured && !st.data.tts.configured && <p className="text-[11px] text-flw-mute">Live providers need API keys and monthly caps in the API server’s environment — see docs/phase-3-live-providers.md.</p>}

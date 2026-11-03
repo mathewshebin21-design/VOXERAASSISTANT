@@ -82,6 +82,23 @@ await step("setup assistant (guided): a conversation fills in the workspace", as
     && state.agents.some((a) => a.name === "Ava" && /AI receptionist/.test(a.greeting));
 });
 
+await step("setup assistant (guided): removing a service then 'undo' brings back the same service", async () => {
+  const chat = p.getByTestId("setup-chat");
+  const svcs = (all) => p.evaluate(async ([id, q]) => (await fetch(`/api/v1/orgs/${id}/services${q}`)).json(), [orgId, all ? "?include_inactive=true" : ""]);
+  const before = (await svcs(true)).find((s) => s.name === "Gents cut");
+  await p.getByLabel("Your answer").fill("remove gents cut");
+  await p.getByRole("button", { name: "Send" }).click();
+  await chat.getByText(/Removed Gents cut/).last().waitFor({ timeout: 10000 });
+  const hidden = await svcs(false);
+  if (hidden.some((s) => s.name === "Gents cut")) throw new Error("still offered after removal");
+  await p.getByLabel("Your answer").fill("undo");
+  await p.getByRole("button", { name: "Send" }).click();
+  await chat.getByText(/✓/).last().waitFor({ timeout: 10000 });
+  await p.waitForTimeout(500);
+  const after = (await svcs(false)).find((s) => s.name === "Gents cut");
+  return !!after && after.id === before.id && after.price_from_pence === 2000;
+});
+
 await step("Command: real bookings and desk cases appear after they're created", async () => {
   const hours = { intervals: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opens_at: "00:00", closes_at: "23:59" })) };
   if ((await apiCall("PUT", `/orgs/${orgId}/office-hours`, hours)).status !== 200) throw new Error("hours");
@@ -97,7 +114,7 @@ await step("Command: real bookings and desk cases appear after they're created",
   return /4\/6 done/.test(await p.locator("main").innerText());
 });
 
-await step("Flow Simulate: practice receptionist answers from the workspace's real details", async () => {
+await step("Flow Simulate: practice receptionist answers from the workspace's real details (AI model when switched on)", async () => {
   await p.goto(`${BASE}/flow/app/simulate`, { waitUntil: "networkidle" });
   await p.getByTestId("sim-source").getByText(/real services, hours and availability/).waitFor({ timeout: 10000 });
   const ask = async (text, expect) => {
@@ -105,6 +122,18 @@ await step("Flow Simulate: practice receptionist answers from the workspace's re
     await p.getByRole("button", { name: "Send" }).click();
     await p.getByText(expect).last().waitFor({ timeout: 15000 });
   };
+  // With an AI model switched on for the workspace (CI runs a local Claude stand-in), the call uses it;
+  // otherwise the free practice brain answers.
+  const brain = p.getByTestId("sim-brain");
+  await brain.waitFor({ timeout: 10000 });
+  if (/Brain: AI/.test(await brain.innerText())) {
+    await ask("Hiya, what services do you do?", /We offer .*Gents cut/);
+    // Reasoning some open models put in <think> tags must never reach the caller.
+    const hidden = (await p.getByText(/The caller wants the list|<think>/).count()) === 0;
+    return hidden && (await p.getByText("list_services").count()) > 0 && (await p.getByText("unsupported_answer").count()) === 0;
+  }
+  await ask("heyy", /Hi there!/);
+  await ask("what do you know", /AI receptionist for/);
   await ask("Okay great what all services do you offer", /Gents cut \(from £20\)/);
   await ask("What's a gents cut?", /Gents cut is a 30 minutes appointment/);
   await ask("Can I book a sports massage tomorrow?", /I could do|The next one I have|is free/);

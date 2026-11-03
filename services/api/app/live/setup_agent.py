@@ -8,6 +8,8 @@ the signed-in owner/admin, and is scoped to their workspace by RLS.
 import json
 import uuid
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
@@ -15,10 +17,11 @@ from sqlalchemy.orm import Session
 
 from .. import audit
 from ..models import Agent, BusinessProfile, OfficeHours, Service, WorkspaceSettings
-from ..schemas import AgentIn, BusinessProfileIO, HoursIn, ServiceIn
+from ..schemas import AgentIn, AgentPatch, BusinessProfileIO, HoursIn, ServiceIn, ServicePatch
 
 SECTORS = [
     "hair_beauty",
+    "barbershop",
     "aesthetics",
     "wellness",
     "clinic",
@@ -30,9 +33,18 @@ SECTORS = [
     "other",
 ]
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+@cache
+def template(sector: str) -> dict | None:
+    """A ready-made starting point for a type of business (kept in step with the guided assistant's copy)."""
+    f = TEMPLATES_DIR / f"{sector}.json"
+    return json.loads(f.read_text()) if sector.isidentifier() and f.is_file() else None
 
 
 def system_prompt(business_name: str) -> str:
+    # The noqa on the closing line: S608 mistakes this English ("update … set") for SQL.
     return f"""You are the VOXERA setup assistant, helping the owner of {business_name} get their AI phone \
 receptionist ready. You are friendly, calm and brief: plain sentences, no jargon, one question at a time.
 
@@ -45,8 +57,44 @@ right tool straight away (they can always correct you). Never invent details the
 If a tool returns an error, explain it simply and ask for what's needed. Prices are in pounds; times are 24-hour.
 The receptionist's greeting must say it is an AI receptionist (UK rules on disclosure).
 
+Owners of every kind of business use this, and they write the way they talk. Understand them without confusion:
+- Business type: map their words to the closest business_type ("gents barbers", "men's grooming" → barbershop; \
+"massage therapist" → wellness; "dog groomer", "tattoo studio" → other). If it's genuinely unclear, ask.
+- Hours: "9-5" means 09:00–17:00; "Thu till 8" or "late Thursday" moves only Thursday's closing time; "every day \
+except Sunday" leaves Sunday closed; a lunch break ("closed 1-2", "9-12 and 1-5") becomes two periods that day; \
+"24/7" is 00:00–23:59. A day they didn't mention is closed — say which days you've treated as closed. \
+set_opening_hours replaces the whole week, so when they change one day, resend every other day as it was. \
+Bank holidays and seasonal hours can't go in the weekly hours: offer to add a sentence about them to the \
+description.
+- Services: a price range ("£18–£25") is saved with the lowest as the starting price, and you say so. "Free" is £0; \
+"POA" or "price varies" is no price. Several services on one line are separate services. A heading such as \
+"Haircuts:" is the category for the lines under it. If no length is given, ask (or, with a template, offer the \
+template's typical length) rather than guessing silently.
+- Corrections ("actually Saturday is 9-5", "skin fade is £25", "we don't do perms") change only that item: use \
+update_service or remove_services, never re-add or wipe the rest. If a name could mean more than one service, list \
+them and ask which.
+- Capacity is how many customers can be seen at once: with "4 chairs but 2 barbers" it's 2 (the smaller number).
+- If they ask a question ("what's capacity?", "why do you need this?"), answer it in a sentence and ask again.
+
+If get_business_template has a template for their business type, offer it when you reach hours or services. Show \
+it briefly (grouped by category, with lengths and "from" prices), let them change anything, and only then save it: \
+hours with set_opening_hours, services with add_services (keep each service's category and buffer), and the \
+template's policies with update_business_details as the description — but only if they have no description yet, \
+or they agree to replace it.
+
+Owners can ask for changes at any time, during setup or long after it: "skin fade is now £25", "we're closed on \
+Mondays now", "we've hired another barber", "rename the receptionist to Sam", "tell callers we have free parking". \
+Just do it: check get_setup_state for the current values, make the change with the right tool straight away \
+(don't ask "shall I?"), then say exactly what changed as before → after, e.g. "Skin fade: £24 → £25". If they say \
+"undo" or "change it back", put back the "before" / "previous_hours" values the tool returned, the same way \
+(a removed service comes back with add_services under the same name). Only ask first when the request could \
+mean more than one thing (several services match, or no days were given for "we close at 6"). For "put all prices \
+up £2" or "10% on haircuts", call update_service for each service affected and list the new prices. To add \
+something callers should be told, append a sentence to the existing description — never replace what's there. \
+Renaming the receptionist uses update_receptionist (its greeting keeps saying it's an AI); never create a second one.
+
 When everything is set, say so and suggest the next steps: go Available on the Desk, invite the team on the \
-Team page, and try a test call in the Voice lab. Only help with setting up this workspace."""
+Team page, and try a test call in the Voice lab. Only help with setting up and running this workspace's setup."""  # noqa: S608
 
 
 def _obj(props: dict) -> dict:
@@ -85,7 +133,8 @@ TOOLS = [
     ),
     _tool(
         "set_opening_hours",
-        "Replace the whole week. Days not listed are closed. weekday: 0 = Monday … 6 = Sunday; times HH:MM.",
+        "Replace the whole week. Days not listed are closed. weekday: 0 = Monday … 6 = Sunday; times HH:MM. "
+        "A day with a break has two entries (e.g. 09:00–13:00 and 14:00–17:00).",
         _obj(
             {
                 "days": {
@@ -110,11 +159,38 @@ TOOLS = [
                             "duration_minutes": {"type": "integer"},
                             "price_from_gbp": {"type": ["number", "null"]},
                             "requires_patch_test": {"type": "boolean"},
+                            "category": NS,
+                            "buffer_minutes": {"type": ["integer", "null"]},
                         }
                     ),
                 }
             }
         ),
+    ),
+    _tool(
+        "update_service",
+        "Change one existing service, found by its current name. Pass null for anything not being changed.",
+        _obj(
+            {
+                "name": {"type": "string"},
+                "new_name": NS,
+                "duration_minutes": {"type": ["integer", "null"]},
+                "price_from_gbp": {"type": ["number", "null"]},
+                "category": NS,
+            }
+        ),
+    ),
+    _tool(
+        "remove_services",
+        "Stop offering services, by their exact names. They are hidden from callers, not erased: existing "
+        "bookings keep them, and add_services with the same name brings one back (for undo).",
+        _obj({"names": {"type": "array", "items": {"type": "string"}}}),
+    ),
+    _tool(
+        "get_business_template",
+        "A ready-made template (services with lengths and from-prices, typical hours, booking policies) for a "
+        "business type, or null if there isn't one. Reading it saves nothing.",
+        _obj({"business_type": {"type": "string", "enum": SECTORS}}),
     ),
     _tool(
         "set_booking_capacity",
@@ -125,6 +201,12 @@ TOOLS = [
         "create_receptionist",
         "Create the AI receptionist. The greeting must say it is an AI receptionist.",
         _obj({"name": {"type": "string"}, "greeting": {"type": "string"}}),
+    ),
+    _tool(
+        "update_receptionist",
+        "Rename the existing receptionist or change its greeting. Pass null for anything not being changed. "
+        "The greeting must still say it is an AI receptionist.",
+        _obj({"name": NS, "greeting": NS}),
     ),
 ]
 
@@ -176,6 +258,7 @@ def state(db: Session, org_id: uuid.UUID) -> dict:
                 "name": x.name,
                 "minutes": x.duration_min,
                 "from_gbp": None if x.price_from_pence is None else x.price_from_pence / 100,
+                "category": x.category,
             }
             for x in services
         ]
@@ -196,6 +279,27 @@ def state(db: Session, org_id: uuid.UUID) -> dict:
     }
 
 
+def _find_service(db: Session, org_id: uuid.UUID, name: object, *, exact_only: bool = False) -> Service | str:
+    """The one active service a name refers to (exact, case-insensitive), or a message saying why not.
+    Deleting needs the exact name; changing also accepts a part of the name that matches only one."""
+    if not isinstance(name, str) or not name.strip():
+        return "give the service's name"
+    rows = list(db.scalars(select(Service).where(Service.organization_id == org_id, Service.active.is_(True))))
+    exact = [s for s in rows if s.name.lower() == name.strip().lower()]
+    if exact:
+        return exact[0]
+    if exact_only:
+        close = sorted(s.name for s in rows if name.strip().lower() in s.name.lower())
+        hint = f" Did you mean {', '.join(close)}? Confirm the exact name with the owner." if close else ""
+        return f"no service called exactly “{name}”.{hint}"
+    close = sorted(s.name for s in rows if name.strip().lower() in s.name.lower())
+    if len(close) == 1:
+        return next(s for s in rows if s.name == close[0])
+    if close:
+        return f"“{name}” could be {', '.join(close)}: ask the owner which one"
+    return f"no service called “{name}”: check get_setup_state for the exact names"
+
+
 def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[bool, str]:
     if not isinstance(args, dict):
         return _err("invalid arguments")
@@ -211,7 +315,9 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             if "website" in changes and not str(changes["website"]).startswith("https://"):
                 changes["website"] = "https://" + str(changes["website"]).removeprefix("http://")
             merged = BusinessProfileIO.model_validate({**current, **changes})
-            for k, v in merged.model_dump().items():
+            after = merged.model_dump()
+            before = {k: current.get(k) for k in changes}
+            for k, v in after.items():
                 setattr(p, k, v)
             audit.record(
                 db,
@@ -224,7 +330,10 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"saved": sorted(changes)})
+            # before → after lets the owner see exactly what changed, and "undo" restore it.
+            return True, json.dumps(
+                {"saved": sorted(changes), "before": before, "after": {k: after.get(k) for k in changes}}, default=str
+            )
 
         if name == "set_opening_hours":
             hours = HoursIn.model_validate(
@@ -235,6 +344,14 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                     ]
                 }
             )
+            previous = [
+                {"weekday": h.weekday, "opens": f"{h.opens_at:%H:%M}", "closes": f"{h.closes_at:%H:%M}"}
+                for h in db.scalars(
+                    select(OfficeHours)
+                    .where(OfficeHours.organization_id == ctx.org_id)
+                    .order_by(OfficeHours.weekday, OfficeHours.opens_at)
+                )
+            ]
             db.execute(delete(OfficeHours).where(OfficeHours.organization_id == ctx.org_id))
             db.add_all(OfficeHours(organization_id=ctx.org_id, **i.model_dump()) for i in hours.intervals)
             audit.record(
@@ -248,14 +365,17 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"saved_days": sorted({DAYS[i.weekday] for i in hours.intervals}, key=DAYS.index)})
+            return True, json.dumps(
+                {
+                    "saved_days": sorted({DAYS[i.weekday] for i in hours.intervals}, key=DAYS.index),
+                    "previous_hours": previous,  # pass back to set_opening_hours to undo
+                }
+            )
 
         if name == "add_services":
-            existing = {
-                n.lower()
-                for n in db.scalars(select(func.lower(Service.name)).where(Service.organization_id == ctx.org_id))
-            }
-            added, skipped = [], []
+            rows = {x.name.lower(): x for x in db.scalars(select(Service).where(Service.organization_id == ctx.org_id))}
+            existing = {k for k, v in rows.items() if v.active}
+            added, skipped, restored = [], [], []
             for x in args.get("services", []):
                 price = x.get("price_from_gbp")
                 svc = ServiceIn.model_validate(
@@ -264,10 +384,29 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                         "duration_min": x.get("duration_minutes"),
                         "price_from_pence": None if price is None else round(float(price) * 100),
                         "requires_patch_test": bool(x.get("requires_patch_test")),
+                        "category": x.get("category") or None,
+                        "buffer_min": x.get("buffer_minutes") or 0,
                     }
                 )
                 if svc.name.lower() in existing:
                     skipped.append(svc.name)
+                    continue
+                old = rows.get(svc.name.lower())
+                if old is not None:  # removed earlier: bring the same service back, keeping its bookings' link
+                    for k, v in svc.model_dump().items():
+                        setattr(old, k, v)
+                    old.active = True
+                    existing.add(svc.name.lower())
+                    restored.append(old.name)
+                    audit.record(
+                        db,
+                        ctx.org_id,
+                        ctx.user_id,
+                        "service.updated",
+                        "service",
+                        old.id,
+                        {"fields": ["active"], "restored": True, "via": "setup_assistant"},
+                    )
                     continue
                 s = Service(organization_id=ctx.org_id, **svc.model_dump())
                 db.add(s)
@@ -285,7 +424,101 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
                 )
             db.commit()
             ctx.writes += 1
-            return True, json.dumps({"added": added, "already_existed": skipped})
+            return True, json.dumps({"added": added, "restored": restored, "already_existed": skipped})
+
+        if name == "update_service":
+            s = _find_service(db, ctx.org_id, args.get("name"))
+            if isinstance(s, str):
+                return _err(s)
+            price = args.get("price_from_gbp")
+            raw = {
+                "name": args.get("new_name"),
+                "duration_min": args.get("duration_minutes"),
+                "price_from_pence": None if price is None else round(float(price) * 100),
+                "category": args.get("category"),
+            }
+            changes = ServicePatch.model_validate({k: v for k, v in raw.items() if v is not None}).model_dump(
+                exclude_unset=True
+            )
+            if not changes:
+                return _err("nothing to change: give a new name, length, price or category")
+            if "name" in changes and changes["name"].lower() != s.name.lower():
+                taken = db.scalar(
+                    select(func.count())
+                    .select_from(Service)
+                    .where(Service.organization_id == ctx.org_id, func.lower(Service.name) == changes["name"].lower())
+                )
+                if taken:
+                    return _err(f"a service called {changes['name']} already exists")
+            before = {k: getattr(s, k) for k in changes}
+            for k, v in changes.items():
+                setattr(s, k, v)
+            audit.record(
+                db,
+                ctx.org_id,
+                ctx.user_id,
+                "service.updated",
+                "service",
+                s.id,
+                {"fields": sorted(changes), "via": "setup_assistant"},
+            )
+            db.commit()
+            ctx.writes += 1
+            return True, json.dumps({"updated": s.name, "fields": sorted(changes), "before": before, "after": changes})
+
+        if name == "remove_services":
+            removed, problems = [], []
+            for n in args.get("names", []):
+                s = _find_service(db, ctx.org_id, n, exact_only=True)
+                if isinstance(s, str):
+                    problems.append(s)
+                    continue
+                removed.append(s.name)
+                # Soft delete: callers can no longer book it, existing bookings keep their link, and
+                # "undo" (add_services with the same name) restores the very same service.
+                s.active = False
+                audit.record(
+                    db,
+                    ctx.org_id,
+                    ctx.user_id,
+                    "service.deleted",
+                    "service",
+                    s.id,
+                    {"name": s.name, "via": "setup_assistant"},
+                )
+            db.commit()
+            ctx.writes += 1 if removed else 0
+            return True, json.dumps({"removed": removed, "problems": problems})
+
+        if name == "get_business_template":
+            t = template(str(args.get("business_type")))
+            if t is None:
+                return True, json.dumps({"template": None})
+            return True, json.dumps(
+                {
+                    "template": {
+                        "label": t["label"],
+                        "services": [
+                            {
+                                "name": s["name"],
+                                "category": s["category"],
+                                "duration_minutes": s["duration_min"],
+                                "buffer_minutes": s["buffer_min"],
+                                "price_from_gbp": s["price_from_pence"] / 100,
+                            }
+                            for s in t["services"]
+                        ],
+                        "opening_hours": [
+                            {"weekday": d, "opens": p["opens"], "closes": p["closes"]}
+                            for d, periods in enumerate(t["week"])
+                            for p in periods
+                        ],
+                        "policies_description": t["description"],
+                        "note": "Starting prices at typical UK high-street rates. Show the owner and let them edit "
+                        "before saving anything.",
+                    }
+                }
+            )
 
         if name == "set_booking_capacity":
             n = args.get("capacity")
@@ -319,10 +552,35 @@ def run_tool(db: Session, ctx: SetupContext, name: str, args: object) -> tuple[b
             ctx.writes += 1
             return True, json.dumps({"created": a.name})
 
+        if name == "update_receptionist":
+            a = db.scalars(select(Agent).where(Agent.organization_id == ctx.org_id).order_by(Agent.created_at)).first()
+            if a is None:
+                return _err("there is no receptionist yet: use create_receptionist")
+            changes = AgentPatch.model_validate(
+                {k: v for k, v in {"name": args.get("name"), "greeting": args.get("greeting")}.items() if v}
+            ).model_dump(exclude_unset=True)
+            if not changes:
+                return _err("nothing to change: give a new name or greeting")
+            before = {k: getattr(a, k) for k in changes}
+            for k, v in changes.items():
+                setattr(a, k, v)
+            audit.record(
+                db,
+                ctx.org_id,
+                ctx.user_id,
+                "agent.updated",
+                "agent",
+                a.id,
+                {"fields": sorted(changes), "via": "setup_assistant"},
+            )
+            db.commit()
+            ctx.writes += 1
+            return True, json.dumps({"before": before, "after": changes})
+
         return _err(f"unknown tool {name}")
     except ValidationError as e:
         db.rollback()
         return _err(e)
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, OverflowError) as e:
         db.rollback()
         return _err(str(e))

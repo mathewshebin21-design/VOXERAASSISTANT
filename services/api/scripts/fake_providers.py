@@ -1,4 +1,5 @@
-"""Local stand-ins for the Anthropic Messages API and ElevenLabs TTS, for end-to-end tests.
+"""Local stand-ins for the Anthropic Messages API, an OpenAI-compatible chat API (the format
+Groq, Gemini, OpenRouter and Ollama share) and ElevenLabs TTS, for end-to-end tests.
 
 They speak just enough of each wire format for VOXERA's adapters, so the whole live
 path (browser → Next proxy → API → provider) can be exercised without keys or cost.
@@ -43,13 +44,40 @@ def reply(blocks: list[dict], stop: str) -> bytes:
     return sse(evs)
 
 
+def chat_reply(messages: list[dict]) -> bytes:
+    """OpenAI-compatible streamed reply: list the services, then say them (like the Anthropic fake)."""
+    last = messages[-1]
+    if last.get("role") == "tool":
+        services = json.loads(last["content"])
+        names = ", ".join(s["name"] for s in services) or "no services listed"
+        # Some open models think out loud in <think> tags; VOXERA must hide that from callers.
+        parts = ["<think>The caller wants the list.</think>", *f"We offer {names}. Is there one you'd like?".split(" ")]
+        chunks = [{"choices": [{"index": 0, "delta": {"content": w if w.startswith("<") else w + " "}}]} for w in parts]
+        chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+    else:
+        call = {
+            "index": 0,
+            "id": "call_fake",
+            "type": "function",
+            "function": {"name": "list_services", "arguments": "{}"},
+        }
+        chunks = [
+            {"choices": [{"index": 0, "delta": {"tool_calls": [call]}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+        ]
+    chunks.append({"choices": [], "usage": {"total_tokens": 900}})
+    return b"".join(f"data: {json.dumps(c)}\n\n".encode() for c in chunks) + b"data: [DONE]\n\n"
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
-        if self.path.startswith("/v1/messages"):
+        if self.path.endswith("/chat/completions"):
+            self._send(200, "text/event-stream", chat_reply(body["messages"]))
+        elif self.path.startswith("/v1/messages"):
             last = body["messages"][-1]["content"]
             said = next((m["content"] for m in reversed(body["messages"]) if isinstance(m["content"], str)), "")
             if (

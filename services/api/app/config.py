@@ -35,8 +35,17 @@ class Settings(BaseSettings):
     # ---- live AI and speech providers (Phase 3) ----
     # Nothing here is called unless BOTH a key and a non-zero monthly cap are set.
     # Keys are read only on the server and never returned by any endpoint.
+    # Which language model answers: Anthropic's Claude (default), or any provider with an
+    # OpenAI-compatible chat API — Groq, Google Gemini, OpenRouter, a local Ollama (e.g. Qwen),
+    # or another endpoint given by llm_base_url. See docs/phase-3-live-providers.md.
+    llm_provider: str = Field("anthropic", pattern="^(anthropic|groq|gemini|openrouter|ollama|openai_compatible)$")
     anthropic_api_key: SecretStr | None = None
-    llm_model: str = "claude-opus-5-5"
+    # Key for the non-Anthropic providers (Ollama needs none).
+    llm_api_key: SecretStr | None = None
+    # Overrides the provider's usual address (required for openai_compatible).
+    llm_base_url: str | None = None
+    # Required for non-Anthropic providers, since model names change often; Claude defaults below.
+    llm_model: str | None = None
     llm_effort: str = Field("low", pattern="^(low|medium|high|xhigh|max)$")
     llm_max_output_tokens: int = Field(400, ge=64, le=4000)
     elevenlabs_api_key: SecretStr | None = None
@@ -55,6 +64,11 @@ class Settings(BaseSettings):
         if len(v.get_secret_value()) < 32:
             raise ValueError("VOXERA_JWT_SECRET must be at least 32 characters")
         return v
+
+    @property
+    def model(self) -> str | None:
+        """The model to call: the one configured, or Claude's default for Anthropic."""
+        return self.llm_model or ("claude-opus-5-5" if self.llm_provider == "anthropic" else None)
 
     def assert_production_safe(self) -> None:
         dev = "dev-only" in self.jwt_secret.get_secret_value() or "dev-only" in self.database_url

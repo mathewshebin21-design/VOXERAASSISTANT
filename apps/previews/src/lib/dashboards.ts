@@ -41,6 +41,7 @@ export const DASHBOARDS: DashboardTemplate[] = [
 /** Business sectors stored on the workspace profile, and the dashboard each one uses. */
 export const SECTORS: { value: string; label: string; dashboard: DashboardId }[] = [
   { value: "hair_beauty", label: "Hair & beauty", dashboard: "salon" },
+  { value: "barbershop", label: "Barbershop", dashboard: "salon" },
   { value: "aesthetics", label: "Aesthetics (non-clinical)", dashboard: "salon" },
   { value: "wellness", label: "Wellness & spa", dashboard: "salon" },
   { value: "clinic", label: "Clinic & therapy", dashboard: "clinic" },
