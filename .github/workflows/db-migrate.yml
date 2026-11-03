@@ -30,13 +30,73 @@ permissions:
   contents: read
 
 jobs:
+  # Runs first, with no environment, no secrets and no checkout, so a refused run never
+  # requests the `production` environment or sees its secret. Defence in depth: the GitHub
+  # `production` environment's deployment-branch rule is the control GitHub enforces itself
+  # (a branch can edit this file). Tested by services/api/tests/test_db_migrate_workflow.py.
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ref guard
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # Production migrations run only from the production branch, started by hand.
+          # Everything else stops here: other branches, tags, pull-request refs, empty refs.
+          case "$ENVIRONMENT" in
+            staging) echo "ref guard: staging migration from $REF allowed"; exit 0 ;;
+            production) ;;
+            *) echo "::error::ref guard: unknown environment '$ENVIRONMENT'"; exit 1 ;;
+          esac
+          if [ "$REPOSITORY" != "mathewshebin21-design/VOXERAASSISTANT" ]; then
+            echo "::error::ref guard: production migrations run only in mathewshebin21-design/VOXERAASSISTANT, not '$REPOSITORY' (e.g. a fork). Nothing was changed."; exit 1
+          fi
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "::error::ref guard: production migrations must be started by hand, not by '$EVENT'. Nothing was changed."; exit 1
+          fi
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF" != "refs/heads/claude/confident-shannon-7nb05f" ]; then
+            echo "::error::ref guard: production migrations may only run from claude/confident-shannon-7nb05f (this run: $REF_TYPE '$REF'). Nothing was changed."; exit 1
+          fi
+          echo "ref guard: production migration from $REF allowed"
+
   migrate:
+    needs: authorize
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     defaults:
       run:
         working-directory: services/api
     steps:
+      - name: Ref guard (again, inside the protected job)
+        working-directory: .  # runs before checkout, so not services/api
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # Production migrations run only from the production branch, started by hand.
+          # Everything else stops here: other branches, tags, pull-request refs, empty refs.
+          case "$ENVIRONMENT" in
+            staging) echo "ref guard: staging migration from $REF allowed"; exit 0 ;;
+            production) ;;
+            *) echo "::error::ref guard: unknown environment '$ENVIRONMENT'"; exit 1 ;;
+          esac
+          if [ "$REPOSITORY" != "mathewshebin21-design/VOXERAASSISTANT" ]; then
+            echo "::error::ref guard: production migrations run only in mathewshebin21-design/VOXERAASSISTANT, not '$REPOSITORY' (e.g. a fork). Nothing was changed."; exit 1
+          fi
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "::error::ref guard: production migrations must be started by hand, not by '$EVENT'. Nothing was changed."; exit 1
+          fi
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF" != "refs/heads/claude/confident-shannon-7nb05f" ]; then
+            echo "::error::ref guard: production migrations may only run from claude/confident-shannon-7nb05f (this run: $REF_TYPE '$REF'). Nothing was changed."; exit 1
+          fi
+          echo "ref guard: production migration from $REF allowed"
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
