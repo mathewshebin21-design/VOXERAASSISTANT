@@ -298,9 +298,8 @@ def test_ai_moves_in_place_only_after_confirmation(make_account, live, tool_inpu
             (200, message([tool], "tool_use", 500, 20)),
             (200, message([("text", {"parts": ["Anything else?"]})], "end_turn", 500, 8)),
         ]
-        ev = events(
-            a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": said}]})
-        )
+        body = {**brain_body(), "messages": [{"role": "user", "text": said}]}
+        ev = events(a.post(a.o("/live/brain"), json=body))
         assert next(e for e in ev if e["type"] == "tool")["ok"] is expected
         rows = a.get(a.o("/appointments?include_cancelled=true")).json()
         assert len(rows) == 1 and rows[0]["id"] == original["id"]
