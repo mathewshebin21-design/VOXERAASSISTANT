@@ -23,6 +23,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - run: npm ci
+      # Collect advisory details without changing dependencies. Release review must triage findings.
+      - name: Dependency audit evidence
+        continue-on-error: true
+        run: npm audit --json
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
