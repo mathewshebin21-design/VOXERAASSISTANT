@@ -29,6 +29,7 @@ jobs:
           d["devDependencies"]["postcss"] = "8.5.23"
           d["devDependencies"]["vitest"] = "4.1.12"
           d.setdefault("overrides", {})["postcss"] = "$postcss"
+          d["overrides"]["@typescript-eslint/typescript-estree"] = {"minimatch": "11.0.1"}
           p.write_text(json.dumps(d, indent=2) + "\n")
           Path("package-lock.json").rename("package-lock.baseline.json")
           PY
