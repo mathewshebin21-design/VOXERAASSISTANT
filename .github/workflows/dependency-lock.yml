@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Resolve reviewed patch versions without running package scripts
         run: |
           python3 - <<'PY'
@@ -28,11 +28,23 @@ jobs:
           d["devDependencies"]["eslint-config-next"] = "15.5.29"
           d["devDependencies"]["postcss"] = "8.5.23"
           d["devDependencies"]["vitest"] = "4.1.12"
-          d.setdefault("overrides", {})["postcss"] = "8.5.23"
+          d.setdefault("overrides", {})["postcss"] = "$postcss"
           p.write_text(json.dumps(d, indent=2) + "\n")
           Path("package-lock.json").rename("package-lock.baseline.json")
           PY
+          node --version
+          npm --version
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Resolver diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in Path.home().joinpath('.npm/_logs').glob('*debug*.log'):
+              for line in p.read_text().splitlines():
+                  if 'verbose stack' in line or 'error ' in line:
+                      print(line)
+          PY
       - name: Capture advisory and lock evidence
         run: |
           npm audit --json > dependency-audit.json || true
