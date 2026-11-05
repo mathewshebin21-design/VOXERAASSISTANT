@@ -26,7 +26,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: node --test scripts/staging-isolation.test.mjs scripts/wait-for-deploy.test.mjs
+      - run: node --test scripts/*.test.mjs
       - run: npm run build
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
       - run: npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
@@ -40,3 +40,4 @@ jobs:
         with:
           name: e2e-results
           path: apps/previews/e2e-results.json
+

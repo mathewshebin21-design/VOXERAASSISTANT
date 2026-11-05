@@ -4,6 +4,7 @@
 // in FAILURES (default: e2e-failures/) so an intermittent failure can be diagnosed afterwards.
 import { mkdirSync, writeFileSync } from "fs";
 import { createRequire } from "module";
+import { createStudioChecks } from "./studio-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -14,8 +15,6 @@ const run = Date.now().toString(36);
 const PW = "correct horse battery staple";
 const me = { name: "Ewa Wright", email: `ewa-${run}@e2e.example`, org: `EW Saloon ${run}` };
 
-const results = [];
-const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
 const keepFailure = async (name, e) => {
   console.log(String(e?.stack ?? e)); // the whole error, including Playwright's call log
@@ -27,10 +26,7 @@ const keepFailure = async (name, e) => {
     console.log(`      kept: ${base}.png, ${base}.txt`);
   } catch (err) { console.log(`      (couldn't keep failure details: ${err})`); }
 };
-const step = async (name, fn) => {
-  try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); if (r === false || typeof r === "string") await keepFailure(name, r || "check returned false"); }
-  catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 240)); await keepFailure(name, e); }
-};
+const { check, step, finish } = createStudioChecks({ keepFailure });
 const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false }); };
 
 const browser = await chromium.launch();
@@ -234,6 +230,5 @@ await step("mobile: the Studio stacks and stays usable", async () => {
 await step("clean-up: delete the test account and its workspace", async () => (await call("DELETE", "/me", { password: PW })).status === 204);
 
 await browser.close();
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} studio checks passed`);
-process.exit(failed.length ? 1 : 0);
+process.exit(finish());
+
