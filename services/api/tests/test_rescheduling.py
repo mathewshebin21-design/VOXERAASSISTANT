@@ -119,13 +119,17 @@ def test_audit_failure_rolls_back_the_move(make_account, monkeypatch):
     a = make_account("move@example.com")
     svc = setup_salon(a)
     original = book(a, svc, next_week_at(10)).json()
+    attempted = []
 
     def fail(*args, **kwargs):
+        attempted.append(True)
         raise RuntimeError("injected audit failure")
 
     monkeypatch.setattr(audit, "record", fail)
-    with pytest.raises(RuntimeError, match="injected audit failure"):
-        move(a, original, next_week_at(11))
+    response = move(a, original, next_week_at(11))
+    assert attempted == [True]  # the fault really occurred; the HTTP middleware returns a safe 500
+    assert response.status_code == 500 and response.json()["detail"] == "Internal server error"
+    assert "injected audit failure" not in response.text
     assert a.get(a.o("/appointments")).json() == [original]
 
 
