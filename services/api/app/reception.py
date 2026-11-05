@@ -129,6 +129,7 @@ def available_slots(
     part: str = "any",
     now: datetime | None = None,
     limit: int = 6,
+    exclude_appointment_id: uuid.UUID | None = None,
 ) -> list[datetime]:
     """Bookable local start times: from `on` (or today) forward, at most two per day, up to `limit`."""
     now = now or datetime.now(UTC)
@@ -137,6 +138,7 @@ def available_slots(
     hours = _hours(db, d.org_id)
     span_end = datetime.combine(first + timedelta(days=HORIZON_DAYS), time(0), d.tz)
     booked = _booked(db, d.org_id, datetime.combine(first, time(0), d.tz), span_end)
+    booked = [a for a in booked if a.id != exclude_appointment_id]
     dur, buf = timedelta(minutes=svc.duration_min), timedelta(minutes=svc.buffer_min)
     lo, hi = PARTS.get(part, (time(0), time(23, 59)))
     out: list[datetime] = []
@@ -158,6 +160,27 @@ def available_slots(
     return out[:limit]
 
 
+def _booking_times(
+    db: Session, d: Desk, svc: Service, start_local: datetime, now: datetime
+) -> tuple[datetime, datetime, datetime]:
+    if not svc.active or svc.organization_id != d.org_id:
+        raise DeskError("That service is no longer offered, so the team will need to rebook it.")
+    if start_local.tzinfo is None:
+        start_local = start_local.replace(tzinfo=d.tz)
+    start_local = start_local.astimezone(d.tz)
+    if start_local < now + LEAD:
+        raise DeskError("That time is too soon or has passed. Offer a later time.")
+    if start_local.date() > (now.astimezone(d.tz).date() + timedelta(days=HORIZON_DAYS)):
+        raise DeskError(f"Bookings can only be made up to {HORIZON_DAYS} days ahead.")
+    if (start_local.minute % 15) or start_local.second or start_local.microsecond:
+        raise DeskError("Appointments start on the quarter hour.")
+    if not _fits(d, _hours(db, d.org_id), svc, start_local):
+        raise DeskError("That time is outside opening hours for this service. Check availability first.")
+    start = start_local.astimezone(UTC)
+    end = start + timedelta(minutes=svc.duration_min)
+    return start, end, end + timedelta(minutes=svc.buffer_min)
+
+
 def book(
     db: Session,
     d: Desk,
@@ -177,8 +200,6 @@ def book(
     if not 1 <= len(name) <= 120:
         raise DeskError("I need the caller's name for the booking.")
     phone = normalise_phone(phone)
-    if start_local.tzinfo is None:
-        start_local = start_local.replace(tzinfo=d.tz)
     now = now or datetime.now(UTC)
     if key:
         existing = db.scalar(
@@ -186,18 +207,7 @@ def book(
         )
         if existing:
             return existing, False
-    if start_local < now + LEAD:
-        raise DeskError("That time is too soon or has passed. Offer a later time.")
-    if start_local.date() > (now.astimezone(d.tz).date() + timedelta(days=HORIZON_DAYS)):
-        raise DeskError(f"Bookings can only be made up to {HORIZON_DAYS} days ahead.")
-    if (start_local.minute % 15) or start_local.second:
-        raise DeskError("Appointments start on the quarter hour.")
-    hours = _hours(db, d.org_id)
-    if not _fits(d, hours, svc, start_local):
-        raise DeskError("That time is outside opening hours for this service. Check availability first.")
-    start = start_local.astimezone(UTC)
-    end = start + timedelta(minutes=svc.duration_min)
-    block_end = end + timedelta(minutes=svc.buffer_min)
+    start, end, block_end = _booking_times(db, d, svc, start_local, now)
     # Serialise bookings per workspace (transaction-scoped lock), then re-check capacity.
     db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"bookings:{d.org_id}"})
     if not _free(_booked(db, d.org_id, start, block_end), d.capacity, start, block_end):
@@ -252,13 +262,28 @@ def cancel(db: Session, a: Appointment) -> None:
     a.cancelled_at = datetime.now(UTC)
 
 
-def reschedule(db: Session, d: Desk, a: Appointment, new_start_local: datetime) -> Appointment:
+def reschedule(db: Session, d: Desk, a: Appointment, new_start_local: datetime) -> tuple[Appointment, datetime]:
+    if a.organization_id != d.org_id:
+        raise DeskError("That booking could not be found in this workspace.")
+    # Use the same lock as booking, then refresh under a row lock so a stale
+    # caller cannot move a booking another request already cancelled.
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"bookings:{d.org_id}"})
+    db.refresh(a, with_for_update=True)
+    if a.status != AppointmentStatus.booked or a.starts_at <= datetime.now(UTC):
+        raise DeskError("Only upcoming, active bookings can be moved.")
     svc = db.get(Service, a.service_id) if a.service_id else None
     if svc is None:
         raise DeskError("That service is no longer offered, so the team will need to rebook it.")
-    new, _ = book(db, d, svc, new_start_local, a.customer_name, a.customer_phone, a.notes, a.source)
-    cancel(db, a)
-    return new
+    if not svc.bookable_by_agent and a.source == "ai_receptionist":
+        raise DeskError(f"{svc.name} has to be booked by the team directly.")
+    start, end, block_end = _booking_times(db, d, svc, new_start_local, datetime.now(UTC))
+    booked = [other for other in _booked(db, d.org_id, start, block_end) if other.id != a.id]
+    if not _free(booked, d.capacity, start, block_end):
+        raise DeskError("Sorry, that slot has just been taken. Offer the next available time.")
+    before = a.starts_at
+    a.starts_at, a.ends_at, a.blocks_until = start, end, block_end
+    db.flush()
+    return a, before
 
 
 def leave_message(

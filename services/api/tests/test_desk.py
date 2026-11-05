@@ -283,6 +283,30 @@ def test_ai_books_only_after_a_clear_yes_and_is_idempotent(make_account, live, t
     assert len(appts) == 1 and appts[0]["source"] == "ai_receptionist" and appts[0]["service_name"] == "Cut & Finish"
 
 
+def test_ai_moves_in_place_only_after_confirmation(make_account, live, tool_input):  # noqa: F811
+    a = make_account("move@example.com")
+    svc = setup_salon(a)
+    original = book(a, svc, next_week_at(10)).json()
+    tool_input["reschedule_appointment"] = {
+        "appointment_ref": original["id"][:8],
+        "customer_phone": "07700900123",
+        "new_start": next_week_at(10, 30).strftime("%Y-%m-%dT%H:%M"),
+    }
+    tool = ("tool", {"id": "toolu_move", "name": "reschedule_appointment"})
+    for said, expected in [("Could it be a little later?", False), ("yes, move it", True)]:
+        live["llm"] += [
+            (200, message([tool], "tool_use", 500, 20)),
+            (200, message([("text", {"parts": ["Anything else?"]})], "end_turn", 500, 8)),
+        ]
+        ev = events(
+            a.post(a.o("/live/brain"), json={**brain_body(), "messages": [{"role": "user", "text": said}]})
+        )
+        assert next(e for e in ev if e["type"] == "tool")["ok"] is expected
+        rows = a.get(a.o("/appointments?include_cancelled=true")).json()
+        assert len(rows) == 1 and rows[0]["id"] == original["id"]
+        assert datetime.fromisoformat(rows[0]["starts_at"]) == next_week_at(10, 30 if expected else 0)
+
+
 def test_ai_can_only_see_and_cancel_the_callers_own_bookings(make_account, live, tool_input):  # noqa: F811
     a = make_account("ada@example.com")
     svc = setup_salon(a)

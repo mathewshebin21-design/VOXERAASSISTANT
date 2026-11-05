@@ -25,6 +25,7 @@ from ..models import (
 from ..permissions import Perm
 from ..schemas import (
     AppointmentIn,
+    AppointmentMoveIn,
     AppointmentOut,
     AssignIn,
     CaseDetail,
@@ -66,12 +67,27 @@ def list_appointments(
 
 
 @router.get("/availability", response_model=SlotsOut)
-def availability(ctx: Reader, db: DB, service_id: uuid.UUID, on: date | None = None) -> SlotsOut:
+def availability(
+    ctx: Reader, db: DB, service_id: uuid.UUID, on: date | None = None, appointment_id: uuid.UUID | None = None
+) -> SlotsOut:
     svc = db.get(Service, service_id)
     if svc is None or svc.organization_id != ctx.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if appointment_id is not None:
+        appt = db.get(Appointment, appointment_id)
+        if (
+            appt is None
+            or appt.organization_id != ctx.org_id
+            or appt.service_id != svc.id
+            or appt.status != AppointmentStatus.booked
+        ):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     d = reception.desk(db, ctx.org_id)
-    return SlotsOut(service=svc.name, timezone=str(d.tz), slots=reception.available_slots(db, d, svc, on, limit=24))
+    return SlotsOut(
+        service=svc.name,
+        timezone=str(d.tz),
+        slots=reception.available_slots(db, d, svc, on, limit=24, exclude_appointment_id=appointment_id),
+    )
 
 
 @router.post("/appointments", response_model=AppointmentOut, status_code=status.HTTP_201_CREATED)
@@ -118,6 +134,31 @@ def cancel_appointment(appointment_id: uuid.UUID, ctx: Manager, db: DB, request:
             client_meta(request),
         )
         db.commit()
+    return appt
+
+
+@router.post("/appointments/{appointment_id}/reschedule", response_model=AppointmentOut)
+def reschedule_appointment(
+    appointment_id: uuid.UUID, body: AppointmentMoveIn, ctx: Manager, db: DB, request: Request
+) -> Appointment:
+    appt = db.get(Appointment, appointment_id)
+    if appt is None or appt.organization_id != ctx.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    try:
+        appt, before = reception.reschedule(db, reception.desk(db, ctx.org_id), appt, body.starts_at)
+    except reception.DeskError as e:
+        raise _err(e) from None
+    audit.record(
+        db,
+        ctx.org_id,
+        ctx.user.id,
+        "appointment.rescheduled",
+        "appointment",
+        appt.id,
+        {"from": before.isoformat(), "to": appt.starts_at.isoformat(), "by": "staff"},
+        client_meta(request),
+    )
+    db.commit()
     return appt
 
 
