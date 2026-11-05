@@ -237,23 +237,17 @@ sys.exit(migrate.main(sys.argv[2:]))
 def test_write_failures_are_redacted_and_roll_back(phase, fresh_db, runtime_role):
     env, eng = fresh_db
     root = Path(__file__).resolve().parents[1]
-    r = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            WRITE_FAILURE_HARNESS,
-            phase,
-            "--env",
-            "staging",
-            "--claim-if-empty",
-            "--reset-runtime-role",
-        ],
-        cwd=root,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )  # noqa: S603
+    cmd = [
+        sys.executable,
+        "-c",
+        WRITE_FAILURE_HARNESS,
+        phase,
+        "--env",
+        "staging",
+        "--claim-if-empty",
+        "--reset-runtime-role",
+    ]
+    r = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, check=False)  # noqa: S603
     out = r.stdout + r.stderr
     assert f"injected write failure at {phase}" in out
     assert r.returncode == 1 and "Error details are suppressed to protect credentials" in out
