@@ -27,10 +27,12 @@ jobs:
           d["dependencies"]["next"] = "15.5.29"
           d["devDependencies"]["eslint-config-next"] = "15.5.29"
           d["devDependencies"]["postcss"] = "8.5.23"
-          d["devDependencies"]["vitest"] = "3.2.7"
+          d["devDependencies"]["vitest"] = "4.1.12"
+          d.setdefault("overrides", {})["postcss"] = "8.5.23"
           p.write_text(json.dumps(d, indent=2) + "\n")
           PY
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm update --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Capture advisory and lock evidence
         run: |
           npm audit --json > dependency-audit.json || true
