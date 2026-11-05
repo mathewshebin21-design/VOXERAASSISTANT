@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Size-matched fallbacks shown while the bundled fonts load (src/app/layout.tsx). The values are the
+   metrics next/font/google generated for these families, so swapping in the real font doesn't shift the layout. */
+@font-face { font-family: "Inter Fallback"; src: local("Arial"); ascent-override: 90.44%; descent-override: 22.52%; line-gap-override: 0%; size-adjust: 107.12%; }
+@font-face { font-family: "JetBrains Mono Fallback"; src: local("Arial"); ascent-override: 75.79%; descent-override: 22.29%; line-gap-override: 0%; size-adjust: 134.59%; }
+@font-face { font-family: "Cormorant Garamond Fallback"; src: local("Times New Roman"); ascent-override: 95.27%; descent-override: 29.59%; line-gap-override: 0%; size-adjust: 96.98%; }
+@font-face { font-family: "Space Grotesk Fallback"; src: local("Arial"); ascent-override: 89.71%; descent-override: 26.62%; line-gap-override: 0%; size-adjust: 109.69%; }
+
 /* Design tokens. Each preview scopes its palette under a class on its root. */
 :root {
   /* A — Command: charcoal/black, electric violet, restrained cyan */

@@ -12,6 +12,8 @@ export async function verifyStaging(api, web, sha, request = fetch) {
       method: "GET", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10000),
     });
     assert.equal(response.status, 200, "Staging identity endpoint unavailable");
+    // A Vercel building, error or protection page can arrive as HTML with status 200.
+    assert.match(response.headers.get("content-type") ?? "", /application\/json/, `Staging identity at ${url} is not JSON (placeholder or protection page?)`);
     return response.json();
   }
 
