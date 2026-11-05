@@ -23,6 +23,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - run: npm ci
+      - name: Dependency security gate
+        run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
