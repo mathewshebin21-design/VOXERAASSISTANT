@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "phase": "RC-1 validation",
+  "production_branch": "claude/confident-shannon-7nb05f",
+  "base": "9f6633573e4d260e138427a2e09f7a9e919582ef",
+  "components": [
+    {
+      "pr": 4,
+      "head": "62c113254016b5cac6db8696e5eafdbdfbd2ded3"
+    },
+    {
+      "pr": 5,
+      "head": "463f530f05d5c72535c82466f6f17c51a51a595a"
+    },
+    {
+      "pr": 6,
+      "head": "d2b61141f85c168900081204cd00272294d83942"
+    }
+  ],
+  "database": {
+    "expected_revision": "0007",
+    "production_marker": "production",
+    "staging_marker": "staging",
+    "production_claim_completed": true,
+    "additional_production_migration_authorized": false
+  },
+  "gates": {
+    "production_merge": false,
+    "production_deploy": false,
+    "hosted_exact_source_acceptance": false,
+    "paid_provider_testing": false,
+    "phase1_complete": false
+  },
+  "notes": [
+    "Candidate on isolated branch for disposable CI only.",
+    "Shared staging is at 0008 and must not be downgraded.",
+    "Owner approval gates apply to cloud isolation changes, merges and production deployments."
+  ]
+}

@@ -190,12 +190,16 @@ function Bookings({ base }: { base: string }) {
   const [phone, setPhone] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const slots = useApi<{ slots: string[] }>(open && svc ? `${base}/availability?service_id=${svc}&on=${day}` : null);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const t = (iso: string) => new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const submit = async () => {
+    setBusy(true);
     try {
       await api(`${base}/appointments`, { method: "POST", body: { service_id: svc, starts_at: slot, customer_name: name, customer_phone: phone } });
       setMsg({ kind: "ok", text: "Booked" }); setSlot(""); setName(""); setPhone(""); await Promise.all([appts.reload(), slots.reload()]);
     } catch (e) { setMsg({ kind: "error", text: e instanceof ApiError ? e.detail : "Booking failed" }); await slots.reload(); }
+    finally { setBusy(false); }
   };
   return (
     <Glass>
@@ -210,19 +214,58 @@ function Bookings({ base }: { base: string }) {
           </select>
           <input aria-label="Customer name" className={finput} placeholder="Customer name" value={name} onChange={(e) => setName(e.target.value)} />
           <input aria-label="Customer phone" className={finput} placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <FBtn type="submit" variant="glow" disabled={!slot || !name || !phone} className="sm:col-span-2">Book</FBtn>
-          {msg && <div className="sm:col-span-2"><Notice kind={msg.kind}>{msg.text}</Notice></div>}
+          <FBtn type="submit" variant="glow" disabled={busy || !slot || !name || !phone} className="sm:col-span-2">{busy ? "Booking…" : "Book"}</FBtn>
         </form>
       )}
+      {msg && <div className="px-4 py-2"><Notice kind={msg.kind}>{msg.text}</Notice></div>}
       <ul className="max-h-80 divide-y divide-flw-line/60 overflow-y-auto" data-testid="bookings">
         {appts.data?.length === 0 && <li className="p-4 text-sm text-flw-mute">No upcoming bookings.</li>}
         {appts.data?.map((a) => (
-          <li key={a.id} className="flex items-center gap-2 px-4 py-2 text-sm">
+          <li key={a.id} data-testid={`booking-${a.id}`} className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
             <div className="min-w-0 flex-1"><div className="truncate">{a.customer_name} · {a.service_name}</div><div className="font-mono text-[11px] text-flw-mute">{t(a.starts_at)} · {a.customer_phone}{a.source === "ai_receptionist" && " · booked by AI"}</div></div>
-            <button className="text-xs text-flw-mute hover:text-flw-pink" onClick={async () => { await api(`${base}/appointments/${a.id}/cancel`, { method: "POST" }).catch(() => undefined); await appts.reload(); }}>cancel</button>
+            {a.service_id && <button className="text-xs text-flw-cyan" onClick={() => setMoving(a.id)}>Reschedule</button>}
+            <button disabled={busy} className="text-xs text-flw-mute hover:text-flw-pink" onClick={async () => {
+              if (!window.confirm(`Cancel ${a.customer_name}'s ${a.service_name} appointment?`)) return;
+              setBusy(true);
+              try { await api(`${base}/appointments/${a.id}/cancel`, { method: "POST" }); setMsg({ kind: "ok", text: "Appointment cancelled" }); await appts.reload(); }
+              catch (e) { setMsg({ kind: "error", text: e instanceof ApiError ? e.detail : "Cancellation failed. Try again." }); }
+              finally { setBusy(false); }
+            }}>cancel</button>
+            {moving === a.id && <MoveBooking base={base} appointment={a} onClose={() => setMoving(null)} onMoved={async () => { setMoving(null); setMsg({ kind: "ok", text: "Appointment moved; booking reference kept" }); await appts.reload(); }} />}
           </li>
         ))}
       </ul>
     </Glass>
+  );
+}
+
+function MoveBooking({ base, appointment, onClose, onMoved }: { base: string; appointment: Appointment; onClose: () => void; onMoved: () => Promise<void> }) {
+  const [day, setDay] = useState("");
+  const [slot, setSlot] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const settings = useApi<{ timezone: string }>(`${base}/settings`);
+  useEffect(() => {
+    if (!day && settings.data) setDay(new Intl.DateTimeFormat("en-CA", { timeZone: settings.data.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(appointment.starts_at)));
+  }, [appointment.starts_at, day, settings.data]);
+  const slots = useApi<{ slots: string[]; timezone: string }>(day ? `${base}/availability?service_id=${appointment.service_id}&on=${day}&appointment_id=${appointment.id}` : null);
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try { await api(`${base}/appointments/${appointment.id}/reschedule`, { method: "POST", body: { starts_at: slot } }); await onMoved(); }
+    catch (e) { setError(e instanceof ApiError ? e.detail : "Could not confirm the move. Refresh bookings before retrying."); setSlot(""); await slots.reload(); }
+    finally { setBusy(false); }
+  };
+  return (
+    <form aria-label="Reschedule appointment" className="grid w-full gap-2 rounded-lg border border-flw-line p-3" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <p className="text-xs text-flw-mute">Original: {fmtWhen(appointment.starts_at)}. Times below use {slots.data?.timezone ?? "the business time zone"}.</p>
+      <input aria-label="New day" type="date" required className={finput} value={day} onChange={(e) => { setDay(e.target.value); setSlot(""); setError(null); }} />
+      <select aria-label="New time" className={finput} value={slot} onChange={(e) => setSlot(e.target.value)} disabled={busy || slots.loading}>
+        <option value="">{slots.loading ? "Loading times…" : slots.data?.slots.length === 0 ? "No free times that day" : "Choose a new time…"}</option>
+        {slots.data?.slots.map((s) => <option key={s} value={s}>{new Date(s).toLocaleString("en-GB", { timeZone: slots.data?.timezone, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</option>)}
+      </select>
+      {(slots.error || settings.error) && <Notice kind="error">{(slots.error || settings.error)?.detail}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
+      <div className="flex flex-wrap gap-2"><FBtn type="submit" variant="glow" disabled={busy || !slot}>{busy ? "Moving…" : "Confirm move"}</FBtn><FBtn type="button" disabled={busy} onClick={onClose}>Keep original</FBtn></div>
+    </form>
   );
 }

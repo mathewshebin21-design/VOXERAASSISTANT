@@ -408,6 +408,10 @@ class AppointmentIn(Strict):
     notes: str | None = Field(None, max_length=500)
 
 
+class AppointmentMoveIn(Strict):
+    starts_at: datetime = Field(description="New start in the workspace time zone or with an explicit offset")
+
+
 class SlotsOut(BaseModel):
     service: str
     timezone: str

@@ -23,10 +23,12 @@ jobs:
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - run: npm ci
+      - name: Dependency security gate
+        run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: node --test scripts/staging-isolation.test.mjs
+      - run: node --test scripts/*.test.mjs
       - run: npm run build
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
       - run: npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium

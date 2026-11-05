@@ -102,7 +102,7 @@ def runtime_role_status(c, owner_url: str) -> str:
         probe.dispose()
 
 
-def main(argv: list[str] | None = None) -> int:
+def _run(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--env", required=True, choices=deploy_env.ENVIRONMENTS)
     ap.add_argument("--check", action="store_true", help="report only; change nothing")
@@ -200,6 +200,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     finally:
         engine.dispose()
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _run(argv)
+    except Exception:
+        # SQLAlchemy exceptions can include the full statement. Role DDL contains a
+        # password literal, and driver/configuration errors can contain the owner URL.
+        # Never format the exception, its cause, or a traceback into CI logs.
+        say(
+            "STOP: migration failed. Error details are suppressed to protect credentials. "
+            "Verify the database state before retrying."
+        )
+        return 1
 
 
 if __name__ == "__main__":

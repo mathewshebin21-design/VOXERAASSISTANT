@@ -351,7 +351,7 @@ def run_tool(db: Session, ctx: BusinessContext, turn: Turn, name: str, args: obj
                 turn.writes += 1
                 turn.changes += 1
                 return True, json.dumps({"cancelled": _appt(appt, d)})
-            new = reception.reschedule(db, d, appt, _local(d, str(a.get("new_start", ""))))
+            new, before = reception.reschedule(db, d, appt, _local(d, str(a.get("new_start", ""))))
             audit.record(
                 db,
                 turn.org_id,
@@ -359,7 +359,7 @@ def run_tool(db: Session, ctx: BusinessContext, turn: Turn, name: str, args: obj
                 "appointment.rescheduled",
                 "appointment",
                 new.id,
-                {"from": str(appt.id), "by": "ai_receptionist"},
+                {"from": before.isoformat(), "to": new.starts_at.isoformat(), "by": "ai_receptionist"},
             )
             db.commit()
             turn.writes += 1
