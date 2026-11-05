@@ -255,4 +255,3 @@ def test_write_failures_are_redacted_and_roll_back(phase, fresh_db, runtime_role
     assert "owner-dev-only" not in out and platform.derive("owner-dev-only", "app-role") not in out
     assert tables(eng) == set()
     assert role_logs_in(runtime_role, OLD_PASSWORD)
-
