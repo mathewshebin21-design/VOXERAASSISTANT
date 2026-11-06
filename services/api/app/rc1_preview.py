@@ -53,25 +53,35 @@ def active() -> bool:
 
 
 def _url(name: str, hosts: tuple[str, ...]) -> str:
+    """The validated driver URL, or ConfigError naming the failed rules in fixed words only."""
     value = os.environ.get(name, "")
+    failed: list[str] = []
     try:
-        p = urlsplit(value)
-        valid = (
-            p.scheme in ("postgres", "postgresql", "postgresql+psycopg")
-            and p.hostname in hosts
-            and p.port in (None, 5432)
-            and unquote(p.username or "") == "voxera_app"
-            and bool(p.password)
-            and p.path == "/neondb"
-            and not p.fragment
+        if value and (value != value.strip() or value[0] in "'\"" or value[-1] in "'\""):
+            failed.append("surrounding whitespace or quotes")
+        p = urlsplit(value.strip())
+        checks = (
+            ("scheme", p.scheme in ("postgres", "postgresql", "postgresql+psycopg")),
+            ("host", p.hostname in hosts),
+            ("port", p.port in (None, 5432)),
+            ("user voxera_app", unquote(p.username or "") == "voxera_app"),
+            ("password", bool(p.password)),
+            ("path /neondb", p.path == "/neondb"),
+            ("no fragment", not p.fragment),
         )
+        failed += [rule for rule, ok in checks if not ok]
         query = parse_qs(p.query, keep_blank_values=True)
-        valid = valid and query.get("sslmode") in (["require"], ["verify-full"])
-        valid = valid and set(query) <= {"sslmode", "channel_binding"}
-        if not valid:
-            raise ValueError()
+        if query.get("sslmode") not in (["require"], ["verify-full"]):
+            failed.append("sslmode require or verify-full")
+        if not set(query) <= {"sslmode", "channel_binding"}:
+            failed.append("only sslmode and channel_binding parameters")
     except ValueError:
-        raise ConfigError(f"RC-1 {name} must use the dedicated database, TLS and voxera_app") from None
+        failed.append("parseable URL")
+    if failed:
+        # Fixed rule names only: never any part of the value.
+        raise ConfigError(
+            f"RC-1 {name} must use the dedicated database, TLS and voxera_app (failed: {', '.join(failed)})"
+        )
     return p._replace(scheme="postgresql+psycopg").geturl()
 
 

@@ -91,6 +91,42 @@ class RC1PreviewTests(unittest.TestCase):
                     with self.assertRaises(ValueError) as error:
                         configuration()
                     self.assertNotIn("synthetic", str(error.exception))
+                    self.assertNotIn("production.example", str(error.exception))
+                    self.assertIn("failed: ", str(error.exception))
+
+    def test_url_refusal_names_the_failed_rule(self):
+        good = self.env["VOXERA_DATABASE_URL"]
+        for value, rule in (
+            (good.replace(HOST, "production.example"), "host"),
+            (good.replace("voxera_app", "neondb_owner"), "user voxera_app"),
+            (good.replace("/neondb", "/other"), "path /neondb"),
+            (good.replace("sslmode=require", "sslmode=disable"), "sslmode require or verify-full"),
+            (good + "&options=x", "only sslmode and channel_binding parameters"),
+            (good.replace(".tech/", ".tech:6543/"), "port"),
+            (good.replace("synthetic", ""), "password"),
+            (f"'{good}'", "surrounding whitespace or quotes"),
+            (f" {good}\n", "surrounding whitespace or quotes"),
+            (f"psql '{good}'", "scheme"),
+            ("", "scheme"),
+        ):
+            env = {**self.env, "VOXERA_DATABASE_URL": value}
+            with self.subTest(rule=rule), patch.dict(os.environ, env, clear=True):
+                with self.assertRaises(ValueError) as error:
+                    configuration()
+                self.assertIn(rule, str(error.exception))
+                self.assertNotIn("synthetic", str(error.exception))
+
+    def test_empty_url_is_not_reported_as_quoted(self):
+        env = {**self.env, "VOXERA_DATABASE_URL": ""}
+        with patch.dict(os.environ, env, clear=True), self.assertRaises(ValueError) as error:
+            configuration()
+        self.assertNotIn("quotes", str(error.exception))
+
+    def test_neon_connection_string_with_channel_binding_accepted(self):
+        good = self.env["VOXERA_DATABASE_URL"]
+        env = {**self.env, "VOXERA_DATABASE_URL": good + "&channel_binding=require"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIsNotNone(configuration())
 
     def test_existing_production_and_shared_staging_behavior_preserved(self):
         for target in ("production", "preview", "development"):
