@@ -1,0 +1,14 @@
+name: rc1-safeguards
+on:
+  push:
+    branches: [codex/rc1-hosted-rehearsal, codex/rc1-validation]
+  pull_request:
+    paths: ['.github/scripts/**', '.github/workflows/db-migrate.yml']
+permissions:
+  contents: read
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m unittest discover -s .github/scripts -p 'test_rc1_*.py'
