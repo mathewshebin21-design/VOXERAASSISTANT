@@ -20,6 +20,9 @@ on:
       confirm_host:
         description: For claim — the database host, typed back exactly
         required: false
+      confirm_rc1_sha:
+        description: For isolated RC-1 claim only, repeat the approved full source SHA
+        required: false
       downgrade_to:
         description: For downgrade — the revision to roll back to (e.g. 0006)
         required: false
@@ -59,7 +62,7 @@ jobs:
           esac
 
   rc1-check:
-    if: inputs.environment == 'rc1-validation' && inputs.action == 'check' && github.ref == 'refs/heads/codex/rc1-validation'
+    if: inputs.environment == 'rc1-validation' && (inputs.action == 'check' || inputs.action == 'claim') && github.ref == 'refs/heads/codex/rc1-validation'
     runs-on: ubuntu-latest
     environment: rc1-validation
     steps:
@@ -78,8 +81,19 @@ jobs:
         run: |
           cd services/api
           uv run python ../../.github/scripts/rc1_check.py
+      - name: Explicitly approved empty RC-1 claim
+        if: inputs.action == 'claim'
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          PGSSLMODE: require
+          APPROVED_SHA: ${{ inputs.confirm_rc1_sha }}
+          CONFIRM_HOST: ${{ inputs.confirm_host }}
+        run: |
+          python .github/scripts/rc1_claim_gate.py
+          cd services/api
+          uv run python scripts/migrate.py --env staging --claim-if-empty
   rc1-refuse:
-    if: inputs.environment == 'rc1-validation' && (inputs.action != 'check' || github.ref != 'refs/heads/codex/rc1-validation')
+    if: inputs.environment == 'rc1-validation' && ((inputs.action != 'check' && inputs.action != 'claim') || github.ref != 'refs/heads/codex/rc1-validation')
     runs-on: ubuntu-latest
     steps:
-      - run: echo "RC-1 requires check action on the validation branch"; exit 1
+      - run: echo "RC-1 requires check or explicitly approved claim on the validation branch"; exit 1
