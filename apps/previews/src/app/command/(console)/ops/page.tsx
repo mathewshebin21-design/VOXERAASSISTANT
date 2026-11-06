@@ -42,7 +42,7 @@ function DemoOps() {
       <PageHead kicker="Operate · overview" title="Operations">
         <div className="flex rounded-md border border-cmd-line p-0.5 font-mono text-xs" role="tablist" aria-label="Date range">
           {RANGES.map((r) => (
-            <button key={r} role="tab" aria-selected={r === range} onClick={() => setRange(r)} className={clsx("rounded px-2.5 py-1", r === range ? "bg-cmd-violet text-white" : "text-cmd-mute hover:text-cmd-text")}>{r}d</button>
+            <button key={r} role="tab" aria-selected={r === range} onClick={() => setRange(r)} className={clsx("rounded px-2.5 py-1", r === range ? "bg-cmd-violet-strong text-white" : "text-cmd-mute hover:text-cmd-text")}>{r}d</button>
           ))}
         </div>
         <Tag tone="warn">Simulated data</Tag>

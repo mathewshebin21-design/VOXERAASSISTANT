@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 
-from . import deploy_env
+from . import deploy_env, rc1_preview
 from .config import get_settings
 from .db import SessionLocal
 from .logging_setup import configure_logging, request_id_var
@@ -117,6 +117,47 @@ def create_app() -> FastAPI:
             if deploy_env.claimed(session.connection()) != "staging":
                 return JSONResponse({}, status_code=503)
         return JSONResponse({"commit": os.getenv("VERCEL_GIT_COMMIT_SHA"), "environment": "staging"})
+
+    @app.get("/rc1-identity", include_in_schema=False)
+    def rc1_identity() -> JSONResponse:
+        """Read-only isolation evidence for the RC-1 Preview, from the live runtime connection.
+
+        Answers only on the RC-1 Preview profile. Reports booleans, the schema revision and the
+        commit, never a host, user name or credential.
+        """
+        try:
+            if not rc1_preview.active():
+                return JSONResponse({}, status_code=404)
+        except ValueError:
+            return JSONResponse({}, status_code=404)
+        with SessionLocal() as session:
+            c = session.connection()
+            role = c.execute(
+                text(
+                    "SELECT current_user = 'voxera_app', rolsuper, rolbypassrls, current_database() = 'neondb' "
+                    "FROM pg_roles WHERE rolname = current_user"
+                )
+            ).one()
+            environment = deploy_env.claimed(c)
+            readable = c.execute(
+                text(
+                    "SELECT to_regclass('public.alembic_version') IS NOT NULL "
+                    "AND has_table_privilege('public.alembic_version', 'SELECT')"
+                )
+            ).scalar()
+            schema = c.execute(text("SELECT version_num FROM alembic_version")).scalar() if readable else None
+        return JSONResponse(
+            {
+                "profile": "rc1-validation",
+                "commit": os.getenv("VERCEL_GIT_COMMIT_SHA"),
+                "environment": environment,
+                "schema": schema,
+                "runtime_role": bool(role[0]),
+                "superuser": bool(role[1]),
+                "bypass_rls": bool(role[2]),
+                "dedicated_database": bool(role[3]),
+            }
+        )
 
     for r in (
         auth.router,
