@@ -22,6 +22,7 @@ from sqlalchemy import create_engine, pool, text  # noqa: E402
 
 from app import deploy_env  # noqa: E402
 from app.platform import hosted_overrides  # noqa: E402
+from app.rc1_preview import active as rc1_active  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,6 +46,14 @@ def main() -> int:
     )
     try:
         with engine.connect() as c:
+            if rc1_active():
+                restricted = c.execute(text(
+                    "SELECT current_user = 'voxera_app' AND NOT rolsuper AND NOT rolbypassrls "
+                    "AND current_database() = 'neondb' FROM pg_roles WHERE rolname = current_user"
+                )).scalar()
+                if not restricted:
+                    print("vercel_build: REFUSING TO DEPLOY: RC-1 runtime role is not restricted.")
+                    return 1
             problem = deploy_env.mismatch(c)
             has_version = c.execute(text("SELECT to_regclass('public.alembic_version') IS NOT NULL")).scalar()
             rev = c.execute(text("SELECT version_num FROM alembic_version")).scalar() if has_version else None
@@ -55,9 +64,13 @@ def main() -> int:
         return 1
     if rev != head:
         target = want or "<environment>"
+        recovery = (
+            "Stop and review the isolated RC-1 target; do not run automatic migrations."
+            if rc1_active() else f"Run the migrations first: python scripts/migrate.py --env {target}"
+        )
         print(
             f"vercel_build: REFUSING TO DEPLOY: database schema is at {rev or 'empty'}, this code needs {head}. "
-            f"Run the migrations first: python scripts/migrate.py --env {target}"
+            f"{recovery}"
         )
         return 1
     print(f"vercel_build: database preflight passed ({want or 'unchecked environment'}, schema at {head}).")
@@ -65,4 +78,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        result = main()
+    except Exception:
+        # Driver/config exceptions can contain credential-bearing URLs.
+        print("vercel_build: REFUSING TO DEPLOY: database preflight failed; inspect configuration and access.")
+        result = 1
+    sys.exit(result)
