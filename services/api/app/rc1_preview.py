@@ -6,6 +6,12 @@ from urllib.parse import parse_qs, unquote, urlsplit
 BRANCH = "codex/rc1-validation"
 HOST = "ep-wandering-hat-zatfukuw.c-2.eu-west-2.aws.neon.tech"
 POOLED_HOST = HOST.replace(".c-2.", "-pooler.c-2.")
+
+
+class ConfigError(ValueError):
+    """An RC-1 refusal whose text is fixed: it names a gate or a variable, never a value."""
+
+
 LEGACY_KEYS = (
     "DATABASE_URL",
     "DATABASE_URL_UNPOOLED",
@@ -42,7 +48,7 @@ def active() -> bool:
         or os.environ.get("VERCEL_ENV") != "preview"
         or os.environ.get("VOXERA_EXPECT_DB_ENV") != "staging"
     ):
-        raise ValueError("RC-1 requires its exact Preview branch, profile and staging identity")
+        raise ConfigError("RC-1 requires its exact Preview branch, profile and staging identity")
     return True
 
 
@@ -65,7 +71,7 @@ def _url(name: str, hosts: tuple[str, ...]) -> str:
         if not valid:
             raise ValueError()
     except ValueError:
-        raise ValueError(f"RC-1 {name} must use the dedicated database, TLS and voxera_app") from None
+        raise ConfigError(f"RC-1 {name} must use the dedicated database, TLS and voxera_app") from None
     return p._replace(scheme="postgresql+psycopg").geturl()
 
 
@@ -73,12 +79,12 @@ def configuration() -> dict[str, str] | None:
     if not active():
         return None
     if any(os.environ.get(k) for k in LEGACY_KEYS):
-        raise ValueError("RC-1 forbids inherited database credentials and migration overrides")
+        raise ConfigError("RC-1 forbids inherited database credentials and migration overrides")
     if os.environ.get("VOXERA_APP_ROLE", "voxera_app") != "voxera_app":
-        raise ValueError("RC-1 requires the restricted runtime role")
+        raise ConfigError("RC-1 requires the restricted runtime role")
     jwt = os.environ.get("VOXERA_JWT_SECRET", "")
     if len(jwt) < 32 or "dev-only" in jwt:
-        raise ValueError("RC-1 requires an independent JWT signing secret")
+        raise ConfigError("RC-1 requires an independent JWT signing secret")
     return {
         "database_url": _url("VOXERA_DATABASE_URL", (HOST, POOLED_HOST)),
         # This is a restricted, direct preflight connection, never an owner credential.

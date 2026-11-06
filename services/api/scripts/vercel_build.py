@@ -22,6 +22,7 @@ from sqlalchemy import create_engine, pool, text  # noqa: E402
 
 from app import deploy_env  # noqa: E402
 from app.platform import hosted_overrides  # noqa: E402
+from app.rc1_preview import ConfigError  # noqa: E402
 from app.rc1_preview import active as rc1_active  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,11 +78,19 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
+def run() -> int:
+    """Run the preflight; print only fixed text on failure (driver errors can carry URLs)."""
     try:
-        result = main()
+        return main()
+    except ConfigError as exc:
+        # Fixed RC-1 gate text only: it names a gate or a variable, never a value.
+        print(f"vercel_build: REFUSING TO DEPLOY: {exc}.")
+        return 1
     except Exception:
         # Driver/config exceptions can contain credential-bearing URLs.
         print("vercel_build: REFUSING TO DEPLOY: database preflight failed; inspect configuration and access.")
-        result = 1
-    sys.exit(result)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run())
