@@ -1,0 +1,44 @@
+name: rc1-db-rehearsal
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Operation on the isolated RC-1 database
+        type: choice
+        options: [check, claim, upgrade]
+        default: check
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: rc1-validation-database
+  cancel-in-progress: false
+jobs:
+  rehearse:
+    if: github.ref == 'refs/heads/codex/rc1-validation'
+    runs-on: ubuntu-latest
+    environment: rc1-validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: python -m unittest discover -s .github/scripts -p 'test_rc1_target.py'
+      - run: uv sync --frozen
+        working-directory: services/api
+      - name: Validate isolated target and run explicit staging operation
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.RC1_DATABASE_URL_UNPOOLED }}
+          PGSSLMODE: require
+          ACTION: ${{ inputs.action }}
+        run: |
+          python .github/scripts/rc1_target.py
+          cd services/api
+          case "$ACTION" in
+            check) uv run python scripts/migrate.py --env staging --check ;;
+            claim) uv run python scripts/migrate.py --env staging --claim --confirm-host ep-wandering-hat-zatfukuw.c-2.eu-west-2.aws.neon.tech ;;
+            upgrade) uv run python scripts/migrate.py --env staging ;;
+            *) exit 2 ;;
+          esac
