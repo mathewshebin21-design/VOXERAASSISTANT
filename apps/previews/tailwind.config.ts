@@ -12,7 +12,7 @@ const config: Config = {
         // A — Command
         cmd: {
           bg: v("cmd-bg"), panel: v("cmd-panel"), raised: v("cmd-raised"), line: v("cmd-line"),
-          text: v("cmd-text"), mute: v("cmd-mute"), violet: v("cmd-violet"), cyan: v("cmd-cyan"),
+          text: v("cmd-text"), mute: v("cmd-mute"), violet: v("cmd-violet"), "violet-strong": v("cmd-violet-strong"), cyan: v("cmd-cyan"),
           ok: v("cmd-ok"), warn: v("cmd-warn"), bad: v("cmd-bad"),
         },
         // B — Atelier

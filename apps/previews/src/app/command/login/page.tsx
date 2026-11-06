@@ -29,14 +29,14 @@ function Login() {
             <div className="mt-5 rounded-md border border-cmd-ok/40 bg-cmd-ok/10 p-3 text-sm" role="status">
               Signed in as <b>{dm.user?.email}</b>{dm.org && <> · {dm.org.organization.name}</>}
               <div className="mt-2 flex gap-2">
-                <button onClick={() => { dm.backToWorkspace(); router.push("/command/ops"); }} className="rounded-md bg-cmd-violet px-3 py-1 text-xs font-medium text-white">Open console</button>
+                <button onClick={() => { dm.backToWorkspace(); router.push("/command/ops"); }} className="rounded-md bg-cmd-violet-strong px-3 py-1 text-xs font-medium text-white">Open console</button>
                 <button onClick={() => void signOut()} className="flex items-center gap-1 rounded-md border border-cmd-line px-3 py-1 text-xs"><LogOut size={12} /> Sign out</button>
               </div>
             </div>
           )}
           <div className="mt-6 grid grid-cols-2 rounded-md border border-cmd-line p-0.5 font-mono text-xs" role="tablist" aria-label="Account">
             {(["in", "up"] as const).map((m) => (
-              <button key={m} role="tab" aria-selected={a.mode === m} onClick={() => a.setMode(m)} className={clsx("rounded py-1.5", a.mode === m ? "bg-cmd-violet text-white" : "text-cmd-mute hover:text-cmd-text")}>{m === "in" ? "Sign in" : "Create workspace"}</button>
+              <button key={m} role="tab" aria-selected={a.mode === m} onClick={() => a.setMode(m)} className={clsx("rounded py-1.5", a.mode === m ? "bg-cmd-violet-strong text-white" : "text-cmd-mute hover:text-cmd-text")}>{m === "in" ? "Sign in" : "Create workspace"}</button>
             ))}
           </div>
           <h1 className="mt-5 text-xl font-semibold">{a.mode === "in" ? "Sign in to your workspace" : "Create a workspace"}</h1>
@@ -53,7 +53,7 @@ function Login() {
             <label className={label} htmlFor="cmd-pw">Password</label>
             <input id="cmd-pw" type="password" required minLength={a.minPassword} autoComplete={a.mode === "up" ? "new-password" : "current-password"} placeholder={a.mode === "up" ? "12+ characters" : ""} className={inputCls + " mt-1.5"} value={a.f.password} onChange={(e) => a.setF({ ...a.f, password: e.target.value })} />
             {a.err && <p role="alert" className="mt-3 text-sm text-cmd-bad">{a.err}</p>}
-            <button disabled={a.busy} className="mt-6 w-full rounded-md bg-cmd-violet py-2 font-medium text-white hover:bg-cmd-violet/85 disabled:opacity-50">{a.busy ? "Please wait…" : a.mode === "in" ? "Sign in" : "Create workspace"}</button>
+            <button disabled={a.busy} className="mt-6 w-full rounded-md bg-cmd-violet-strong py-2 font-medium text-white hover:bg-cmd-violet-strong/85 disabled:opacity-50">{a.busy ? "Please wait…" : a.mode === "in" ? "Sign in" : "Create workspace"}</button>
             <button type="button" disabled title="Planned" className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-cmd-line py-2 text-sm text-cmd-mute opacity-60"><KeyRound size={14} /> SSO (planned)</button>
           </form>
         </div>
