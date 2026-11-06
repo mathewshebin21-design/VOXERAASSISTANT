@@ -14,22 +14,24 @@ the live runtime connection:
 
 The evidence (`rc1-acceptance.json`, `rc1-a11y.json`) is uploaded as a run artifact.
 
+Hosted run: `rc1-hosted` run 42297447382 at `ad98ff6` (2026-11-06), evidence artifact ID 13542159106.
+
 | Area | Checks (script) | Local rehearsal | Hosted |
 |------|-----------------|-----------------|--------|
-| Isolation gate | commit, marker, schema, role, dedicated DB, web upstream (`rc1-isolation.mjs`) | 18/18 unit cases | Not run |
-| Authentication | sign-up, duplicate, weak password, wrong password, uniform error, refresh rotation, reuse revokes session, logout (`rc1-acceptance.mjs`) | Pass | Not run |
-| Rate limiting | 429 within 8 failed logins | Pass (single process) | Not run (F2) |
-| JWT | none, garbage, tampered signature, swapped subject, foreign secret, `alg=none`, expired claim, lifetime ≤ 15 min, iss/aud | Pass | Not run |
-| Tenant isolation | 10 cross-tenant reads, service by ID, booking into A, A's IDs via B's paths, list leakage, invitations | Pass | Not run |
-| RBAC | viewer read-only; staff book/cancel only; no services/settings/invite/promote/export/delete; audit trail | Pass | Not run |
-| Scheduling | availability, time zone (+05:30), naive vs offset, hours, past, horizon, quarter hour, phone | Pass | Not run |
-| Concurrency | 8 parallel bookings of one slot → exactly one; 2 parallel reschedules → one | Pass | Not run |
-| Rescheduling / cancellation | move frees old slot, taken slot refused, idempotent cancel, no move after cancel, rebook, history | Pass | Not run |
-| Idempotency | Staff API has no key (note); duplicates prevented by capacity | Note | Not run |
-| Security | headers, CORS, minimal error bodies, no credential strings | Pass | Not run |
-| Reliability | health commit, readiness, 20 concurrent reads, isolation unchanged after writes | Pass | Not run |
-| Browser | `e2e-designs-live.mjs`: real sign-up/sign-in, dashboards, setup assistant, undo, clean-up | Green in CI (`live-e2e`) | Not run |
-| Accessibility | axe-core WCAG 2.1 A/AA, 6 entry pages, first-Tab focus (`rc1-a11y.mjs`) | 6/6 after fix D2 | Not run |
+| Isolation gate | commit, marker, schema, role, dedicated DB, web upstream (`rc1-isolation.mjs`) | 18/18 unit cases | Pass (before and after) |
+| Authentication | sign-up, duplicate, weak password, wrong password, uniform error, refresh rotation, reuse revokes session, logout (`rc1-acceptance.mjs`) | Pass | Pass |
+| Rate limiting | 429 within 8 failed logins | Pass (single process) | Pass (429 within 8; see F2) |
+| JWT | none, garbage, tampered signature, swapped subject, foreign secret, `alg=none`, expired claim, lifetime ≤ 15 min, iss/aud | Pass | Pass (`alg=none` refused 403 at edge; API 401) |
+| Tenant isolation | 10 cross-tenant reads, service by ID, booking into A, A's IDs via B's paths, list leakage, invitations | Pass | Pass |
+| RBAC | viewer read-only; staff book/cancel only; no services/settings/invite/promote/export/delete; audit trail | Pass | Pass |
+| Scheduling | availability, time zone (+05:30), naive vs offset, hours, past, horizon, quarter hour, phone | Pass | Pass |
+| Concurrency | 8 parallel bookings of one slot → exactly one; 2 parallel reschedules → one | Pass | Pass |
+| Rescheduling / cancellation | move frees old slot, taken slot refused, idempotent cancel, no move after cancel, rebook, history | Pass | Pass |
+| Idempotency | Staff API has no key (note); duplicates prevented by capacity | Note | Note |
+| Security | headers, CORS, minimal error bodies, no credential strings | Pass | Pass (HSTS present; `/docs` exposed, F3) |
+| Reliability | health commit, readiness, 20 concurrent reads, isolation unchanged after writes | Pass | Pass |
+| Browser | `e2e-designs-live.mjs`: real sign-up/sign-in, dashboards, setup assistant, undo, clean-up | Green in CI (`live-e2e`) | Pass 14/14 |
+| Accessibility | axe-core WCAG 2.1 A/AA, 6 entry pages, first-Tab focus (`rc1-a11y.mjs`) | 6/6 after fix D2 | Pass 6/6, 0 violations |
 | Production isolation | no production action | Verified | — |
 
 Not covered on the hosted run, and why:
