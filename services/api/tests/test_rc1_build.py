@@ -101,3 +101,52 @@ class RefusalTextTests(unittest.TestCase):
 
     def test_rc1_errors_remain_value_errors(self):
         self.assertTrue(issubclass(build.ConfigError, ValueError))
+
+
+class DriverFailureTextTests(unittest.TestCase):
+    """Driver failures are classified into fixed text; the driver message never reaches the log."""
+
+    URL = "postgresql://voxera_app:s3cr3t@ep-secret-host.example/neondb"
+
+    def refusal(self, error):
+        out = io.StringIO()
+        with patch.object(build, "main", side_effect=error), contextlib.redirect_stdout(out):
+            self.assertEqual(build.run(), 1)
+        text = out.getvalue()
+        for leaked in ("s3cr3t", "ep-secret-host", "voxera_app", "127.0.0.1"):
+            self.assertNotIn(leaked, text)
+        return text
+
+    def test_connection_failures_are_classified(self):
+        for message, expected in (
+            (
+                f'connection to server at "127.0.0.1" ({self.URL}) failed: FATAL:  password authentication failed for user "voxera_app"',
+                "authentication failed",
+            ),
+            ('FATAL:  database "neondb" does not exist', "does not exist"),
+            ("SSL connection has been closed unexpectedly", "TLS or channel-binding"),
+            ("channel binding required but not supported by server", "TLS or channel-binding"),
+            ("ERROR: The endpoint has been disabled. Enable it using Neon API and retry.", "Neon endpoint"),
+            ('connection to server at "127.0.0.1", port 5432 failed: Connection refused', "network"),
+            ("[Errno -2] Name or service not known", "network"),
+            (f"something else entirely at {self.URL}", "unclassified RuntimeError"),
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, self.refusal(RuntimeError(message)))
+
+    def test_sqlstate_is_reported_with_its_meaning(self):
+        class Driver(Exception):
+            sqlstate = "42501"
+
+        class Wrapped(Exception):
+            orig = Driver(f"permission denied for table deployment_environment ({self.URL})")
+
+        text = self.refusal(Wrapped("wrapper text with " + self.URL))
+        self.assertIn("SQLSTATE 42501", text)
+        self.assertIn("permission denied", text)
+
+    def test_unknown_sqlstate_still_value_free(self):
+        class Driver(Exception):
+            sqlstate = "XX000"
+
+        self.assertIn("SQLSTATE XX000: database error", self.refusal(Driver(self.URL)))
