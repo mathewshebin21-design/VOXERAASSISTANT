@@ -4,6 +4,7 @@ on:
     paths:
       - 'services/api/app/rc1_preview.py'
       - 'services/api/app/platform.py'
+      - 'services/api/app/config.py'
       - 'services/api/scripts/vercel_build.py'
       - 'services/api/tests/test_rc1_*.py'
       - '.github/workflows/rc1-preview-safeguards.yml'
@@ -15,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.32'
       - run: uv sync --frozen --group dev
         working-directory: services/api
       - run: uv run python -m unittest discover -s tests -p 'test_rc1_*.py' -v

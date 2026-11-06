@@ -26,6 +26,18 @@ class RC1PreviewTests(unittest.TestCase):
             self.assertIn("voxera_app:synthetic@", config["database_url"])
             self.assertEqual(config["jwt_secret"], self.env["VOXERA_JWT_SECRET"])
 
+    def test_settings_use_validated_driver_urls(self):
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        try:
+            with patch.dict(os.environ, self.env, clear=True):
+                settings = get_settings()
+                self.assertTrue(settings.database_url.startswith("postgresql+psycopg://voxera_app:"))
+                self.assertTrue(settings.migration_database_url.startswith("postgresql+psycopg://voxera_app:"))
+        finally:
+            get_settings.cache_clear()
+
     def test_migration_owner_access_refused(self):
         with patch.dict(os.environ, self.env, clear=True), self.assertRaises(ValueError):
             migration_owner_url()
