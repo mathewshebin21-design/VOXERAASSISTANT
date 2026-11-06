@@ -150,3 +150,48 @@ class DriverFailureTextTests(unittest.TestCase):
             sqlstate = "XX000"
 
         self.assertIn("SQLSTATE XX000: database error", self.refusal(Driver(self.URL)))
+
+
+class RedactionTests(unittest.TestCase):
+    """Unclassified driver errors show a redacted first line: never a credential or address."""
+
+    URL = "postgresql://voxera_app:Zq9-s3cr3t-Zq9@ep-wandering-hat-zatfukuw-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require"
+
+    def text(self, message):
+        out = io.StringIO()
+        env = {"VOXERA_DATABASE_URL": self.URL, "VOXERA_BUILD_DATABASE_URL": self.URL.replace("-pooler", "")}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(build, "main", side_effect=RuntimeError(message)),
+            contextlib.redirect_stdout(out),
+        ):
+            self.assertEqual(build.run(), 1)
+        result = out.getvalue()
+        for leaked in (
+            "Zq9-s3cr3t-Zq9",
+            "s3cr3t",
+            "voxera_app",
+            "ep-wandering-hat",
+            "neon.tech",
+            "10.1.2.3",
+            "2a05:d018::1",
+        ):
+            self.assertNotIn(leaked, result)
+        return result
+
+    def test_unclassified_message_is_shown_redacted(self):
+        result = self.text(
+            'connection to server at "ep-wandering-hat-zatfukuw-pooler.c-2.eu-west-2.aws.neon.tech" (10.1.2.3), '
+            "port 5432 failed: ERROR:  unsupported startup parameter: foo\nsecond line with Zq9-s3cr3t-Zq9"
+        )
+        self.assertIn("unsupported startup parameter", result)
+        self.assertIn("unclassified RuntimeError", result)
+
+    def test_bare_credentials_and_addresses_are_removed(self):
+        result = self.text(f"weird failure for voxera_app Zq9-s3cr3t-Zq9 at 2a05:d018::1 via {self.URL} neondb")
+        self.assertIn("weird failure", result)
+
+    def test_network_phrases_are_classified(self):
+        for message in ("Network is unreachable", "No route to host", "server closed the connection unexpectedly"):
+            with self.subTest(message=message):
+                self.assertIn("network", self.text(message))
