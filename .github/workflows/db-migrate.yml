@@ -10,7 +10,7 @@ on:
       environment:
         description: Which database
         type: choice
-        options: [staging, production]
+        options: [staging, production, rc1-validation]
         required: true
       action:
         description: check (no changes), upgrade, claim (first run on a database), downgrade
@@ -31,6 +31,7 @@ permissions:
 
 jobs:
   migrate:
+    if: inputs.environment != 'rc1-validation'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     defaults:
@@ -56,3 +57,29 @@ jobs:
             claim)     uv run python scripts/migrate.py --env "$ENVIRONMENT" --claim --confirm-host "$CONFIRM_HOST" ;;
             downgrade) uv run python scripts/migrate.py --env "$ENVIRONMENT" --downgrade-to "$DOWNGRADE_TO" --yes ;;
           esac
+
+  rc1-check:
+    if: inputs.environment == 'rc1-validation' && inputs.action == 'check' && github.ref == 'refs/heads/codex/rc1-validation'
+    runs-on: ubuntu-latest
+    environment: rc1-validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: python -m unittest discover -s .github/scripts -p 'test_rc1_*.py'
+      - run: uv sync --frozen
+        working-directory: services/api
+      - name: Read-only RC-1 database identity
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          cd services/api
+          uv run python ../../.github/scripts/rc1_check.py
+  rc1-refuse:
+    if: inputs.environment == 'rc1-validation' && (inputs.action != 'check' || github.ref != 'refs/heads/codex/rc1-validation')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "RC-1 requires check action on the validation branch"; exit 1
