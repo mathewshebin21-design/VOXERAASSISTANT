@@ -1,4 +1,5 @@
 """No-network RC-1 credential boundary regression tests."""
+
 import os
 import unittest
 from unittest.mock import patch
@@ -10,8 +11,10 @@ from app.rc1_preview import BRANCH, HOST, LEGACY_KEYS, configuration
 class RC1PreviewTests(unittest.TestCase):
     def setUp(self):
         self.env = {
-            "VERCEL_ENV": "preview", "VERCEL_GIT_COMMIT_REF": BRANCH,
-            "VOXERA_DEPLOYMENT_PROFILE": "rc1-validation", "VOXERA_EXPECT_DB_ENV": "staging",
+            "VERCEL_ENV": "preview",
+            "VERCEL_GIT_COMMIT_REF": BRANCH,
+            "VOXERA_DEPLOYMENT_PROFILE": "rc1-validation",
+            "VOXERA_EXPECT_DB_ENV": "staging",
             "VOXERA_JWT_SECRET": "synthetic-independent-jwt-secret-123456789",
             "VOXERA_DATABASE_URL": f"postgresql://voxera_app:synthetic@{HOST}/neondb?sslmode=require",
             "VOXERA_BUILD_DATABASE_URL": f"postgresql://voxera_app:synthetic@{HOST}/neondb?sslmode=require",
@@ -48,15 +51,28 @@ class RC1PreviewTests(unittest.TestCase):
             "VOXERA_JWT_SECRET": ["", "short", "dev-only" * 8],
         }.items():
             for value in values:
-                with self.subTest(key=key, value=value), patch.dict(os.environ, {**self.env, key: value}, clear=True), self.assertRaises(ValueError):
+                with (
+                    self.subTest(key=key, value=value),
+                    patch.dict(os.environ, {**self.env, key: value}, clear=True),
+                    self.assertRaises(ValueError),
+                ):
                     configuration()
 
     def test_url_mismatches_refused_without_leaking_values(self):
         good = self.env["VOXERA_DATABASE_URL"]
-        bad = ["", good.replace(HOST, "production.example"), good.replace("voxera_app", "neondb_owner"),
-               good.replace("/neondb", "/other"), good.replace("sslmode=require", "sslmode=disable"),
-               good + "&host=production.example", good + "&sslmode=disable", good + "#fragment",
-               good.replace("synthetic", ""), good.replace(".tech/", ".tech:6543/"), good.replace("postgresql:", "https:")]
+        bad = [
+            "",
+            good.replace(HOST, "production.example"),
+            good.replace("voxera_app", "neondb_owner"),
+            good.replace("/neondb", "/other"),
+            good.replace("sslmode=require", "sslmode=disable"),
+            good + "&host=production.example",
+            good + "&sslmode=disable",
+            good + "#fragment",
+            good.replace("synthetic", ""),
+            good.replace(".tech/", ".tech:6543/"),
+            good.replace("postgresql:", "https:"),
+        ]
         for key in ("VOXERA_DATABASE_URL", "VOXERA_BUILD_DATABASE_URL"):
             for value in bad:
                 with self.subTest(key=key, value=value), patch.dict(os.environ, {**self.env, key: value}, clear=True):
@@ -66,10 +82,18 @@ class RC1PreviewTests(unittest.TestCase):
 
     def test_existing_production_and_shared_staging_behavior_preserved(self):
         for target in ("production", "preview", "development"):
-            with self.subTest(target=target), patch.dict(os.environ, {
-                "VERCEL_ENV": target, "VERCEL_GIT_COMMIT_REF": "staging",
-                "DATABASE_URL": "postgresql://owner:synthetic@legacy.example/db",
-            }, clear=True):
+            with (
+                self.subTest(target=target),
+                patch.dict(
+                    os.environ,
+                    {
+                        "VERCEL_ENV": target,
+                        "VERCEL_GIT_COMMIT_REF": "staging",
+                        "DATABASE_URL": "postgresql://owner:synthetic@legacy.example/db",
+                    },
+                    clear=True,
+                ),
+            ):
                 self.assertIsNone(configuration())
                 self.assertIn("owner:synthetic@legacy.example", hosted_overrides()["migration_database_url"])
 
@@ -78,8 +102,16 @@ class RC1PreviewTests(unittest.TestCase):
             self.assertEqual(hosted_overrides(), {})
 
     def test_remediation_branch_cannot_use_inherited_database(self):
-        with patch.dict(os.environ, {
-            "VERCEL_ENV": "preview", "VERCEL_GIT_COMMIT_REF": "codex/rc1-runtime-preview",
-            "DATABASE_URL": "postgresql://owner:synthetic@shared.example/db",
-        }, clear=True), self.assertRaises(ValueError):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "VERCEL_ENV": "preview",
+                    "VERCEL_GIT_COMMIT_REF": "codex/rc1-runtime-preview",
+                    "DATABASE_URL": "postgresql://owner:synthetic@shared.example/db",
+                },
+                clear=True,
+            ),
+            self.assertRaises(ValueError),
+        ):
             hosted_overrides()

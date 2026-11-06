@@ -7,11 +7,25 @@ BRANCH = "codex/rc1-validation"
 HOST = "ep-wandering-hat-zatfukuw.c-2.eu-west-2.aws.neon.tech"
 POOLED_HOST = HOST.replace(".c-2.", "-pooler.c-2.")
 LEGACY_KEYS = (
-    "DATABASE_URL", "DATABASE_URL_UNPOOLED", "POSTGRES_URL",
-    "POSTGRES_URL_NON_POOLING", "POSTGRES_URL_NO_SSL", "POSTGRES_PRISMA_URL",
-    "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_DATABASE",
-    "PGHOST", "PGHOST_UNPOOLED", "PGUSER", "PGPASSWORD", "PGDATABASE",
-    "NEON_PROJECT_ID", "PGSERVICE", "PGSERVICEFILE", "PGPASSFILE",
+    "DATABASE_URL",
+    "DATABASE_URL_UNPOOLED",
+    "POSTGRES_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "POSTGRES_URL_NO_SSL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_HOST",
+    "POSTGRES_DATABASE",
+    "PGHOST",
+    "PGHOST_UNPOOLED",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGDATABASE",
+    "NEON_PROJECT_ID",
+    "PGSERVICE",
+    "PGSERVICEFILE",
+    "PGPASSFILE",
     "VOXERA_MIGRATION_DATABASE_URL",
 )
 
@@ -22,9 +36,12 @@ def active() -> bool:
     reserved = branch in (BRANCH, "codex/rc1-runtime-preview")
     if not profile and not reserved:
         return False
-    if (profile != "rc1-validation" or branch != BRANCH
-            or os.environ.get("VERCEL_ENV") != "preview"
-            or os.environ.get("VOXERA_EXPECT_DB_ENV") != "staging"):
+    if (
+        profile != "rc1-validation"
+        or branch != BRANCH
+        or os.environ.get("VERCEL_ENV") != "preview"
+        or os.environ.get("VOXERA_EXPECT_DB_ENV") != "staging"
+    ):
         raise ValueError("RC-1 requires its exact Preview branch, profile and staging identity")
     return True
 
@@ -35,9 +52,12 @@ def _url(name: str, hosts: tuple[str, ...]) -> str:
         p = urlsplit(value)
         valid = (
             p.scheme in ("postgres", "postgresql", "postgresql+psycopg")
-            and p.hostname in hosts and p.port in (None, 5432)
-            and unquote(p.username or "") == "voxera_app" and bool(p.password)
-            and p.path == "/neondb" and not p.fragment
+            and p.hostname in hosts
+            and p.port in (None, 5432)
+            and unquote(p.username or "") == "voxera_app"
+            and bool(p.password)
+            and p.path == "/neondb"
+            and not p.fragment
         )
         query = parse_qs(p.query, keep_blank_values=True)
         valid = valid and query.get("sslmode") in (["require"], ["verify-full"])
