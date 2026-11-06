@@ -115,8 +115,12 @@ await area("jwt", async () => {
   const fp = b64(forged);
   const fs = createHmac("sha256", foreignKey).update(`${fh}.${fp}`).digest("base64url");
   check("jwt", "token signed with a foreign secret rejected (401)", (await call("GET", "/v1/me", { token: `${fh}.${fp}.${fs}` })).status === 401);
-  check("jwt", "alg=none token rejected (401)",
-    (await call("GET", "/v1/me", { token: `${b64({ alg: "none", typ: "JWT" })}.${fp}.` })).status === 401);
+  // The property is "never accepted". The API answers 401; Vercel's edge may reject an
+  // unsigned token first with another 4xx, which is equally a refusal. Record which it was.
+  const none = await call("GET", "/v1/me", { token: `${b64({ alg: "none", typ: "JWT" })}.${fp}.` });
+  check("jwt", "alg=none token never accepted (4xx, no user data)",
+    none.status >= 400 && none.status < 500 && !/"email"/.test(none.text), `status ${none.status}`);
+  note("jwt", "alg=none rejection status", `${none.status} ${none.status === 401 ? "(API)" : "(rejected before or outside the API auth check)"}`);
   const expired = { ...payload, exp: Math.floor(Date.now() / 1000) - 60 };
   check("jwt", "expired-claim token with original signature rejected (401)",
     (await call("GET", "/v1/me", { token: `${h}.${b64(expired)}.${sig}` })).status === 401);
