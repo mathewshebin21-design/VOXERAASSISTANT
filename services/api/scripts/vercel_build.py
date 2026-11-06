@@ -78,6 +78,42 @@ def main() -> int:
     return 0
 
 
+# Fixed categories for driver failures. The driver's own message can contain the host,
+# user or URL, so only the matching category name (and a SQLSTATE code) is ever printed.
+_CATEGORIES = (
+    (("password authentication failed",), "authentication failed: wrong password, or the role cannot log in"),
+    (("does not exist",), "the database or role does not exist"),
+    (("ssl", "channel binding", "channel_binding"), "TLS or channel-binding negotiation failed"),
+    (("pg_hba", "not permitted", "too many connections"), "connection not permitted by the server"),
+    (("endpoint",), "the Neon endpoint is unavailable (suspended, disabled or wrong)"),
+    (
+        ("connection refused", "timed out", "timeout", "name or service not known", "could not translate host"),
+        "network: host unreachable or not resolvable",
+    ),
+)
+_SQLSTATES = {
+    "42501": "permission denied (a required SELECT grant is missing)",
+    "42P01": "a required table does not exist",
+    "28P01": "authentication failed: wrong password",
+    "28000": "authorization failed for this role",
+    "3D000": "the database does not exist",
+    "25006": "read-only transaction refused the statement",
+}
+
+
+def describe(exc: BaseException) -> str:
+    """A fixed, value-free description of a database failure."""
+    orig = getattr(exc, "orig", None) or exc
+    code = getattr(orig, "sqlstate", None)
+    if isinstance(code, str) and len(code) == 5 and code.isalnum():
+        return f"SQLSTATE {code}: {_SQLSTATES.get(code, 'database error')}"
+    text_ = str(orig).lower()
+    for needles, label in _CATEGORIES:
+        if any(n in text_ for n in needles):
+            return label
+    return f"unclassified {type(orig).__name__}"
+
+
 def run() -> int:
     """Run the preflight; print only fixed text on failure (driver errors can carry URLs)."""
     try:
@@ -86,9 +122,12 @@ def run() -> int:
         # Fixed RC-1 gate text only: it names a gate or a variable, never a value.
         print(f"vercel_build: REFUSING TO DEPLOY: {exc}.")
         return 1
-    except Exception:
-        # Driver/config exceptions can contain credential-bearing URLs.
-        print("vercel_build: REFUSING TO DEPLOY: database preflight failed; inspect configuration and access.")
+    except Exception as exc:
+        # Driver/config exceptions can contain credential-bearing URLs: print a category only.
+        print(
+            "vercel_build: REFUSING TO DEPLOY: database preflight failed "
+            f"({describe(exc)}); inspect configuration and access."
+        )
         return 1
 
 
