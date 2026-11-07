@@ -2,7 +2,7 @@
 
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Rocket, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
+import { Activity, BarChart3, Bot, BookOpen, Building2, CalendarRange, ChevronDown, Gauge, Headset, LineChart, LogOut, MessagesSquare, Mic, Palette, Rocket, Plug, Plus, Search, Sparkles, Users, Waypoints, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -81,6 +81,7 @@ function WorkspaceMenu() {
           {dm.viewingDemo
             ? <button role="menuitem" onClick={() => { dm.backToWorkspace(); setOpen(false); router.push("/flow/app"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-cyan">Back to my workspace</button>
             : <button role="menuitem" onClick={() => { dm.exploreDemo(); setOpen(false); router.push("/flow/app"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-text">Explore with demo data</button>}
+          <Link role="menuitem" href="/start/design" onClick={() => setOpen(false)} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-text" data-testid="switch-design"><Palette size={14} /> Switch design</Link>
           <button role="menuitem" onClick={async () => { await signOut(); setOpen(false); router.push("/flow/enter"); }} className="flex w-full items-center gap-2 border-t border-flw-line/70 px-4 py-2.5 text-sm text-flw-mute hover:text-flw-pink"><LogOut size={14} /> Sign out</button>
         </div>
       )}

@@ -3,7 +3,7 @@
 import { clsx } from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Activity, AudioLines, BookOpen, Bot, CalendarClock, CreditCard, FlaskConical, Gauge, LogIn, LogOut, Menu, PhoneCall, Plug, Search, Users, X,
+  Activity, AudioLines, BookOpen, Bot, CalendarClock, CreditCard, FlaskConical, Gauge, LogIn, LogOut, Menu, Palette, PhoneCall, Plug, Search, Users, X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -144,6 +144,7 @@ export function CommandShell({ children }: { children: React.ReactNode }) {
                     {dm.viewingDemo
                       ? <button role="menuitem" onClick={() => { dm.backToWorkspace(); router.push("/command/ops"); }} className="w-full rounded px-3 py-2 text-left hover:bg-cmd-raised">Back to {dm.org?.organization.name ?? "my workspace"}</button>
                       : <button role="menuitem" onClick={() => { dm.exploreDemo(); setAccount(false); }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-cmd-raised"><FlaskConical size={14} /> Explore with demo data</button>}
+                    <Link role="menuitem" href="/start/design" className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-cmd-raised" data-testid="switch-design"><Palette size={14} /> Switch design</Link>
                     <button role="menuitem" onClick={async () => { await signOut(); router.push("/command/login"); }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-cmd-raised"><LogOut size={14} /> Sign out</button>
                   </> : (
                     <Link role="menuitem" href="/command/login" className="flex items-center gap-2 rounded px-3 py-2 hover:bg-cmd-raised"><LogIn size={14} /> Sign in or create a workspace</Link>
