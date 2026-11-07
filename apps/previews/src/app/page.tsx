@@ -19,6 +19,11 @@ export default function Home() {
         <div className="mt-4 inline-flex rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">
           Demo only — synthetic data, simulated calls, no live telephony, no real integrations, no authentication.
         </div>
+        <div className="mt-6">
+          <Link href="/start" className="inline-flex rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90" data-testid="start-link">
+            Sign in to your workspace →
+          </Link>
+        </div>
         <div className="mt-10 grid gap-5 md:grid-cols-3">
           {designs.map((d) => (
             <Link key={d.href} href={d.href} className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] transition hover:border-white/30 hover:bg-white/[0.06]">

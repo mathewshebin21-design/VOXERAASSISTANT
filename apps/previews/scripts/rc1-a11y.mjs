@@ -10,7 +10,7 @@ const { chromium } = require("playwright");
 const axe = require("axe-core");
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const OUT = process.argv[2] ?? "rc1-a11y.json";
-const PAGES = ["/", "/flow/enter", "/command", "/command/login", "/atelier", "/atelier/sign-in"];
+const PAGES = ["/", "/start", "/flow/enter", "/command", "/command/login", "/atelier", "/atelier/sign-in"];
 const BLOCKING = new Set(["serious", "critical"]);
 
 const browser = await chromium.launch();

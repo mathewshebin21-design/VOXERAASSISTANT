@@ -69,5 +69,6 @@ jobs:
           npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
           LIVE_FAKES=1 BASE_URL=http://localhost:3000 node scripts/e2e-live.mjs
           BASE_URL=http://localhost:3000 node scripts/e2e-designs-live.mjs
+          BASE_URL=http://localhost:3000 node scripts/e2e-design-select.mjs
       - if: failure()
         run: tail -n 100 services/api/api.log apps/previews/web.log

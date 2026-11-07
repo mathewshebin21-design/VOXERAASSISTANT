@@ -105,10 +105,15 @@ class Membership(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     role: Mapped[Role] = mapped_column(Enum(Role, name="member_role"), nullable=False)
+    # This member's own choice of interface; None follows the workspace default.
+    ui_design: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = _created()
     organization: Mapped[Organization] = relationship(back_populates="memberships")
     user: Mapped[User] = relationship()
-    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_membership_org_user"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_membership_org_user"),
+        CheckConstraint("ui_design IN ('command', 'atelier', 'flow')", name="ck_membership_ui_design"),
+    )
 
 
 class Invitation(Base):
@@ -201,12 +206,15 @@ class WorkspaceSettings(Base):
     booking_capacity: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1", nullable=False)
     # Where the receptionist transfers callers once telephony is connected (E.164, e.g. +441179460000).
     transfer_phone: Mapped[str | None] = mapped_column(String(20))
+    # The workspace's default interface (Command, Atelier or Flow); members may override it.
+    ui_design: Mapped[str] = mapped_column(String(16), default="atelier", server_default="atelier", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     __table_args__ = (
         CheckConstraint("recording_retention_days BETWEEN 7 AND 365", name="ck_settings_retention"),
         CheckConstraint("booking_capacity BETWEEN 1 AND 50", name="ck_settings_capacity"),
+        CheckConstraint("ui_design IN ('command', 'atelier', 'flow')", name="ck_settings_ui_design"),
     )
 
 

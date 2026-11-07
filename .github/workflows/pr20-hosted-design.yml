@@ -1,0 +1,53 @@
+name: PR20 hosted design selection
+
+# Hosted acceptance for PR #20 against its own isolated previews only (web -> PR #20 API ->
+# isolated Neon branch). Runs on every push to the PR branch, after Vercel has deployed that
+# commit. A manual dispatch is kept for re-runs once this file is on the default branch.
+# The targets are fixed below: never production, never shared staging.
+
+on:
+  push:
+    branches: [claude/design-selection]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr20-hosted-design-selection
+  cancel-in-progress: false
+
+env:
+  PR20_API: https://voxera-api-git-claude-design-selection-ai-e399.vercel.app
+  PR20_WEB: https://voxera-flow-git-claude-design-selection-ai-e399.vercel.app
+
+jobs:
+  hosted-design-selection:
+    if: github.ref == 'refs/heads/claude/design-selection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - name: Install browser test dependencies
+        run: |
+          npm ci
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Wait for this commit's PR20 deployments
+        run: node scripts/wait-for-deploy.mjs "$PR20_API" "$PR20_WEB" "${GITHUB_SHA::7}"
+      - name: Isolation gate (routing and database separation; nothing else runs unless this passes)
+        id: gate
+        run: node scripts/pr20-isolation.mjs "$PR20_API" "$PR20_WEB" "$GITHUB_SHA"
+      - name: Design chooser, persistence, owner/member permissions, switching, demo labels, clean-up
+        run: BASE_URL="$PR20_WEB" node scripts/e2e-design-select.mjs
+      - name: Isolation unchanged after the suite
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: node scripts/pr20-isolation.mjs "$PR20_API" "$PR20_WEB" "$GITHUB_SHA"

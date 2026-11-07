@@ -100,6 +100,7 @@ export function AtelierShell({ children }: { children: React.ReactNode }) {
                     {dm.viewingDemo
                       ? <button role="menuitem" onClick={() => { dm.backToWorkspace(); router.push("/atelier/studio"); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Back to {dm.org?.organization.name ?? "my studio"}</button>
                       : <button role="menuitem" onClick={() => { dm.exploreDemo(); setAccount(false); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Explore with demo data</button>}
+                    <Link role="menuitem" href="/start/design" className="block w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg" data-testid="switch-design">Switch design</Link>
                     <button role="menuitem" onClick={async () => { await signOut(); router.push("/atelier/sign-in"); }} className="w-full rounded-2xl px-4 py-2 text-left hover:bg-atl-bg">Sign out</button>
                   </> : <Link role="menuitem" href="/atelier/sign-in" className="block rounded-2xl px-4 py-2 hover:bg-atl-bg">Sign in or create a workspace</Link>}
                 </div>
