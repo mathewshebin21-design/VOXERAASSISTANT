@@ -1,0 +1,76 @@
+name: PR20 production-clone rehearsal
+
+# Runs the four documented commands (docs/release-pr20-design-selection.md, step 2) against the
+# disposable Neon clone pr20-rehearsal-20261107, with the real migration runner and verifier.
+#
+# Credentials: ONLY the clone's, stored as secrets of the GitHub environment `pr20-rehearsal`:
+#   PR20_REHEARSAL_DATABASE_URL_UNPOOLED  (clone, direct connection, owner role)
+#   PR20_REHEARSAL_DATABASE_URL           (clone, pooled connection; may equal the direct one)
+# This workflow never reads production, staging or RC-1 secrets.
+#
+# Trigger: a push to claude/design-selection that changes .github/rehearsal/pr20-clone.request
+# (a manual dispatch also works once this file is on the default branch).
+
+on:
+  push:
+    branches: [claude/design-selection]
+    paths: [.github/rehearsal/pr20-clone.request]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr20-clone-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    if: github.ref == 'refs/heads/claude/design-selection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pr20-rehearsal
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.PR20_REHEARSAL_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.PR20_REHEARSAL_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Require the clone credentials and mask every part of them
+        run: |
+          if [ -z "$DATABASE_URL_UNPOOLED" ] || [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set PR20_REHEARSAL_DATABASE_URL_UNPOOLED and PR20_REHEARSAL_DATABASE_URL on the pr20-rehearsal environment"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit, unquote
+          for key in ("DATABASE_URL_UNPOOLED", "DATABASE_URL"):
+              p = urlsplit(os.environ[key].strip())
+              for part in (p.hostname, p.username, p.password, unquote(p.password or ""), (p.path or "").lstrip("/")):
+                  if part:
+                      print(f"::add-mask::{part}")
+          PY
+      - run: uv sync --frozen
+      - name: 1. Baseline at 0007 (read-only)
+        run: uv run python scripts/verify_release.py --env production --expect 0007 --save baseline.json
+      - name: 2. Migration check (changes nothing)
+        run: uv run python scripts/migrate.py --env production --check
+      - name: 3. Migrate the clone 0007 -> 0009
+        run: uv run python scripts/migrate.py --env production
+      - name: 4. Verify 0009 against the baseline (read-only)
+        run: uv run python scripts/verify_release.py --env production --expect 0009 --baseline baseline.json
+      - name: Nothing left pending
+        run: uv run python scripts/migrate.py --env production --check
+      - name: Evidence (table row counts only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr20-clone-rehearsal-${{ github.sha }}
+          path: services/api/baseline.json
+          if-no-files-found: ignore
