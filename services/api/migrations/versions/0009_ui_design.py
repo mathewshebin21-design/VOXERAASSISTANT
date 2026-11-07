@@ -1,11 +1,10 @@
 """Interface design preference: a workspace default and an optional per-member override.
 
 Revision ID 0009 (not 0008): revision 0008 already exists on the Agent Studio branch and is applied
-to shared staging. When both land, re-point whichever is later at the other before either touches
-a shared database, so the chain stays linear.
+to shared staging. This migration follows Agent Studio revision 0008 in a linear chain.
 
 Revision ID: 0009
-Revises: 0007
+Revises: 0008
 """
 
 from collections.abc import Sequence
@@ -14,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0009"
-down_revision: str | None = "0007"
+down_revision: str | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
