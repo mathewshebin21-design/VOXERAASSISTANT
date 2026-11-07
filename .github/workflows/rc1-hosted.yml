@@ -36,7 +36,7 @@ jobs:
       - run: npm ci
       - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
       - name: Wait for this commit's RC-1 deployments
-        run: node scripts/wait-for-deploy.mjs "$RC1_API" "$RC1_WEB" "${GITHUB_SHA::7}"
+        run: node scripts/wait-for-deploy.mjs "$RC1_API" "$RC1_WEB" "${GITHUB_SHA::7}" /api/rc1-identity "$GITHUB_SHA"
       - name: Isolation gate (read-only; nothing is written unless this passes)
         id: gate
         run: node scripts/rc1-isolation.mjs "$RC1_API" "$RC1_WEB" "$GITHUB_SHA"
