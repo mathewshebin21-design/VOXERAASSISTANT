@@ -200,6 +200,38 @@ if (process.env.LIVE_FAKES === "1") {
     await p.getByTestId("bookings").getByText("Priya Shah · Balayage").waitFor({ timeout: 8000 });
   });
 
+  await step("staff desk: a failed move keeps the booking, then reschedules with the same reference", async () => {
+    const appointments = () => p.evaluate(async (id) => (await fetch(`/api/v1/orgs/${id}/appointments`)).json(), orgId);
+    const original = (await appointments()).find((a) => a.customer_name === "Priya Shah");
+    const row = p.getByTestId(`booking-${original.id}`);
+    await row.getByRole("button", { name: "Reschedule", exact: true }).click();
+    const next = new Date(original.starts_at); next.setDate(next.getDate() + 7);
+    await row.getByLabel("New day").fill(next.toISOString().slice(0, 10));
+    await p.waitForFunction(() => document.querySelector('select[aria-label="New time"]')?.querySelectorAll("option").length > 1, null, { timeout: 8000 });
+    await row.getByLabel("New time").selectOption({ index: 1 });
+    const path = `**/appointments/${original.id}/reschedule`;
+    await p.route(path, (route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "That slot has just been taken. Choose another time." }) }));
+    await row.getByRole("button", { name: "Confirm move" }).click();
+    await row.getByRole("alert").getByText(/slot has just been taken/).waitFor({ timeout: 8000 });
+    const unchanged = (await appointments()).find((a) => a.id === original.id);
+    if (unchanged.starts_at !== original.starts_at) return false;
+    await p.unroute(path);
+    await p.waitForFunction(() => !document.querySelector('select[aria-label="New time"]')?.disabled);
+    await row.getByLabel("New time").selectOption({ index: 1 });
+    const target = await row.getByLabel("New time").inputValue();
+    await row.getByRole("button", { name: "Confirm move" }).click();
+    await status(p, "Appointment moved; booking reference kept");
+    const moved = (await appointments()).filter((a) => a.customer_name === "Priya Shah");
+    return moved.length === 1 && moved[0].id === original.id && Date.parse(moved[0].starts_at) === Date.parse(target);
+  });
+
+  await step("staff desk: cancellation requires confirmation", async () => {
+    const row = p.getByTestId("bookings").locator("li").filter({ hasText: "Priya Shah" });
+    p.once("dialog", (dialog) => dialog.dismiss());
+    await row.getByRole("button", { name: "cancel", exact: true }).click();
+    return await row.count() === 1;
+  });
+
   await step("dashboard follows the chosen business type and saves it to the workspace", async () => {
     await p.goto(`${BASE}/flow/app`, { waitUntil: "networkidle" });
     await p.getByTestId("dashboard-picker").click();

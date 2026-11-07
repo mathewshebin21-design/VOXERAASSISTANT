@@ -1,0 +1,62 @@
+name: rc1-hosted
+
+# Hosted acceptance for the isolated RC-1 Preview (branch codex/rc1-validation only).
+# Never migrates, claims or touches production or shared staging. No secrets are used:
+# every write is synthetic and is gated by a read-only isolation check that proves the
+# commit, the dedicated database marker (staging), schema 0007, the restricted runtime
+# role and the web upstream first. Paid providers are not configured on this Preview.
+
+on:
+  push:
+    branches: [codex/rc1-validation]
+  workflow_dispatch:
+
+concurrency: rc1-hosted
+
+permissions:
+  contents: read
+
+env:
+  RC1_API: https://voxera-api-git-codex-rc1-validation-ai-e399.vercel.app
+  RC1_WEB: https://voxera-flow-git-codex-rc1-validation-ai-e399.vercel.app
+
+jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/codex/rc1-validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
+      - name: Wait for this commit's RC-1 deployments
+        run: node scripts/wait-for-deploy.mjs "$RC1_API" "$RC1_WEB" "${GITHUB_SHA::7}"
+      - name: Isolation gate (read-only; nothing is written unless this passes)
+        id: gate
+        run: node scripts/rc1-isolation.mjs "$RC1_API" "$RC1_WEB" "$GITHUB_SHA"
+      - name: API acceptance (auth, JWT, RBAC, tenant isolation, scheduling, security, reliability)
+        run: node scripts/rc1-acceptance.mjs "$RC1_API" "$RC1_WEB" "$GITHUB_SHA" rc1-acceptance.json
+      - name: Browser acceptance (real sign-up/sign-in, dashboards, setup assistant, clean-up)
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: BASE_URL="$RC1_WEB" node scripts/e2e-designs-live.mjs
+      - name: Accessibility (axe-core, WCAG 2.1 AA)
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: BASE_URL="$RC1_WEB" node scripts/rc1-a11y.mjs rc1-a11y.json
+      - name: Isolation unchanged after the suites
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: node scripts/rc1-isolation.mjs "$RC1_API" "$RC1_WEB" "$GITHUB_SHA"
+      - name: Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc1-hosted-evidence-${{ github.sha }}
+          path: |
+            apps/previews/rc1-acceptance.json
+            apps/previews/rc1-a11y.json
+          if-no-files-found: warn

@@ -44,6 +44,11 @@ def derive(secret: str, purpose: str) -> str:
 
 def hosted_overrides() -> dict[str, str]:
     """Settings implied by a hosted Postgres connection, or {} when none is attached."""
+    from .rc1_preview import configuration
+
+    rc1 = configuration()
+    if rc1 is not None:
+        return rc1
     pooled = _first("DATABASE_URL", "POSTGRES_URL")
     direct = _first("DATABASE_URL_UNPOOLED", "POSTGRES_URL_NON_POOLING") or pooled
     if not pooled or not direct:
@@ -59,6 +64,10 @@ def hosted_overrides() -> dict[str, str]:
 
 
 def migration_owner_url() -> str | None:
+    from .rc1_preview import active
+
+    if active():
+        raise ValueError("Migrations are forbidden in the RC-1 Preview runtime")
     direct = _first("DATABASE_URL_UNPOOLED", "POSTGRES_URL_NON_POOLING", "DATABASE_URL", "POSTGRES_URL")
     return _psycopg(direct) if direct and urlsplit(direct).password else None
 

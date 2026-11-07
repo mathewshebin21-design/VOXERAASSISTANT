@@ -175,3 +175,83 @@ def test_upgrade_of_a_claimed_database_stops_when_the_probe_cannot_complete(
         assert c.execute(text("SELECT environment FROM deployment_environment")).scalar() == "staging"
     assert role_logs_in(runtime_role, OLD_PASSWORD) and not role_logs_in(runtime_role, derived)
     assert "owner-dev-only" not in out and derived not in out
+
+
+# These faults deliberately carry synthetic credentials in both SQL and driver text.
+# The real transaction performs each preceding write, so the assertions below also
+# prove that the CLI error boundary does not swallow an exception before rollback.
+WRITE_FAILURE_HARNESS = """
+import importlib.util
+import sys
+
+from sqlalchemy.exc import ProgrammingError
+
+spec = importlib.util.spec_from_file_location("migrate_under_test", "scripts/migrate.py")
+migrate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(migrate)
+phase = sys.argv[1]
+
+
+def fail():
+    print("harness: injected write failure at " + phase, flush=True)
+    password = migrate.app_role_password()
+    raise ProgrammingError(
+        "ALTER ROLE voxera_app LOGIN PASSWORD '" + password + "'",
+        {},
+        RuntimeError("owner connection: " + migrate.migration_owner_url()),
+    )
+
+
+if phase == "role":
+    real_ensure = migrate.ensure_runtime_role
+    def ensure(c, database):
+        real_ensure(c, database)
+        fail()
+    migrate.ensure_runtime_role = ensure
+elif phase == "migration":
+    real_upgrade = migrate.command.upgrade
+    def upgrade(cfg, revision):
+        real_upgrade(cfg, revision)
+        fail()
+    migrate.command.upgrade = upgrade
+elif phase == "claim":
+    real_claimed = migrate.deploy_env.claimed
+    def claimed(c):
+        result = real_claimed(c)
+        if result is not None:
+            fail()
+        return result
+    migrate.deploy_env.claimed = claimed
+elif phase == "connection":
+    def create_engine(*args, **kwargs):
+        fail()
+    migrate.create_engine = create_engine
+else:
+    raise AssertionError("unknown harness phase")
+
+sys.exit(migrate.main(sys.argv[2:]))
+"""
+
+
+@pytest.mark.parametrize("phase", ["role", "migration", "claim", "connection"])
+def test_write_failures_are_redacted_and_roll_back(phase, fresh_db, runtime_role):
+    env, eng = fresh_db
+    root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        "-c",
+        WRITE_FAILURE_HARNESS,
+        phase,
+        "--env",
+        "staging",
+        "--claim-if-empty",
+        "--reset-runtime-role",
+    ]
+    r = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    out = r.stdout + r.stderr
+    assert f"injected write failure at {phase}" in out
+    assert r.returncode == 1 and "Error details are suppressed to protect credentials" in out
+    assert "Traceback" not in out and "ALTER ROLE" not in out and "owner connection:" not in out
+    assert "owner-dev-only" not in out and platform.derive("owner-dev-only", "app-role") not in out
+    assert tables(eng) == set()
+    assert role_logs_in(runtime_role, OLD_PASSWORD)

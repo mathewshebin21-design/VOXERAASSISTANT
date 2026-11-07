@@ -48,7 +48,7 @@ export function Btn({ variant = "ghost", className, ...p }: ButtonHTMLAttributes
       {...p}
       className={clsx(
         "inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-40",
-        variant === "primary" && "bg-cmd-violet text-white hover:bg-cmd-violet/85",
+        variant === "primary" && "bg-cmd-violet-strong text-white hover:bg-cmd-violet-strong/85",
         variant === "ghost" && "border border-cmd-line text-cmd-text hover:border-cmd-violet/60 hover:bg-cmd-raised",
         variant === "danger" && "border border-cmd-bad/40 text-cmd-bad hover:bg-cmd-bad/10",
         className,

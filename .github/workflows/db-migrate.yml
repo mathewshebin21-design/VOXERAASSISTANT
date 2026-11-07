@@ -10,7 +10,7 @@ on:
       environment:
         description: Which database
         type: choice
-        options: [staging, production]
+        options: [staging, production, rc1-validation]
         required: true
       action:
         description: check (no changes), upgrade, claim (first run on a database), downgrade
@@ -19,6 +19,9 @@ on:
         default: check
       confirm_host:
         description: For claim — the database host, typed back exactly
+        required: false
+      confirm_rc1_sha:
+        description: For isolated RC-1 claim only, repeat the approved full source SHA
         required: false
       downgrade_to:
         description: For downgrade — the revision to roll back to (e.g. 0006)
@@ -31,6 +34,7 @@ permissions:
 
 jobs:
   migrate:
+    if: inputs.environment != 'rc1-validation'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     defaults:
@@ -56,3 +60,40 @@ jobs:
             claim)     uv run python scripts/migrate.py --env "$ENVIRONMENT" --claim --confirm-host "$CONFIRM_HOST" ;;
             downgrade) uv run python scripts/migrate.py --env "$ENVIRONMENT" --downgrade-to "$DOWNGRADE_TO" --yes ;;
           esac
+
+  rc1-check:
+    if: inputs.environment == 'rc1-validation' && (inputs.action == 'check' || inputs.action == 'claim') && github.ref == 'refs/heads/codex/rc1-validation'
+    runs-on: ubuntu-latest
+    environment: rc1-validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: python -m unittest discover -s .github/scripts -p 'test_rc1_*.py'
+      - run: uv sync --frozen
+        working-directory: services/api
+      - name: Read-only RC-1 database identity
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          cd services/api
+          uv run python ../../.github/scripts/rc1_check.py
+      - name: Explicitly approved empty RC-1 claim
+        if: inputs.action == 'claim'
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          PGSSLMODE: require
+          APPROVED_SHA: ${{ inputs.confirm_rc1_sha }}
+          CONFIRM_HOST: ${{ inputs.confirm_host }}
+        run: |
+          python .github/scripts/rc1_claim_gate.py
+          cd services/api
+          uv run python scripts/migrate.py --env staging --claim-if-empty
+  rc1-refuse:
+    if: inputs.environment == 'rc1-validation' && ((inputs.action != 'check' && inputs.action != 'claim') || github.ref != 'refs/heads/codex/rc1-validation')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "RC-1 requires check or explicitly approved claim on the validation branch"; exit 1

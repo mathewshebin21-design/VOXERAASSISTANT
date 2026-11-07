@@ -7,6 +7,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .platform import hosted_overrides
+from .rc1_preview import active as rc1_active
 
 
 class Settings(BaseSettings):
@@ -81,7 +82,7 @@ def get_settings() -> Settings:
     s = Settings()
     # On a host that attaches a Postgres database (Vercel + Neon), fill in anything not set explicitly.
     for key, value in hosted_overrides().items():
-        if f"VOXERA_{key.upper()}" not in os.environ:
+        if rc1_active() or f"VOXERA_{key.upper()}" not in os.environ:
             setattr(s, key, SecretStr(value) if key == "jwt_secret" else value)
     s.assert_production_safe()
     return s

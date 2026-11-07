@@ -56,7 +56,7 @@ export default function Landing() {
             with every turn, tool call and outcome visible to operators.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/command/login" className="inline-flex items-center gap-2 rounded-md bg-cmd-violet px-5 py-2.5 font-medium text-white hover:bg-cmd-violet/85">Sign in or create a workspace <ArrowRight size={16} /></Link>
+            <Link href="/command/login" className="inline-flex items-center gap-2 rounded-md bg-cmd-violet-strong px-5 py-2.5 font-medium text-white hover:bg-cmd-violet-strong/85">Sign in or create a workspace <ArrowRight size={16} /></Link>
             <button onClick={() => { exploreDemo(); router.push("/command/ops"); }} className="inline-flex items-center gap-2 rounded-md border border-cmd-warn/60 px-5 py-2.5 text-cmd-warn hover:bg-cmd-warn/10">Explore with demo data</button>
             <Link href="/command/simulator" className="inline-flex items-center gap-2 rounded-md border border-cmd-line px-5 py-2.5 hover:border-cmd-cyan">Try the simulator</Link>
           </div>

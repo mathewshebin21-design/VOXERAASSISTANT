@@ -51,7 +51,7 @@ export function TranscriptView({ id }: { id: string }) {
           ) : (
             <>
               <div className="flex items-center gap-3 border-b border-cmd-line px-4 py-3">
-                <button onClick={() => { if (t >= end) setT(0); setPlaying((p) => !p); }} className="grid h-8 w-8 place-items-center rounded-full bg-cmd-violet text-white" aria-label={playing ? "Pause replay" : "Replay transcript"}>{playing ? <Pause size={14} /> : <Play size={14} />}</button>
+                <button onClick={() => { if (t >= end) setT(0); setPlaying((p) => !p); }} className="grid h-8 w-8 place-items-center rounded-full bg-cmd-violet-strong text-white" aria-label={playing ? "Pause replay" : "Replay transcript"}>{playing ? <Pause size={14} /> : <Play size={14} />}</button>
                 <input type="range" min={0} max={end} step={0.5} value={t} onChange={(e) => { setT(Number(e.target.value)); setPlaying(false); }} className="flex-1 accent-[rgb(var(--cmd-violet))]" aria-label="Transcript position" />
                 <span className="w-24 text-right font-mono text-xs text-cmd-mute">{fmtDuration(Math.floor(t))} / {fmtDuration(end)}</span>
               </div>

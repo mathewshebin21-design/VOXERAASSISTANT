@@ -123,3 +123,17 @@ def test_passwords_are_stored_hashed(make_account, owner_engine):
     with owner_engine.connect() as c:
         h = c.execute(text("SELECT password_hash FROM users")).scalar_one()
     assert h.startswith("$argon2id$") and "correct horse" not in h
+
+
+def test_unsigned_alg_none_token_is_rejected(client, make_account):
+    """A token with alg=none and no signature must never authenticate, even with valid claims."""
+    import base64
+    import json
+
+    a = make_account("alg-none@example.com")
+    _, payload, _ = a.tokens["access_token"].split(".")
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    for token in (f"{header}.{payload}.", f"{header}.{payload}"):
+        r = client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 401
+        assert "email" not in r.text
