@@ -17,6 +17,11 @@ export interface DesignInfo {
   home: string;
   preview: string;
   swatch: string;
+  /** Screenshot of the design's home screen (the labelled demo salon), in /public. */
+  shot: string;
+  /** Ring/accent colour used for this design on the chooser. */
+  accent: string;
+  features: string[];
   recommended?: boolean;
 }
 
@@ -29,6 +34,9 @@ export const DESIGNS: DesignInfo[] = [
     home: "/atelier/studio",
     preview: "/atelier",
     swatch: "from-[#faf7f1] via-[#e4ddd0] to-[#c9aa78]",
+    shot: "/designs/atelier.webp",
+    accent: "#c9aa78",
+    features: ["A plain-language summary of your day", "Diary, journal and callbacks at a glance", "Guided setup for your receptionist"],
     recommended: true,
   },
   {
@@ -39,6 +47,9 @@ export const DESIGNS: DesignInfo[] = [
     home: "/command/ops",
     preview: "/command",
     swatch: "from-[#09090c] via-[#1a1a21] to-[#8b5cf6]",
+    shot: "/designs/command.webp",
+    accent: "#8b5cf6",
+    features: ["Live call monitor and headline numbers", "Outcomes, intents and demand heatmaps", "Team, audit and billing in one place"],
   },
   {
     id: "flow",
@@ -48,6 +59,9 @@ export const DESIGNS: DesignInfo[] = [
     home: "/flow/app",
     preview: "/flow",
     swatch: "from-[#05050a] via-[#a78bfa] to-[#67e8f9]",
+    shot: "/designs/flow.webp",
+    accent: "#67e8f9",
+    features: ["Dashboards tailored to your business type", "A live view of the call in progress", "Visual tools for agents and call flows"],
   },
 ];
 
