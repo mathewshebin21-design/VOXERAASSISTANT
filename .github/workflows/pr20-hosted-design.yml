@@ -1,12 +1,14 @@
 name: PR20 hosted design selection
 
+# Hosted acceptance for PR #20 against its own isolated previews only (web -> PR #20 API ->
+# isolated Neon branch). Runs on every push to the PR branch, after Vercel has deployed that
+# commit. A manual dispatch is kept for re-runs once this file is on the default branch.
+# The targets are fixed below: never production, never shared staging.
+
 on:
+  push:
+    branches: [claude/design-selection]
   workflow_dispatch:
-    inputs:
-      base_url:
-        description: "PR20 web Preview HTTPS URL (must be Vercel preview, never production)"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -15,36 +17,37 @@ concurrency:
   group: pr20-hosted-design-selection
   cancel-in-progress: false
 
+env:
+  PR20_API: https://voxera-api-git-claude-design-selection-ai-e399.vercel.app
+  PR20_WEB: https://voxera-flow-git-claude-design-selection-ai-e399.vercel.app
+
 jobs:
   hosted-design-selection:
+    if: github.ref == 'refs/heads/claude/design-selection'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/previews
     steps:
       - uses: actions/checkout@v4
-      - name: Restrict test to the approved PR20 preview hostname
-        env:
-          BASE_URL: ${{ inputs.base_url }}
-        run: |
-          python - <<'PY'
-          import os
-          from urllib.parse import urlsplit
-          url = urlsplit(os.environ["BASE_URL"])
-          assert url.scheme == "https", "HTTPS required"
-          assert url.hostname == "voxera-flow-git-claude-design-selection-ai-e399.vercel.app", "Only the isolated PR20 web preview is allowed"
-          assert not url.username and not url.password and not url.port and not url.path.strip("/") and not url.query and not url.fragment, "Only the exact preview origin is allowed"
-          PY
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - name: Install browser test dependencies
-        working-directory: apps/previews
         run: |
           npm ci
+          npm i --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
-      - name: Test hosted design chooser, persistence, RBAC and cleanup
-        working-directory: apps/previews
-        env:
-          BASE_URL: ${{ inputs.base_url }}
-        run: node scripts/e2e-design-select.mjs
+      - name: Wait for this commit's PR20 deployments
+        run: node scripts/wait-for-deploy.mjs "$PR20_API" "$PR20_WEB" "${GITHUB_SHA::7}"
+      - name: Isolation gate (routing and database separation; nothing else runs unless this passes)
+        id: gate
+        run: node scripts/pr20-isolation.mjs "$PR20_API" "$PR20_WEB" "$GITHUB_SHA"
+      - name: Design chooser, persistence, owner/member permissions, switching, demo labels, clean-up
+        run: BASE_URL="$PR20_WEB" node scripts/e2e-design-select.mjs
+      - name: Isolation unchanged after the suite
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: node scripts/pr20-isolation.mjs "$PR20_API" "$PR20_WEB" "$GITHUB_SHA"
