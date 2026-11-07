@@ -1,0 +1,50 @@
+name: PR20 hosted design selection
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "PR20 web Preview HTTPS URL (must be Vercel preview, never production)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr20-hosted-design-selection
+  cancel-in-progress: false
+
+jobs:
+  hosted-design-selection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restrict test to the approved PR20 preview hostname
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          url = urlsplit(os.environ["BASE_URL"])
+          assert url.scheme == "https", "HTTPS required"
+          assert url.hostname == "voxera-flow-git-claude-design-selection-ai-e399.vercel.app", "Only the isolated PR20 web preview is allowed"
+          assert not url.username and not url.password and not url.port and not url.path.strip("/") and not url.query and not url.fragment, "Only the exact preview origin is allowed"
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: apps/previews
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Test hosted design chooser, persistence, RBAC and cleanup
+        working-directory: apps/previews
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: node scripts/e2e-design-select.mjs
