@@ -97,7 +97,8 @@ def test_data_residency_is_never_relaxed_by_a_fallback():
 
 
 def test_free_only_workspaces_never_route_to_paid_providers():
-    r = select_route("en-GB", policy(allow_paid=False, allow_unverified=True))
+    free = frozenset({"browser-stt", "standin-llm", "kokoro"})  # the only free model is the test stand-in
+    r = select_route("en-GB", policy(allow_paid=False, allow_unverified=True), available=free | {"anthropic"})
     for pid in (r.stt, r.llm, r.tts):
         assert not L.PROVIDERS[pid].paid
 
@@ -234,3 +235,15 @@ def test_brain_replies_in_the_callers_language_without_breaking_the_cache(make_a
     assert "Hindi" not in plain[-1]["text"] and "Reply in Hindi" in hindi[-1]["text"]
     bad = {"request_id": "lang-bad-0001", "language": "xx-YY", "messages": [{"role": "user", "text": "Hi"}]}
     assert a.post(a.o("/live/brain"), json=bad).status_code == 422
+
+
+def test_stand_ins_are_invisible_unless_configured():
+    with pytest.raises(NoCompliantRoute) as e:
+        select_route("en-GB", policy(), available=frozenset({"browser-stt", "kokoro"}))
+    assert "standin" not in str(e.value.gaps)
+    r = select_route(
+        "en-GB",
+        policy(allow_unverified=True),
+        available=frozenset({"standin-stt", "standin-llm", "standin-tts"}),
+    )
+    assert (r.stt, r.llm, r.tts) == ("standin-stt", "standin-llm", "standin-tts")

@@ -105,6 +105,8 @@ def _pick(
     for p in PROVIDERS.values():
         if p.kind is not kind:
             continue
+        if p.id.startswith("standin") and (available is None or p.id not in available):
+            continue  # test-only stand-ins exist only where a test environment configures them
         if (reason := eligible(p, policy, available)) is not None:
             why_not.append(f"{p.id} {reason}")
         elif p.support(locale) not in accepted:
