@@ -124,3 +124,34 @@ def test_live_mode_is_refused_until_the_country_passes_its_launch_review(worker,
     assert r.status_code == 200
     with pytest.raises(worker_auth.WorkerAuthError):
         worker_auth.mint(uuid.UUID(a.org_id), mode="production")
+
+
+def test_a_telephone_call_can_never_use_test_mode(worker):
+    org = uuid.uuid4()
+    with pytest.raises(worker_auth.WorkerAuthError, match="live token"):
+        worker_auth.mint(org, mode="test", channel="phone")
+    assert worker_auth.verify(worker_auth.mint(org, mode="live", channel="phone")) == (org, "live")
+    # A hand-made token claiming a phone channel in test mode, correctly signed: still refused.
+    now = int(datetime.now(UTC).timestamp())
+    crafted = {
+        "iss": "voxera-api",
+        "aud": "voxera-worker-brain",
+        "org": str(org),
+        "scope": "live:brain",
+        "iat": now,
+        "exp": now + 60,
+        "mode": "test",
+        "channel": "phone",
+    }
+    with pytest.raises(worker_auth.WorkerAuthError, match="live token"):
+        worker_auth.verify(jwt.encode(crafted, SECRET, algorithm="HS256"))
+    missing = {k: v for k, v in crafted.items() if k != "channel"} | {"mode": "test"}
+    with pytest.raises(worker_auth.WorkerAuthError):
+        worker_auth.verify(jwt.encode(missing, SECRET, algorithm="HS256"))
+
+
+def test_a_live_phone_token_is_still_launch_gated(worker, live, make_account):  # noqa: F811
+    a = make_account("a@example.com")
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone")
+    r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
+    assert r.status_code == 403 and live["llm_requests"] == []

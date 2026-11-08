@@ -27,6 +27,7 @@ from collections.abc import AsyncIterable
 from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, llm
 
 from .brain import BrainClient
+from .guard import refusal
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
 
@@ -61,8 +62,13 @@ class VoxeraAgent(Agent):
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
+    caller = await ctx.wait_for_participant()
     cmd = os.environ.get("VOXERA_WORKER_TOKEN_CMD")
     tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
+    if (why := refusal(caller, await tokens.get())) is not None:
+        log.warning("refusing call", extra={"reason": why})
+        ctx.shutdown(reason=why)  # never answer a real caller with a test token (launch gate)
+        return
     brain = BrainClient(os.environ["VOXERA_API_URL"], "", tokens, worker=True)
     accepted = tuple(os.environ.get("VOXERA_LANGUAGES", "en-GB").split(","))
     call = CallSession(brain, language=LanguageGate(accepted=accepted, current=accepted[0]))

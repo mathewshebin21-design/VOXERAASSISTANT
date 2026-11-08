@@ -276,3 +276,26 @@ async def test_a_second_401_is_a_failed_turn_not_a_loop():
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     s = CallSession(BrainClient("http://api.test", "", TokenSource(fetch), http, worker=True))
     assert await say(s, "Hi") == RECOVERY and len(calls) == 2
+
+
+# ---- launch gate on the worker -----------------------------------------------------------------
+
+
+def test_a_telephone_caller_is_never_answered_with_a_test_token():
+    from types import SimpleNamespace
+
+    from voxera_worker.guard import SIP_KIND, refusal
+
+    def token(**claims):
+        import base64
+
+        body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        return f"x.{body}.sig"
+
+    phone = SimpleNamespace(kind=SIP_KIND)
+    browser = SimpleNamespace(kind=0)
+    assert refusal(phone, token(mode="test", channel="simulated"))
+    assert refusal(phone, token(mode="live", channel="simulated"))
+    assert refusal(phone, "garbage")
+    assert refusal(phone, token(mode="live", channel="phone")) is None
+    assert refusal(browser, token(mode="test", channel="simulated")) is None

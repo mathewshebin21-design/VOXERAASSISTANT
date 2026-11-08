@@ -1,8 +1,14 @@
 # Launch checklist per country (real callers)
 
 A business's country comes from its workspace locale. **Live calls are refused** for a workspace
-whose country has not passed every check below. A `live` worker token gets HTTP 403. Test tokens,
-used for simulated and internal calls, are unaffected.
+whose country has not passed every check below. A `live` worker token gets HTTP 403.
+
+**Test mode cannot be used to get round the gate:**
+- **API:** a worker token for the `phone` channel must be `live`. Minting refuses `test` + `phone`,
+  and a correctly signed hand-made token claiming it is refused too.
+- **Worker:** where the call is actually visible, the worker refuses to answer a telephone (SIP)
+  participant unless it holds a `live` `phone` token (`voxera_worker/guard.py`). Test tokens can
+  only serve simulated and browser calls.
 
 The gate is code: `services/api/app/voice/launch.py`. A sign-off is a reviewed change to
 `SIGN_OFFS`. Each sign-off names a check, who signed it, the date and the evidence. A sign-off
