@@ -36,6 +36,26 @@ in production at `667eec1` (item 16).**
 | 16 | Customer-workflow acceptance in production (RC-1 review requirement) | Verified | Run 42464039694 against `667eec1`: 108 passed, 0 test failures, 0 clean-up failures; 4 synthetic accounts and workspaces deleted and refused sign-in. Artifact 13611066471. Record: `docs/phase1-production-acceptance.md` |
 | 17 | Agent Studio (PR #2) scope | Provisional: Phase 2 | Unmerged; targets an old branch. Classified as Phase 2 pending the owner's master roadmap |
 
+## Phase 2: voice foundation and VOXERA Global
+
+Updated 2026-11-08. Production at `0b04695`. Items 18–19 are in production; items 20 onwards are on
+development branches with CI evidence and need owner approval before any migration, merge or paid
+run. All voice results are **simulated** (stand-in providers); none is a real-call measurement.
+
+| # | Item | Status | Evidence / blocker |
+|---|------|--------|--------------------|
+| 18 | Prompt caching, shared connections, turn metrics (PR #25) | Verified (production) | Merge `cb72269`; preflight passed, `/healthz` `cb72269`, `/readyz` 200 |
+| 19 | Scripted-call harness, ADR-0005 (PR #26) | Verified (production) | Merge `0b04695`; API `dpl_ERMVK1m3fPoAbXuPA6TcU6v22o3d` READY; preflight at 0009 |
+| 20 | Shared Postgres rate limiter, migration 0010 (PR #27) | Branch, CI green | 19 tests; local clone rehearsal 350/0. **Blocked:** migration approval; preview refused by schema gate (expected) |
+| 21 | Call records and simulated calls, migration 0011 (PR #28) | Branch, CI green | 25 tests; harness records every scenario. **Blocked:** migration approval |
+| 22 | Dedicated validation databases for #27/#28 | Prepared, read-only verified | Neon `br-divine-poetry-zaxsxbs0` (→0011), `br-red-cherry-zaxx9s1o` (→0010), both claim `staging` at 0009. **Blocked:** migration and six branch-scoped Vercel variables need approval (`docs/phase-2-validation-environment.md`) |
+| 23 | ADR-0006 VOXERA Global; implementation inventory | Proposed | `docs/decisions/ADR-0006-voxera-global.md`, `docs/phase-2-global-inventory.md` |
+| 24 | Language registry, evidence levels, policy routing, language state | Branch `claude/phase2-global` | 25 tests incl. data-residency never relaxed by fallback; nothing marked `tested` |
+| 25 | Languages API, route preview, per-turn language in the brain | Branch `claude/phase2-global` | Cached prefix byte-identical with a language set (test) |
+| 26 | Voice-worker prototype (LiveKit Agents adapter) | Branch `claude/phase2-global` | 13 session tests; adapter run against livekit-agents 1.8.11; stand-in call through the real API (3 turns, switch to Hindi, context kept). **Blocked for hosting:** LiveKit and worker hosting approval |
+| 27 | Multilingual harness (hi, ml, ar, switching, Hinglish) | Branch `claude/phase2-global` | 12/12 stand-in scenarios (plumbing only) |
+| 28 | Real-model, real-audio and telephony validation (Sprint E) | Not run | Needs paid keys with caps, hosting and a test number: owner approval |
+
 ## Defects found and fixed in this phase
 
 | ID | Defect | Fix | Regression test |
