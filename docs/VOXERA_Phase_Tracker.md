@@ -59,6 +59,7 @@ run. All voice results are **simulated** (stand-in providers); none is a real-ca
 | 31 | Languages page (registry, route preview, providers) | Branch `claude/phase2-global` | `5414e21`; browser e2e 8/8 against the real API; in the integration workflow |
 | 32 | Multilingual safety scenarios (injection in ar/ml, yes-before-booking in hi, emergency by business country) | Branch `claude/phase2-global` | `797c3a1`; harness 17/17 stand-in scenarios (plumbing); API test: UAE business gives UAE numbers whatever the caller speaks |
 | 33 | Launch gate per country; live worker tokens refused until signed off | Branch `claude/phase2-global` | `app/voice/launch.py`; no country signed off; `docs/launch-country-checklist.md`; Languages page shows outstanding checks (browser e2e 9/9) |
+| 34 | The voice worker records its own calls into call records | Branch `claude/phase2-worker-recording` (combines #28 and #29) | `/v1/worker/calls`; channel from the token; one writer in spoken order; 11 API tests (12 cases) and 9 worker tests; stand-in call recorded and read back (simulated) |
 | 28 | Real-model, real-audio and telephony validation (Sprint E) | Not run | Needs paid keys with caps, hosting and a test number: owner approval |
 
 ## Defects found and fixed in this phase

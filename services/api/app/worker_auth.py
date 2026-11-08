@@ -87,6 +87,12 @@ def _check_channel(mode: str, channel: object) -> None:
 
 def verify(token: str) -> tuple[uuid.UUID, str]:
     """The workspace the token is for and its mode. Raises WorkerAuthError for anything else."""
+    org, mode, _ = read(token)
+    return org, mode
+
+
+def read(token: str) -> tuple[uuid.UUID, str, str]:
+    """The workspace, mode and channel of a valid token. Raises WorkerAuthError for anything else."""
     secret = _secret()
     if secret is None:
         raise WorkerAuthError("Worker credentials are not enabled")
@@ -109,6 +115,6 @@ def verify(token: str) -> tuple[uuid.UUID, str]:
     if claims["exp"] - claims["iat"] > MAX_TTL.total_seconds():
         raise WorkerAuthError("Token lifetime too long")
     try:
-        return uuid.UUID(claims["org"]), claims["mode"]
+        return uuid.UUID(claims["org"]), claims["mode"], claims["channel"]
     except (ValueError, TypeError):
         raise WorkerAuthError("Invalid workspace in token") from None

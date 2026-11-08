@@ -14,6 +14,9 @@ Rules from ADR-0005 implemented here:
 - **Call limit:** after ``max_call_seconds`` the session closes politely.
 - **Language:** the caller's language is tracked with confirmation (two confident detections, or
   the caller's own choice) and sent with each turn; history is never altered by a switch.
+- **Call record:** with a ``CallRecorder``, ``begin()`` opens the call record, every finished turn is
+  written in spoken order (``turn_events``), and ``finish()`` closes it with an outcome taken from
+  what actually happened (``call_outcome``). Recording never delays or breaks the call.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 from .brain import BrainClient, BrainError, TurnEvents
+from .recording import CallRecorder
 
 FILLER = "One moment, I'm just checking that."
 RECOVERY = "Sorry, I'm having a little trouble with that. Could you say it again?"
@@ -48,6 +52,7 @@ class TurnRecord:
     tools: list[dict] = field(default_factory=list)
     language: str = ""
     server_metrics: dict = field(default_factory=dict)
+    handoff: dict | None = None
 
 
 @dataclass
@@ -95,6 +100,7 @@ class CallSession:
         max_failures: int = 2,
         max_call_seconds: float = 15 * 60,
         on_handoff: Callable[[dict], None] | None = None,
+        recorder: CallRecorder | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.brain = brain
@@ -102,6 +108,7 @@ class CallSession:
         self.filler_after, self.turn_deadline = filler_after, turn_deadline
         self.max_failures, self.max_call_seconds = max_failures, max_call_seconds
         self.on_handoff = on_handoff
+        self.recorder = recorder
         self.clock = clock
         self.conversation_id = f"call-{uuid.uuid4().hex[:16]}"
         self.started = clock()
@@ -149,6 +156,8 @@ class CallSession:
             if rec.reply:
                 spoken = rec.reply + (" …" if rec.outcome == "interrupted" else "")
                 self.history.append({"role": "assistant", "text": spoken})
+            if self.recorder is not None:
+                self.recorder.add(turn_events(rec))
 
     async def _brain_turn(self, rec: TurnRecord) -> AsyncIterator[str]:
         events = TurnEvents()
@@ -188,6 +197,7 @@ class CallSession:
             self.failures = 0
             rec.tools, rec.server_metrics, rec.first_text_ms = events.tools, events.metrics, events.first_text_ms
             if events.handoff:
+                rec.handoff = events.handoff
                 self.handoffs.append(events.handoff)
                 if self.on_handoff:
                     self.on_handoff(events.handoff)
@@ -212,6 +222,36 @@ class CallSession:
         n = len(self.message)
         return MESSAGE_STEPS[n - 1] if n <= len(MESSAGE_STEPS) else MESSAGE_DONE
 
+    # ---- the call record ---------------------------------------------------------------------
+
+    async def begin(
+        self,
+        *,
+        external_ref: str | None = None,
+        caller_number: str | None = None,
+        ai_disclosure_played: bool = False,
+        recording_notice_played: bool = False,
+    ) -> str | None:
+        """Opens the call record. Report only notices that were actually played: without the
+        recording notice the API keeps the call's events but not the words."""
+        if self.recorder is None:
+            return None
+        return await self.recorder.start(
+            external_ref=external_ref,
+            caller_number=caller_number,
+            ai_disclosure_played=ai_disclosure_played,
+            recording_notice_played=recording_notice_played,
+        )
+
+    async def finish(self, reason: str = "caller hung up") -> None:
+        """Closes the call record once the call is over (waits for queued writes)."""
+        if self.recorder is None:
+            return
+        status, outcome = call_outcome(self)
+        if self.closed:
+            reason = "time limit reached"
+        await self.recorder.end(status, outcome, reason)
+
     # ---- reporting -----------------------------------------------------------------------------
 
     def summary(self) -> dict:
@@ -226,3 +266,54 @@ class CallSession:
             "language": self.language.current,
             "first_text_ms_max": max(firsts) if firsts else None,
         }
+
+
+# ---- call record helpers (pure) ---------------------------------------------------------------
+
+_TOOL_OUTCOME = {"book_appointment": "booked", "cancel_appointment": "cancelled", "take_message": "message_taken"}
+_HANDOFF_OUTCOME = {"transferred": "transferred", "queued": "message_taken", "callback": "message_taken"}
+_MAX_TOOLS_PER_TURN = 20
+
+
+def turn_events(rec: TurnRecord) -> list[dict]:
+    """One turn as call-record events, in the order they were heard. Worker lines are marked as such;
+    tool results are never included (only the tool's name and whether it worked)."""
+    caller: dict = {"kind": "utterance", "speaker": "caller", "text": rec.caller[:4000]}
+    if rec.language:
+        caller["data"] = {"language": rec.language}
+    out = [caller]
+    worker = {"kind": "utterance", "speaker": "agent", "text": rec.worker_line[:4000]}
+    worker["data"] = {"by": "worker", "outcome": rec.outcome}
+    if rec.worker_line and rec.outcome == "filler_then_done":
+        out.append(worker)  # the holding line came before the reply
+    out += [{"kind": "tool", "speaker": "agent", "data": t} for t in rec.tools[:_MAX_TOOLS_PER_TURN]]
+    if rec.handoff:
+        out.append({"kind": "handoff", "speaker": "agent", "data": {"outcome": rec.handoff.get("outcome")}})
+    if rec.reply:
+        data: dict = {"first_text_ms": rec.first_text_ms, "total_ms": rec.total_ms}
+        if rec.outcome == "interrupted":
+            data["interrupted"] = True
+        if rec.server_metrics:
+            data["metrics"] = rec.server_metrics
+        out.append({"kind": "utterance", "speaker": "agent", "text": rec.reply[:4000], "data": data})
+    if rec.outcome in ("failed", "timeout"):
+        out.append({"kind": "error", "speaker": "system", "data": {"outcome": rec.outcome}})
+    if rec.worker_line and rec.outcome != "filler_then_done":
+        out.append(worker)
+    return out
+
+
+def call_outcome(session: CallSession) -> tuple[str, str | None]:
+    """(status, outcome) for the call record, from what actually happened on the call."""
+    answered = any(t.reply for t in session.turns)
+    for t in reversed(session.turns):  # the latest decisive action wins
+        if t.handoff and t.handoff.get("outcome") in _HANDOFF_OUTCOME:
+            return "completed", _HANDOFF_OUTCOME[t.handoff["outcome"]]
+        for tool in reversed(t.tools):
+            if tool.get("ok") and tool.get("name") in _TOOL_OUTCOME:
+                return "completed", _TOOL_OUTCOME[tool["name"]]
+    if session.message_mode:
+        return "completed", "message_taken" if session.message else "no_action"
+    if not answered and session.failures:
+        return "failed", None
+    return "completed", "answered" if answered else "no_action"
