@@ -1,6 +1,11 @@
 # Release procedure: PR #20 (design selection) — production schema 0007 → 0009
 
-Status: **rehearsed, not authorised.** Nothing in this document has been run against production.
+**Status update, 2026-11-08: released.** PR #20 merged as `dd29ca1` and deployed to production
+(API `dpl_EF3sA2hLu3t4XenobFqUWQDsDb9f`, web `dpl_JD731LPMjNcYqhM6egAYsj28LsZU`). The production
+database was already at 0009 when it merged. The follow-up release is recorded in
+`docs/release-pr21.md`. The original status below is kept as written.
+
+Status (as written before release): **rehearsed, not authorised.** Nothing in this document has been run against production.
 
 ## What changes
 

@@ -21,6 +21,18 @@ Updated 2026-11-06. Validation branch `codex/rc1-validation` at `ad98ff6`. **Pha
 | 10 | Hosted synthetic acceptance | Verified | `rc1-hosted` run 42297447382 (`ad98ff6`): API 104/104 (5 notes), browser 14/14, accessibility 6/6 pages with 0 violations, synthetic accounts deleted. Evidence artifact `rc1-hosted-evidence-ad98ff6…` (ID 13542159106). Matrix: `docs/rc1-hosted-acceptance-matrix.md` |
 | 11 | Production isolation | Verified (unchanged) | No production deploy, claim, migration or setting change in this phase |
 
+## Phase 0/1 completion: production releases
+
+Updated 2026-11-08. **Phase 0/1 is complete: design selection and authenticated design navigation
+are released and verified in production at `931138e`.**
+
+| # | Item | Status | Evidence / blocker |
+|---|------|--------|--------------------|
+| 12 | PR #20 design selection (schema 0009) in production | Verified | Merge `dd29ca1`; production API `dpl_EF3sA2hLu3t4XenobFqUWQDsDb9f` (2026-11-07 18:49 UTC). Procedure: `docs/release-pr20-design-selection.md` |
+| 13 | PR #21 authenticated design navigation, no silent demo data | Verified | Merge `931138e`; production API `dpl_8gt2Pfqf9dbuLM58RQSDPY3U8GkE`, web `dpl_FZYuDuaSjXK35Z4pNnBcEpPQDUyR`. All six release gates passed. Production smoke 13/13 (run 42459985605) with probe clean-up proven; hosted acceptance 28/28 (run 42458272416). Record: `docs/release-pr21.md` |
+| 14 | Rollback candidates retained | Verified | `dd29ca1` deployments: API `dpl_EF3sA2hLu3t4XenobFqUWQDsDb9f`, web `dpl_JD731LPMjNcYqhM6egAYsj28LsZU` |
+| 15 | PR #21 temporary infrastructure clean-up | Pending owner approval | Dependency review and resource list in `docs/release-pr21.md` → "Infrastructure clean-up record". RC-1 variables stay unchanged |
+
 ## Defects found and fixed in this phase
 
 | ID | Defect | Fix | Regression test |
