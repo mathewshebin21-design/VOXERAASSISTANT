@@ -13,7 +13,7 @@ const staff = { name: "Tom Reid", email: `staff-${run}@design.example`, org: `Re
 
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
-const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
+const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false && typeof r !== "string", typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
 
 const browser = await chromium.launch();
 const ctxA = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -218,10 +218,47 @@ await step("if the workspace list fails, the chooser says so and recovers on ret
   return signedOutShown === 0;
 });
 
-await step("clean-up: delete both test accounts and their workspaces", async () => {
+// Each of the three designs, once selected, must survive a reload and a full re-authentication
+// (a fresh browser context with no cookies or local storage, signing in again). A dedicated
+// account keeps its three sign-ins under the API's per-account limit of five a minute.
+const landed = (p, path) => p.waitForURL(`**${path}`, { timeout: 15000 }).then(() => true, () => false);
+const HOME = { command: "/command/ops", atelier: "/atelier/studio", flow: "/flow/app" };
+const member = { name: "Ana Ruiz", email: `persist-${run}@design.example`, org: `Ruiz Studio ${run}` };
+const m = await fresh();
+let memberOrg = "";
+await step("a third account creates its own workspace for the persistence checks", async () => {
+  await createWorkspace(m, member);
+  await m.waitForURL("**/start/design?new=1", { timeout: 15000 });
+  memberOrg = (await call(m, "GET", "/me/organizations")).json[0].organization.id;
+  return Boolean(memberOrg);
+});
+for (const design of ["command", "atelier", "flow"]) {
+  await step(`${design} persists after a reload and after signing in again`, async () => {
+    const set = await call(m, "PUT", `/orgs/${memberOrg}/design/me`, { design });
+    if (set.status !== 200) return `select ${set.status}`;
+    await m.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+    await m.reload({ waitUntil: "networkidle" });
+    if (!(await landed(m, HOME[design]))) return `after reload: ${new URL(m.url()).pathname}`;
+    const p = await fresh();
+    try {
+      await p.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+      await p.getByLabel("Email").fill(member.email);
+      await p.getByLabel("Password").fill(PW);
+      await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+      if (!(await landed(p, HOME[design]))) return `after signing in again: ${new URL(p.url()).pathname}`;
+      const d = (await call(p, "GET", `/orgs/${memberOrg}/design`)).json;
+      return d.effective === design && d.my_override === design ? true : `effective ${d.effective}`;
+    } finally {
+      await p.context().close();
+    }
+  });
+}
+
+await step("clean-up: delete all test accounts and their workspaces", async () => {
   const s = await call(b, "DELETE", "/me", { password: PW });
   const o = await call(a, "DELETE", "/me", { password: PW });
-  return s.status === 204 && o.status === 204;
+  const r = memberOrg ? (await call(m, "DELETE", "/me", { password: PW })).status : 204;
+  return s.status === 204 && o.status === 204 && r === 204 ? true : `deleted ${s.status}/${o.status}/${r}`;
 });
 
 await browser.close();
