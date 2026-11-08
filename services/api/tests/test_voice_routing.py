@@ -12,6 +12,8 @@ from app.voice.routing import (
     select_route,
 )
 
+from .test_live import live  # noqa: F401  (fixture)
+
 ALL = frozenset({"device", "uk", "eu", "us", "global"})
 
 
@@ -169,3 +171,66 @@ def test_language_instruction_only_for_other_languages():
     assert language_instruction("en-GB") is None
     line = language_instruction("hi-IN")
     assert "Hindi" in line and "हिन्दी" in line and "English" in line
+
+
+# ---- API --------------------------------------------------------------------------------------
+
+
+def test_languages_endpoint_reports_evidence_and_configuration(make_account):
+    a = make_account("ada@example.com")
+    r = a.get(a.o("/voice/languages"))
+    assert r.status_code == 200
+    body = r.json()
+    codes = {row["code"] for row in body["languages"]}
+    assert {"en-GB", "hi-IN", "ml-IN", "ar-SA"} <= codes
+    by_id = {p["id"]: p for p in body["providers"]}
+    assert "standin-stt" not in by_id and by_id["deepgram"]["integrated"] is False
+    assert by_id["kokoro"]["configured"] and not by_id["anthropic"]["configured"]  # no key in tests
+
+
+def test_route_preview_respects_configuration_and_policy(make_account):
+    a = make_account("ada@example.com")
+    # No language-model key is configured in tests, so nothing is routable, with the reason.
+    r = a.post(a.o("/voice/route"), json={"language": "en-GB", "allow_paid": True}).json()
+    assert r["routable"] is False and "not configured" in r["gaps"]["llm"]
+    assert a.post(a.o("/voice/route"), json={"language": "xx-YY"}).status_code == 422
+    bad = {"language": "hi-IN", "default_language": "hi-IN", "languages": ["en-GB"]}
+    assert a.post(a.o("/voice/route"), json=bad).status_code == 422
+
+
+def test_route_preview_with_a_configured_model(make_account, monkeypatch):
+    from app.routers import languages as api
+
+    monkeypatch.setattr(api, "configured_providers", lambda: frozenset({"browser-stt", "anthropic", "kokoro"}))
+    a = make_account("ada@example.com")
+    body = {"language": "hi-IN", "languages": ["en-GB", "hi-IN"], "allow_paid": True}
+    r = a.post(a.o("/voice/route"), json=body).json()
+    # Hindi speech output is not available from Kokoro, so the call falls back to English, and says so.
+    assert r["routable"] and r["language"] == "en-GB" and r["language_fallback"]
+    assert r["tts"] == "kokoro" and r["llm"] == "anthropic"
+
+
+def test_another_workspace_member_check_applies(make_account):
+    a, b = make_account("a@example.com"), make_account("b@example.com")
+    assert b.get(a.o("/voice/languages")).status_code in (403, 404)
+
+
+def test_brain_replies_in_the_callers_language_without_breaking_the_cache(make_account, live):  # noqa: F811
+    import json as _json
+
+    from .test_live import message, setup_business
+
+    a = make_account("ada@example.com")
+    setup_business(a)
+    reply = message([("text", {"parts": ["नमस्ते"]})], "end_turn", 50, 4)
+    live["llm"] = [(200, reply), (200, reply)]
+    for lang in (None, "hi-IN"):
+        body = {"request_id": f"lang-{lang or 'none'}-01", "messages": [{"role": "user", "text": "Namaste"}]}
+        if lang:
+            body["language"] = lang
+        assert a.post(a.o("/live/brain"), json=body).status_code == 200
+    plain, hindi = (_json.loads(r.content)["system"] for r in live["llm_requests"])
+    assert plain[0] == hindi[0] and "cache_control" in hindi[0]  # cached prefix unchanged
+    assert "Hindi" not in plain[-1]["text"] and "Reply in Hindi" in hindi[-1]["text"]
+    bad = {"request_id": "lang-bad-0001", "language": "xx-YY", "messages": [{"role": "user", "text": "Hi"}]}
+    assert a.post(a.o("/live/brain"), json=bad).status_code == 422

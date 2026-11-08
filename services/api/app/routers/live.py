@@ -30,6 +30,8 @@ from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool,
 from ..models import UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
+from ..voice.languages import LANGUAGES
+from ..voice.routing import language_instruction
 
 log = logging.getLogger("voxera.live")
 router = APIRouter(prefix="/v1/orgs/{org_id}/live", tags=["live"])
@@ -51,6 +53,9 @@ class BrainIn(Strict):
     # One id per call: makes bookings idempotent if a turn is retried.
     conversation_id: RequestId | None = None
     messages: list[LiveMessage] = Field(min_length=1, max_length=40)
+    # The language the call is being conducted in (BCP 47, from the language registry). The model
+    # replies directly in it; the instruction sits after the cache breakpoint, like the clock.
+    language: str | None = Field(None, pattern=r"^[a-z]{2,3}-[A-Z]{2}$")
 
 
 class TtsIn(Strict):
@@ -190,6 +195,11 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
             yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
 
     system = system_prompt(bctx)
+    if body.language is not None:
+        if body.language not in LANGUAGES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown language")
+        if (line := language_instruction(body.language)) is not None:
+            system += "\n" + line  # after the clock line, so in the per-turn (uncached) block
     # Hold this turn's worst case against the monthly caps before calling the provider (atomic).
     allowance = turn_allowance(system, TOOLS, msgs)
     budget_mod.reserve(db, org_id, UsageKind.llm_tokens, allowance, f"llm-{body.request_id}")
