@@ -18,7 +18,8 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "request_id": request_id_var.get(),
         }
-        for key in ("method", "path", "status", "duration_ms", "client"):
+        # "metrics" carries numbers and flags only (timings, token and connection counts), never content.
+        for key in ("method", "path", "status", "duration_ms", "client", "metrics"):
             if hasattr(record, key):
                 data[key] = getattr(record, key)
         if record.exc_info:

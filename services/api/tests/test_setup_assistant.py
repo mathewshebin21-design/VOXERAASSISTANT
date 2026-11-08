@@ -145,7 +145,9 @@ def test_streams_a_setup_turn_with_tools(make_account, live):  # noqa: F811
     assert [e["type"] for e in ev] == ["tool", "text", "text", "done"]
     assert ev[0]["name"] == "get_setup_state" and ev[0]["ok"] and "EW Saloon" in ev[0]["result"]
     first = json.loads(live["llm_requests"][0].content)
-    assert "setup assistant" in first["system"] and "EW Saloon" in first["system"]
+    system = " ".join(b["text"] for b in first["system"])
+    assert "setup assistant" in system and "EW Saloon" in system
+    assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert {t["name"] for t in first["tools"]} == {t["name"] for t in setup_agent.TOOLS}
     assert get_settings().anthropic_api_key == SecretStr("sk-test")
 

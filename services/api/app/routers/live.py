@@ -4,11 +4,13 @@ Provider keys stay on the server. Nothing is called unless a key AND a non-zero 
 configured (see app/config.py). Transcripts are not stored: only metered usage is.
 """
 
+import contextlib
 import json
 import logging
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import asdict, dataclass
 from typing import Annotated, Literal
 
 import anthropic
@@ -24,7 +26,7 @@ from ..deps import DB, OrgContext, require
 from ..live import budget as budget_mod
 from ..live import providers, setup_agent, toolcheck
 from ..live.budget import budget
-from ..live.receptionist import TOOLS, Turn, load_context, run_tool, system_prompt
+from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool, system_prompt
 from ..models import UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
@@ -100,6 +102,59 @@ def greeting(ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB) ->
 
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+def system_blocks(system: str) -> list[dict]:
+    """The system prompt as cacheable blocks: the stable instructions carry the cache breakpoint
+    (which also covers the tool definitions, sent before the system prompt), and the clock line,
+    which changes every minute, comes after it so it never invalidates the cached prefix."""
+    head, sep, tail = system.rpartition("\n\n" + CLOCK_LINE)
+    stable, clock = (head, CLOCK_LINE + tail) if sep else (system, "")
+    blocks: list[dict] = [{"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}}]
+    if clock:
+        blocks.append({"type": "text", "text": clock})
+    return blocks
+
+
+@dataclass
+class TurnMetrics:
+    """What one caller turn cost and how long it took, as far as the provider reports it."""
+
+    rounds: int = 0
+    input_tokens: int = 0  # uncached input
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
+    first_text_ms: int | None = None  # from the start of the turn to the first text sent on
+    tool_ms: int = 0  # time spent running tools
+
+    def add_usage(self, u: object) -> None:
+        get = lambda f: int(getattr(u, f, 0) or 0)  # noqa: E731
+        self.input_tokens += get("input_tokens")
+        self.cache_read_tokens += get("cache_read_input_tokens")
+        self.cache_write_tokens += get("cache_creation_input_tokens")
+        self.output_tokens += get("output_tokens")
+
+
+def _log_turn(m: TurnMetrics, provider: str, ok: bool, started: float) -> None:
+    """Logs a turn's metrics. Runs after the usage is settled, and can never break a turn."""
+    with contextlib.suppress(Exception):  # metrics are best effort
+        _emit_turn(m, provider, ok, started)
+
+
+def _emit_turn(m: TurnMetrics, provider: str, ok: bool, started: float) -> None:
+    log.info(
+        "llm turn",
+        extra={
+            "metrics": {
+                "provider": provider,
+                "ok": ok,
+                "total_ms": int((time.monotonic() - started) * 1000),
+                "clients_created": dict(providers.CLIENTS_CREATED),
+                **asdict(m),
+            }
+        },
+    )
 
 
 def _usage_total(u: object) -> int:
@@ -285,6 +340,23 @@ def _usage_tokens(chunk: dict) -> int:
     return t if isinstance(t, int) and not isinstance(t, bool) and 0 <= t < 10_000_000 else 0
 
 
+def _openai_usage(chunk: dict, m: TurnMetrics) -> None:
+    """Records the token counts an OpenAI-compatible provider reports (usually on the last chunk),
+    including cached prompt tokens where the provider exposes them."""
+    u = chunk.get("usage")
+    if not isinstance(u, dict):
+        return
+
+    def num(v: object) -> int:
+        return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 10_000_000 else 0
+
+    details = u.get("prompt_tokens_details")
+    cached = num(details.get("cached_tokens")) if isinstance(details, dict) else 0
+    m.cache_read_tokens += cached
+    m.input_tokens += max(0, num(u.get("prompt_tokens")) - cached)
+    m.output_tokens += num(u.get("completion_tokens"))
+
+
 def _openai_stream(
     *,
     system: str,
@@ -309,8 +381,10 @@ def _openai_stream(
     by_name = {t["name"]: t for t in tools}
     used = 0
     pending = 0  # estimate for the round in flight, counted if it is interrupted
-    deadline = time.monotonic() + TURN_DEADLINE_S
-    http = providers.openai_http()
+    started = time.monotonic()
+    deadline = started + TURN_DEADLINE_S
+    m, ok = TurnMetrics(), False
+    http = providers.openai_http()  # shared and reused; only responses are closed here
     tdb = SessionLocal()
     set_tenant(tdb, org_id=org_id, user_id=user_id)
     try:
@@ -328,6 +402,7 @@ def _openai_stream(
             if s.llm_provider in ("groq", "openrouter", "openai_compatible"):
                 body["stream_options"] = {"include_usage": True}
             text_out, calls, finish, usage, done = "", {}, None, 0, False
+            last_usage: dict | None = None
             hide = _HideThinking()
             pending = prompt_chars // 3
             r = http.send(providers.openai_request(http, body), stream=True)
@@ -346,6 +421,8 @@ def _openai_stream(
                         break
                     chunk = _chunk(data)
                     usage = max(usage, _usage_tokens(chunk))
+                    if isinstance(chunk.get("usage"), dict):
+                        last_usage = chunk  # usage is reported once per reply, normally on the last chunk
                     for ch in chunk["choices"]:
                         d = ch.get("delta") or {}
                         content, tcs, fr = (
@@ -363,6 +440,8 @@ def _openai_stream(
                             shown = hide.feed(content)
                             text_out += content
                             if shown:
+                                if m.first_text_ms is None:
+                                    m.first_text_ms = int((time.monotonic() - started) * 1000)
                                 yield _sse({"type": "text", "text": shown})
                         for n, tc in enumerate(tcs or []):
                             idx = tc.get("index", n) if isinstance(tc, dict) else None
@@ -389,6 +468,9 @@ def _openai_stream(
                 r.close()
             if not done and finish is None:
                 raise StreamFault("The language model stopped before finishing its reply.")
+            m.rounds += 1
+            if last_usage is not None:
+                _openai_usage(last_usage, m)
             used += usage or pending
             pending = 0
             if finish == "content_filter":
@@ -426,23 +508,26 @@ def _openai_stream(
                     args = toolcheck.parse_args(c["args"])
                 except toolcheck.ToolCallError as e:
                     out = json.dumps({"error": f"Tool call rejected, nothing was done: {e}"})
-                    ok, shown = False, out[:300]
+                    tool_ok, shown = False, out[:300]
                 else:
-                    ok, out, shown = _exec_tool(tdb, run, by_name, c["name"], args)
-                yield _tool_event(by_name, c["name"], ok, shown)
+                    t0 = time.monotonic()
+                    tool_ok, out, shown = _exec_tool(tdb, run, by_name, c["name"], args)
+                    m.tool_ms += int((time.monotonic() - t0) * 1000)
+                yield _tool_event(by_name, c["name"], tool_ok, shown)
                 convo.append({"role": "tool", "tool_call_id": c["id"], "content": out})
         else:
             raise StreamFault("The receptionist couldn't finish this turn in time.")
         if after:
             yield from after()
-        yield _sse({"type": "done", "llm_tokens": used})
+        ok = True
+        yield _sse({"type": "done", "llm_tokens": used, "metrics": asdict(m)})
     except Exception as e:  # every failure ends the stream with an error event, never a broken response
         yield _fail(e, s.llm_provider)
     finally:
         tdb.close()
-        http.close()
         used += pending  # an interrupted or cancelled request still counts what was sent
         budget_mod.settle(org_id, user_id, UsageKind.llm_tokens, usage_key, used, reference)
+        _log_turn(m, s.llm_provider, ok, started)
 
 
 def _agent_stream(
@@ -466,7 +551,10 @@ def _agent_stream(
     by_name = {t["name"]: t for t in tools}
     used = 0
     partial_in = partial_chars = 0
-    deadline = time.monotonic() + TURN_DEADLINE_S
+    started = time.monotonic()
+    deadline = started + TURN_DEADLINE_S
+    m, ok = TurnMetrics(), False
+    cached_system = system_blocks(system)
     tdb = SessionLocal()  # the request's session is closed once streaming starts
     set_tenant(tdb, org_id=org_id, user_id=user_id)
     try:
@@ -477,7 +565,7 @@ def _agent_stream(
             with client.beta.messages.stream(
                 model=s.model,
                 max_tokens=s.llm_max_output_tokens,
-                system=system,
+                system=cached_system,
                 tools=tools,
                 messages=msgs,
                 output_config={"effort": s.llm_effort},
@@ -490,9 +578,13 @@ def _agent_stream(
                         partial_in = _usage_total(event.message.usage)
                     elif event.type == "text":
                         partial_chars += len(event.text)
+                        if m.first_text_ms is None:
+                            m.first_text_ms = int((time.monotonic() - started) * 1000)
                         yield _sse({"type": "text", "text": event.text})
                 final = stream.get_final_message()
             used += _usage_total(final.usage)
+            m.rounds += 1
+            m.add_usage(final.usage)
             partial_in = partial_chars = 0
             if final.stop_reason == "refusal":
                 raise StreamFault("The model declined to answer this turn.")
@@ -507,10 +599,17 @@ def _agent_stream(
                 raise StreamFault("The language model asked for too many actions at once.")
             results = []
             for b in tool_uses:
-                ok, out, shown = _exec_tool(tdb, run, by_name, b.name, b.input)
-                yield _tool_event(by_name, b.name, ok, shown)
+                t0 = time.monotonic()
+                tool_ok, out, shown = _exec_tool(tdb, run, by_name, b.name, b.input)
+                m.tool_ms += int((time.monotonic() - t0) * 1000)
+                yield _tool_event(by_name, b.name, tool_ok, shown)
                 results.append(
-                    {"type": "tool_result", "tool_use_id": b.id, "content": out, **({} if ok else {"is_error": True})}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": b.id,
+                        "content": out,
+                        **({} if tool_ok else {"is_error": True}),
+                    }
                 )
             msgs.append({"role": "assistant", "content": final.content})
             msgs.append({"role": "user", "content": results})
@@ -518,7 +617,8 @@ def _agent_stream(
             raise StreamFault("The receptionist couldn't finish this turn in time.")
         if after:
             yield from after()
-        yield _sse({"type": "done", "llm_tokens": used})
+        ok = True
+        yield _sse({"type": "done", "llm_tokens": used, "metrics": asdict(m)})
     except Exception as e:  # every failure ends the stream with an error event, never a broken response
         yield _fail(e, "anthropic")
     finally:
@@ -526,6 +626,7 @@ def _agent_stream(
         # An interrupted or cancelled stream still bills what the provider produced.
         used += partial_in + (partial_chars // 3 if partial_in else 0)
         budget_mod.settle(org_id, user_id, UsageKind.llm_tokens, usage_key, used, reference)
+        _log_turn(m, "anthropic", ok, started)
 
 
 # ---------- setup assistant ----------
@@ -592,23 +693,44 @@ def tts(body: TtsIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_write
     budget_mod.charge(
         db, ctx.org_id, UsageKind.tts_characters, len(body.text), f"tts-{body.request_id}", "voice lab tts"
     )
-    http = providers.tts_http()
+    http = providers.tts_http()  # shared and reused across sentences; only the response is closed here
+    started = time.monotonic()
     try:
         r = http.send(providers.tts_request(http, body.text), stream=True)
     except Exception:
-        http.close()
+        log.warning("tts provider unreachable", extra={"chars": len(body.text)})
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not reach the text-to-speech provider") from None
     if r.status_code != 200:
         r.close()
-        http.close()
         log.warning("tts provider error", extra={"status": r.status_code})
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Text-to-speech provider error (HTTP {r.status_code})")
+    headers_ms = int((time.monotonic() - started) * 1000)
 
     def chunks() -> Iterator[bytes]:
+        first_byte_ms: int | None = None
+        sent = 0
+        complete = False
         try:
-            yield from r.iter_bytes()
+            for chunk in r.iter_bytes():
+                if first_byte_ms is None:
+                    first_byte_ms = int((time.monotonic() - started) * 1000)
+                sent += len(chunk)
+                yield chunk
+            complete = True
         finally:
-            r.close()
-            http.close()
+            r.close()  # also runs when the browser stops listening (barge-in), freeing the connection
+            log.info(
+                "tts request",
+                extra={
+                    "metrics": {
+                        "chars": len(body.text),
+                        "headers_ms": headers_ms,
+                        "first_byte_ms": first_byte_ms,
+                        "bytes": sent,
+                        "complete": complete,
+                        "clients_created": providers.CLIENTS_CREATED["tts_http"],
+                    }
+                },
+            )
 
     return StreamingResponse(chunks(), media_type="audio/mpeg", headers={"cache-control": "no-store"})
