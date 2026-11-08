@@ -54,6 +54,9 @@ run. All voice results are **simulated** (stand-in providers); none is a real-ca
 | 25 | Languages API, route preview, per-turn language in the brain | Branch `claude/phase2-global` | Cached prefix byte-identical with a language set (test) |
 | 26 | Voice-worker prototype (LiveKit Agents adapter) | Branch `claude/phase2-global` | 13 session tests; adapter run against livekit-agents 1.8.11; stand-in call through the real API (3 turns, switch to Hindi, context kept). **Blocked for hosting:** LiveKit and worker hosting approval |
 | 27 | Multilingual harness (hi, ml, ar, switching, Hinglish) | Branch `claude/phase2-global` | 12/12 stand-in scenarios (plumbing only) |
+| 29 | Receptionist wording by business country (currency, emergency numbers) | Branch `claude/phase2-global` | `93a3ec7`; `tests/test_regions.py`; no number marked verified; unknown country gets no guessed number |
+| 30 | Scoped worker credential, worker brain endpoint, token refresh | Branch `claude/phase2-global` | `f96c480`, `df12e32`; 6 API + 5 worker tests; stand-in call via minted, refreshing token; endpoint off unless `VOXERA_WORKER_SECRET` set |
+| 31 | Languages page (registry, route preview, providers) | Branch `claude/phase2-global` | `5414e21`; browser e2e 8/8 against the real API; in the integration workflow |
 | 28 | Real-model, real-audio and telephony validation (Sprint E) | Not run | Needs paid keys with caps, hosting and a test number: owner approval |
 
 ## Defects found and fixed in this phase
