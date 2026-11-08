@@ -1,0 +1,49 @@
+name: Phase 1 production acceptance (owner-approved)
+
+# Customer-workflow acceptance against PRODUCTION on synthetic accounts, then deletion of
+# every synthetic account and workspace with proof. See apps/previews/scripts/prod-acceptance.mjs.
+#
+# Runs ONLY when .github/rehearsal/phase1-prod-acceptance.request changes on the branch
+# claude/phase1-prod-acceptance. That file is added only after the owner approves the run.
+# Pushing the scripts alone never touches production. Uses no secrets.
+
+on:
+  push:
+    branches: [claude/phase1-prod-acceptance]
+    paths: [.github/rehearsal/phase1-prod-acceptance.request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase1-prod-acceptance
+  cancel-in-progress: false
+
+env:
+  # The production commit this acceptance is approved for. The gate refuses any other.
+  EXPECTED_SHA: 667eec1f649a394f2f1b1ddef2aaf815ab3129b0
+
+jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/claude/phase1-prod-acceptance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read-only production gate (nothing is written unless this passes)
+        run: node -e 'import("./scripts/prod-acceptance.mjs").then((m) => m.verifyProduction(m.PROD_API, m.PROD_WEB, process.env.EXPECTED_SHA)).then(() => console.log("gate passed"))'
+      - name: Synthetic customer-workflow acceptance, clean-up and clean-up proof
+        run: node scripts/prod-acceptance.mjs https://voxera-api-two.vercel.app https://voxera-flow.vercel.app "$EXPECTED_SHA" prod-acceptance.json
+      - name: Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-prod-acceptance-${{ github.sha }}
+          path: apps/previews/prod-acceptance.json
+          if-no-files-found: ignore

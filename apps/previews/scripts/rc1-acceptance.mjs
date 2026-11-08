@@ -8,9 +8,18 @@ import { verifyRc1 } from "./rc1-isolation.mjs";
 
 // The CLI entry (bottom) always runs the isolation gate first. runAcceptance is exported
 // only so the suite itself can be exercised against a local API before a hosted run.
-export async function runAcceptance({ api: API, web: WEB, sha: SHA, identity, out: OUT }) {
+// Options (defaults keep the RC-1 behaviour unchanged):
+//   password      per-run secret; never printed or written to the evidence file
+//   emailDomain   synthetic account domain
+//   label         prefix for synthetic names (accounts, workspaces, services)
+//   finalIdentity async () => boolean: re-checks the target after the writes
+//   proveCleanup  after deleting the accounts, require each sign-in to be refused (401)
+export async function runAcceptance({
+  api: API, web: WEB, sha: SHA, identity, out: OUT,
+  password, emailDomain = "rc1-acceptance.example", label: LABEL = "RC1", finalIdentity, proveCleanup = false,
+}) {
 const run = `${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
-const PW = "correct horse battery staple";
+const PW = password ?? "correct horse battery staple";
 const results = [];
 const check = (area, name, ok, detail = "") => {
   results.push({ area, name, ok: Boolean(ok), detail: String(detail).slice(0, 300) });
@@ -45,9 +54,9 @@ const area = async (name, fn) => {
 // ---------- accounts ----------
 const accounts = [];
 async function signup(label, org) {
-  const email = `${label}-${run}@rc1-acceptance.example`;
+  const email = `${label}-${run}@${emailDomain}`;
   const r = await call("POST", "/v1/auth/signup", {
-    body: { email, password: PW, full_name: `RC1 ${label}`, organization_name: org },
+    body: { email, password: PW, full_name: `${LABEL} ${label}`, organization_name: org },
   });
   const a = { label, email, token: r.json?.access_token, refresh: r.json?.refresh_token, status: r.status };
   if (r.status === 201) {
@@ -62,20 +71,20 @@ const o = (a, p = "") => `/v1/orgs/${a.orgId}${p}`;
 let A, B, viewer, staff;
 
 await area("auth", async () => {
-  A = await signup("owner-a", `RC1 Clinic A ${run}`);
+  A = await signup("owner-a", `${LABEL} Clinic A ${run}`);
   check("auth", "sign-up creates an account and workspace (201)", A.status === 201 && A.orgId, A.status);
-  B = await signup("owner-b", `RC1 Clinic B ${run}`);
+  B = await signup("owner-b", `${LABEL} Clinic B ${run}`);
   check("auth", "second tenant sign-up (201)", B.status === 201 && B.orgId, B.status);
   check("auth", "duplicate e-mail rejected", (await call("POST", "/v1/auth/signup", {
     body: { email: A.email, password: PW, full_name: "Dup", organization_name: "Dup" },
   })).status >= 400);
   check("auth", "trivial password rejected (422)", (await call("POST", "/v1/auth/signup", {
-    body: { email: `weak-${run}@rc1-acceptance.example`, password: "aaaaaaaaaaaa", full_name: "W", organization_name: "W" },
+    body: { email: `weak-${run}@${emailDomain}`, password: "aaaaaaaaaaaa", full_name: "W", organization_name: "W" },
   })).status === 422);
   const bad = await call("POST", "/v1/auth/login", { body: { email: A.email, password: "wrong password here" } });
   check("auth", "wrong password rejected (401)", bad.status === 401, bad.status);
   check("auth", "login failure does not reveal whether the account exists",
-    bad.json?.detail === (await call("POST", "/v1/auth/login", { body: { email: `nobody-${run}@rc1-acceptance.example`, password: "x" } })).json?.detail);
+    bad.json?.detail === (await call("POST", "/v1/auth/login", { body: { email: `nobody-${run}@${emailDomain}`, password: "x" } })).json?.detail);
   const ok = await call("POST", "/v1/auth/login", { body: { email: A.email, password: PW } });
   check("auth", "correct password signs in (200)", ok.status === 200 && ok.json?.access_token, ok.status);
   // refresh rotation and reuse detection
@@ -93,7 +102,7 @@ await area("auth", async () => {
 });
 
 await area("rate-limit", async () => {
-  const email = `limit-${run}@rc1-acceptance.example`;
+  const email = `limit-${run}@${emailDomain}`;
   const codes = [];
   for (let i = 0; i < 8; i++) codes.push((await call("POST", "/v1/auth/login", { body: { email, password: "wrong" } })).status);
   check("rate-limit", "repeated failed logins are throttled (429 within 8 attempts)", codes.includes(429), codes.join(","));
@@ -135,11 +144,11 @@ await area("setup", async () => {
   check("setup", "workspace settings: timezone Asia/Kolkata (+05:30), capacity 1", set.status === 200 && set.json?.timezone === "Asia/Kolkata", set.status);
   const intervals = [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opens_at: "09:00:00", closes_at: "17:00:00" }));
   check("setup", "office hours set", (await call("PUT", o(A, "/office-hours"), { token: A.token, body: { intervals } })).status === 200);
-  const s = await call("POST", o(A, "/services"), { token: A.token, body: { name: "RC1 Consultation", duration_min: 30, buffer_min: 0 } });
+  const s = await call("POST", o(A, "/services"), { token: A.token, body: { name: `${LABEL} Consultation`, duration_min: 30, buffer_min: 0 } });
   check("setup", "service created (201)", s.status === 201, s.status);
   svc = s.json;
   await call("PUT", o(B, "/office-hours"), { token: B.token, body: { intervals } });
-  svcB = (await call("POST", o(B, "/services"), { token: B.token, body: { name: "RC1 B Service", duration_min: 30 } })).json;
+  svcB = (await call("POST", o(B, "/services"), { token: B.token, body: { name: `${LABEL} B Service`, duration_min: 30 } })).json;
 });
 
 // a date 3 days ahead in the workspace's zone (plain date is fine: the API resolves it locally)
@@ -241,13 +250,13 @@ await area("tenant-isolation", async () => {
   const bList = (await call("GET", o(B, `/appointments?from=${on}T00:00:00Z`), { token: B.token })).json ?? [];
   check("tenant-isolation", "B's appointment list contains none of A's", !bList.some((a) => a.service_id === svc.id));
   check("tenant-isolation", "B's workspace list shows only B", (await call("GET", "/v1/me/organizations", { token: B.token })).json?.length === 1);
-  check("tenant-isolation", "B cannot invite into A", [403, 404].includes((await call("POST", o(A, "/invitations"), { token: B.token, body: { email: `x-${run}@rc1-acceptance.example` } })).status));
+  check("tenant-isolation", "B cannot invite into A", [403, 404].includes((await call("POST", o(A, "/invitations"), { token: B.token, body: { email: `x-${run}@${emailDomain}` } })).status));
   check("tenant-isolation", "B's own workspace still works", (await call("GET", o(B, "/services"), { token: B.token })).json?.some((s) => s.id === svcB?.id));
 });
 
 await area("rbac", async () => {
   async function member(label, role) {
-    const m = await signup(label, `RC1 ${label} own ${run}`);
+    const m = await signup(label, `${LABEL} ${label} own ${run}`);
     const inv = await call("POST", o(A, "/invitations"), { token: A.token, body: { email: m.email, role } });
     if (!inv.json?.token) {
       check("rbac", `invitation token available to join ${role}`, false, "API does not expose invitation tokens; RBAC needs an e-mail-less join path");
@@ -272,7 +281,7 @@ await area("rbac", async () => {
   check("rbac", "staff can cancel (200)", (await call("POST", o(A, `/appointments/${sb.json?.id}/cancel`), { token: staff.token })).status === 200);
   check("rbac", "staff cannot create services (403)", (await call("POST", o(A, "/services"), { token: staff.token, body: { name: "x", duration_min: 30 } })).status === 403);
   check("rbac", "staff cannot change settings (403)", (await call("PATCH", o(A, "/settings"), { token: staff.token, body: { booking_capacity: 5 } })).status === 403);
-  check("rbac", "staff cannot invite members (403)", (await call("POST", o(A, "/invitations"), { token: staff.token, body: { email: `y-${run}@rc1-acceptance.example` } })).status === 403);
+  check("rbac", "staff cannot invite members (403)", (await call("POST", o(A, "/invitations"), { token: staff.token, body: { email: `y-${run}@${emailDomain}` } })).status === 403);
   check("rbac", "staff cannot promote themselves (403)",
     (await call("PATCH", o(A, `/members/${staff.userId}`), { token: staff.token, body: { role: "owner" } })).status === 403);
   check("rbac", "staff cannot export workspace data (403)", (await call("GET", o(A, "/export"), { token: staff.token })).status === 403);
@@ -307,8 +316,12 @@ await area("reliability", async () => {
   check("reliability", "readyz 200", (await call("GET", "/readyz")).status === 200);
   const burst = await Promise.all(Array.from({ length: 20 }, () => call("GET", o(A, "/services"), { token: A.token })));
   check("reliability", "20 concurrent reads succeed without 5xx", burst.every((r) => r.status === 200), burst.map((r) => r.status).join(","));
-  const id2 = await fetch(API + "/rc1-identity", { cache: "no-store" }).then((r) => r.json());
-  check("reliability", "isolation identity unchanged after the writes", id2.environment === "staging" && id2.schema === identity.schema && id2.superuser === false);
+  if (finalIdentity) {
+    check("reliability", "target identity unchanged after the writes", await finalIdentity());
+  } else {
+    const id2 = await fetch(API + "/rc1-identity", { cache: "no-store" }).then((r) => r.json());
+    check("reliability", "isolation identity unchanged after the writes", id2.environment === "staging" && id2.schema === identity.schema && id2.superuser === false);
+  }
 });
 
 // ---------- clean-up (members first; owners last) ----------
@@ -316,6 +329,12 @@ await area("cleanup", async () => {
   for (const a of [...accounts].reverse()) {
     const r = await call("DELETE", "/v1/me", { token: a.token, body: { password: PW } });
     check("cleanup", `synthetic account ${a.label} deleted`, r.status === 204, r.status);
+  }
+  if (proveCleanup) {
+    for (const a of accounts) {
+      const r = await call("POST", "/v1/auth/login", { body: { email: a.email, password: PW } });
+      check("cleanup", `deleted account ${a.label} can no longer sign in (401)`, r.status === 401, r.status);
+    }
   }
 });
 
