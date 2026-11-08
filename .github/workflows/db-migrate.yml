@@ -42,9 +42,11 @@ jobs:
         working-directory: services/api
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.11.32"
+      # Install the pinned uv wheel from PyPI instead of downloading the GitHub
+      # release tarball, which repeatedly returned HTTP 504 on hosted runners.
+      # Keep RC-1 unchanged; this applies only to staging/production migrate job.
+      - name: Install pinned uv from PyPI
+        run: python -m pip install --disable-pip-version-check "uv==0.11.32"
       - run: uv sync --frozen
       - name: ${{ inputs.action }} ${{ inputs.environment }}
         env:
