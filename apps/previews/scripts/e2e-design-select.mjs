@@ -13,7 +13,7 @@ const staff = { name: "Tom Reid", email: `staff-${run}@design.example`, org: `Re
 
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
-const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
+const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false && typeof r !== "string", typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
 
 const browser = await chromium.launch();
 const ctxA = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -147,10 +147,159 @@ await step("screens without real data stay labelled as demo in every design", as
   return cmd === 1 && atl === 1 && flw >= 1 ? true : `command ${cmd}, atelier ${atl}, flow ${flw}`;
 });
 
-await step("clean-up: delete both test accounts and their workspaces", async () => {
+// Authenticated navigation (regression for a production report: the chooser said "Sign in first"
+// while another page looked signed in). Each case uses a fresh browser context.
+const fresh = async () => (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+
+await step("a demo dashboard is not a session: the chooser says so and offers sign-in", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/command/ops`, { waitUntil: "networkidle" });
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-signed-out").waitFor({ timeout: 10000 });
+  const href = await p.getByTestId("design-signin").getAttribute("href");
+  await p.context().close();
+  return href === "/start?next=%2Fstart%2Fdesign" ? true : `href ${href}`;
+});
+
+await step("signing in from the chooser's prompt returns to the chooser", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-signin").click();
+  await p.waitForURL("**/start?next=*", { timeout: 10000 });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/start/design", { timeout: 15000 });
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  await p.context().close();
+  return true;
+});
+
+await step("signed in on Command's own sign-in page, the chooser opens with no second sign-in", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/command/login`, { waitUntil: "networkidle" });
+  await p.locator("#cmd-email").fill(owner.email);
+  await p.locator("#cmd-pw").fill(PW);
+  await p.locator("#cmd-pw").press("Enter");
+  await p.waitForURL("**/command/ops", { timeout: 15000 });
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  const wrong = await p.getByTestId("design-signed-out").count();
+  await p.context().close();
+  return wrong === 0;
+});
+
+await step("an unsafe ?next= is ignored: sign-in opens the workspace's own design", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start?next=${encodeURIComponent("https://evil.example/")}`, { waitUntil: "networkidle" });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/flow/app", { timeout: 15000 }); // the owner's own override is Flow
+  await p.context().close();
+  return true;
+});
+
+await step("if the workspace list fails, the chooser says so and recovers on retry", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/flow/app", { timeout: 15000 });
+  await p.route("**/api/v1/me/organizations", (r) => r.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"Service unavailable"}' }));
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-orgs-error").waitFor({ timeout: 10000 });
+  const signedOutShown = await p.getByTestId("design-signed-out").count();
+  await p.unroute("**/api/v1/me/organizations");
+  await p.getByRole("button", { name: "Try again" }).click();
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  await p.context().close();
+  return signedOutShown === 0;
+});
+
+// Each of the three designs, once selected, must survive a reload and a full re-authentication
+// (a fresh browser context with no cookies or local storage, signing in again). A dedicated
+// account keeps its three sign-ins under the API's per-account limit of five a minute.
+const landed = (p, path) => p.waitForURL(`**${path}`, { timeout: 15000 }).then(() => true, () => false);
+const HOME = { command: "/command/ops", atelier: "/atelier/studio", flow: "/flow/app" };
+const member = { name: "Ana Ruiz", email: `persist-${run}@design.example`, org: `Ruiz Studio ${run}` };
+const m = await fresh();
+let memberOrg = "";
+await step("a third account creates its own workspace for the persistence checks", async () => {
+  await createWorkspace(m, member);
+  await m.waitForURL("**/start/design?new=1", { timeout: 15000 });
+  memberOrg = (await call(m, "GET", "/me/organizations")).json[0].organization.id;
+  return Boolean(memberOrg);
+});
+for (const design of ["command", "atelier", "flow"]) {
+  await step(`${design} persists after a reload and after signing in again`, async () => {
+    const set = await call(m, "PUT", `/orgs/${memberOrg}/design/me`, { design });
+    if (set.status !== 200) return `select ${set.status}`;
+    await m.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+    await m.reload({ waitUntil: "networkidle" });
+    if (!(await landed(m, HOME[design]))) return `after reload: ${new URL(m.url()).pathname}`;
+    const p = await fresh();
+    try {
+      await p.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+      await p.getByLabel("Email").fill(member.email);
+      await p.getByLabel("Password").fill(PW);
+      await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+      if (!(await landed(p, HOME[design]))) return `after signing in again: ${new URL(p.url()).pathname}`;
+      const d = (await call(p, "GET", `/orgs/${memberOrg}/design`)).json;
+      return d.effective === design && d.my_override === design ? true : `effective ${d.effective}`;
+    } finally {
+      await p.context().close();
+    }
+  });
+}
+
+// When a signed-in user's workspace list fails, no dashboard may fall back to demo data: each
+// design shows that the workspace is unavailable, recovers on retry, and offers demo data only
+// as an explicit choice.
+const DEMO_NAME = "Halden & Rye";
+const ORGS = "**/api/v1/me/organizations";
+const fail503 = (r) => r.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"Service unavailable"}' });
+for (const design of ["command", "atelier", "flow"]) {
+  await step(`${design}: a failed workspace list shows an error, never demo data, and recovers on retry`, async () => {
+    await m.route(ORGS, fail503);
+    await m.goto(`${BASE}${HOME[design]}`, { waitUntil: "networkidle" });
+    try {
+      await m.getByTestId("workspace-unavailable").waitFor({ timeout: 10000 });
+    } finally {
+      await m.unroute(ORGS);
+    }
+    const body = await m.locator("body").innerText();
+    if (body.includes(DEMO_NAME)) return "demo data shown";
+    if (!body.includes("Service unavailable")) return "error detail missing";
+    await m.getByRole("button", { name: "Try again" }).click();
+    await m.getByTestId("workspace-unavailable").waitFor({ state: "detached", timeout: 10000 });
+    await m.waitForLoadState("networkidle");
+    const after = await m.locator("body").innerText();
+    return after.includes(member.org) && !after.includes(DEMO_NAME) ? true : "workspace not shown after retry";
+  });
+}
+
+await step("from the error, demo data opens only when chosen, labelled as demo", async () => {
+  await m.route(ORGS, fail503);
+  await m.goto(`${BASE}/command/ops`, { waitUntil: "networkidle" });
+  try {
+    await m.getByTestId("workspace-unavailable").waitFor({ timeout: 10000 });
+    await m.getByRole("button", { name: "Explore demo data instead" }).click();
+    await m.getByTestId("workspace-unavailable").waitFor({ state: "detached", timeout: 10000 });
+  } finally {
+    await m.unroute(ORGS);
+  }
+  const labelled = (await m.getByText("Simulation mode").count()) > 0 && (await m.getByTestId("cmd-workspace").innerText()) === DEMO_NAME;
+  await m.evaluate(() => localStorage.removeItem("voxera-view-demo"));
+  return labelled;
+});
+
+await step("clean-up: delete all test accounts and their workspaces", async () => {
   const s = await call(b, "DELETE", "/me", { password: PW });
   const o = await call(a, "DELETE", "/me", { password: PW });
-  return s.status === 204 && o.status === 204;
+  const r = memberOrg ? (await call(m, "DELETE", "/me", { password: PW })).status : 204;
+  return s.status === 204 && o.status === 204 && r === 204 ? true : `deleted ${s.status}/${o.status}/${r}`;
 });
 
 await browser.close();

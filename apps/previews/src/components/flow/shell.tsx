@@ -98,6 +98,7 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
   const on = (h: string, exact?: boolean) => (exact ? path === h : path === h || path.startsWith(h + "/"));
   const canvas = path.startsWith("/flow/app/canvas");
   const signedIn = useSession((st) => st.status === "signed_in");
+  const dm = useDataMode();
   const results = useMemo(() => [...FLOW_NAV, { href: "/flow/app/new", label: "New agent wizard", icon: Wand2, key: "" }].filter((n) => n.label.toLowerCase().includes(q.toLowerCase())), [q]);
 
   useEffect(() => {
@@ -130,7 +131,7 @@ export function FlowShell({ children }: { children: React.ReactNode }) {
       </aside>
       <header className="relative z-30 flex items-center gap-3 px-5 py-4 md:pl-24">
         <span className="font-display text-sm font-semibold tracking-wide">VOXERA <span className="bg-gradient-to-r from-flw-violet to-flw-cyan bg-clip-text text-transparent">FLOW</span></span>
-        <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline">Halden &amp; Rye · {agent}</span>
+        <span className="hidden text-flw-mute sm:inline">/</span><span className="hidden truncate text-sm text-flw-mute sm:inline" data-testid="flw-crumb">{dm.mode === "live" ? dm.org!.organization.name : <>Halden &amp; Rye · {agent}</>}</span>
         <button onClick={() => setPalette(true)} className="ml-auto hidden items-center gap-2 rounded-xl border border-flw-line bg-flw-surface/60 px-3 py-1.5 text-xs text-flw-mute hover:border-flw-violet/60 sm:flex" aria-label="Jump to a page"><Search size={13} /> Jump to… <kbd>Ctrl K</kbd></button>
         <div className="ml-auto sm:ml-0"><WorkspaceMenu /></div>
       </header>

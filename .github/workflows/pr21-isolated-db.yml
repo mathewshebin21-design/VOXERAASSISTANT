@@ -1,0 +1,68 @@
+name: PR21 isolated database
+
+# Migrates and verifies ONLY the Neon branch pr21-start-auth-isolated (created from staging
+# main, so it carries the `staging` claim and starts at 0008). Uses the real runner and the
+# read-only verifier. Credentials: ONLY that branch's, as secrets of the GitHub environment
+# `pr21-isolated`:
+#   PR21_DATABASE_URL_UNPOOLED  (direct connection, owner role)
+#   PR21_DATABASE_URL           (pooled connection; may equal the direct one)
+# Never reads production, staging-main or RC-1 secrets.
+#
+# Trigger: a push to claude/start-auth-routing that changes .github/rehearsal/pr21-db.request.
+
+on:
+  push:
+    branches: [claude/start-auth-routing]
+    paths: [.github/rehearsal/pr21-db.request]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr21-isolated-db
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/claude/start-auth-routing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pr21-isolated
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.PR21_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.PR21_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Require the branch credentials and mask every part of them
+        run: |
+          if [ -z "$DATABASE_URL_UNPOOLED" ] || [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set PR21_DATABASE_URL_UNPOOLED and PR21_DATABASE_URL on the pr21-isolated environment"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit, unquote
+          for key in ("DATABASE_URL_UNPOOLED", "DATABASE_URL"):
+              p = urlsplit(os.environ[key].strip())
+              for part in (p.hostname, p.username, p.password, unquote(p.password or ""), (p.path or "").lstrip("/")):
+                  if part:
+                      print(f"::add-mask::{part}")
+          PY
+      - run: uv sync --frozen
+      - name: 1. Baseline (read-only; a fresh branch of staging main is at 0008)
+        run: uv run python scripts/verify_release.py --env staging --expect 0008 --save baseline.json
+      - name: 2. Migration check (changes nothing; must list only 0009)
+        run: uv run python scripts/migrate.py --env staging --check
+      - name: 3. Migrate this branch only, 0008 -> 0009
+        run: uv run python scripts/migrate.py --env staging
+      - name: 4. Verify 0009 against the baseline (read-only)
+        run: uv run python scripts/verify_release.py --env staging --expect 0009 --baseline baseline.json
+      - name: Nothing left pending
+        run: uv run python scripts/migrate.py --env staging --check

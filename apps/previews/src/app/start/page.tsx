@@ -5,20 +5,33 @@
 
 import { clsx } from "clsx";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { useAuthForm } from "@/lib/live/auth-form";
 import { designById, useDesign } from "@/lib/live/design";
+import { safeNext } from "@/lib/live/next-path";
 import { useSession } from "@/lib/live/session";
 
 const input = "mt-1.5 w-full rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 text-sm outline-none transition focus:border-white/50 focus:bg-white/[0.06]";
 
-function SignedInRedirect() {
+function SignedInRedirect({ next }: { next: string | null }) {
   const router = useRouter();
   const { data, error, org } = useDesign();
+  const orgsError = useSession((s) => s.orgsError);
+  const reload = useSession((s) => s.load);
   useEffect(() => {
-    if (data) router.replace(designById(data.effective).home);
-  }, [data, router]);
+    // A page that sent the visitor here to sign in gets them back; otherwise open their design.
+    if (next && org) router.replace(next);
+    else if (data) router.replace(designById(data.effective).home);
+  }, [next, org, data, router]);
+  if (orgsError) {
+    return (
+      <div role="alert" className="text-sm text-red-300">
+        Signed in, but your workspaces couldn&apos;t be loaded: {orgsError}.{" "}
+        <button type="button" onClick={() => void reload()} className="underline">Try again</button>
+      </div>
+    );
+  }
   if (!org) return <p className="text-sm text-[#a8a8ba]">This account isn&apos;t a member of any workspace yet.</p>;
   if (error) return <p role="alert" className="text-sm text-red-300">Couldn&apos;t open your workspace: {error.detail}</p>;
   return <p className="text-sm text-[#a8a8ba]" data-testid="start-opening">Opening {org.organization.name}…</p>;
@@ -80,6 +93,11 @@ function Showcase() {
   );
 }
 
+/** Reads ?next= (client-only), so only this small part waits for the URL. */
+function SignedInWithNext() {
+  return <SignedInRedirect next={safeNext(useSearchParams().get("next"))} />;
+}
+
 export default function Start() {
   const status = useSession((s) => s.status);
   const [signingUp, setSigningUp] = useState(false);
@@ -99,7 +117,7 @@ export default function Start() {
           <div className="rounded-2xl border border-white/10 bg-[#121218]/80 p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)] backdrop-blur sm:p-7">
             {status === "loading" ? <p className="text-sm text-[#a8a8ba]">Loading…</p>
               : status === "signed_in" && signingUp ? <p className="text-sm text-[#a8a8ba]">Creating your workspace…</p>
-              : status === "signed_in" ? <SignedInRedirect />
+              : status === "signed_in" ? <Suspense fallback={<p className="text-sm text-[#a8a8ba]">Loading…</p>}><SignedInWithNext /></Suspense>
               : <AuthForm onSignUp={setSigningUp} />}
           </div>
           <p className="mt-4 text-center text-xs text-[#8c8c9e]">New workspaces choose their design next. You can switch at any time.</p>

@@ -13,6 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { ApiError } from "@/lib/live/api";
 import { DESIGNS, designById, useDesign, type DesignId, type DesignInfo } from "@/lib/live/design";
+import { signInHref } from "@/lib/live/next-path";
 import { useSession } from "@/lib/live/session";
 
 function Frame({ d, active }: { d: DesignInfo; active: boolean }) {
@@ -45,13 +46,33 @@ function Chooser() {
   const router = useRouter();
   const isNew = useSearchParams().get("new") === "1";
   const status = useSession((s) => s.status);
+  const orgsError = useSession((s) => s.orgsError);
+  const reload = useSession((s) => s.load);
   const { data, error, org, setDefault, setMine } = useDesign();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   if (status === "loading" || (org && !data && !error)) return <p className="text-sm text-[#a8a8ba]">Loading…</p>;
-  if (status !== "signed_in" || !org) {
-    return <p className="text-sm text-[#a8a8ba]">Sign in first. <Link href="/start" className="underline">Go to sign in</Link></p>;
+  // Each case says what is actually wrong. The demo dashboards show a sample owner without any
+  // session, so "signed out" must be stated plainly rather than implied.
+  if (status !== "signed_in") {
+    return (
+      <p className="text-sm text-[#a8a8ba]" data-testid="design-signed-out">
+        You&apos;re not signed in, so there is no workspace to change. The sample dashboards show a demo salon, not an account.{" "}
+        <Link href={signInHref(isNew ? "/start/design?new=1" : "/start/design")} className="underline" data-testid="design-signin">Sign in to choose a design</Link>
+      </p>
+    );
+  }
+  if (orgsError) {
+    return (
+      <div role="alert" className="text-sm text-red-300" data-testid="design-orgs-error">
+        You&apos;re signed in, but your workspaces couldn&apos;t be loaded: {orgsError}.{" "}
+        <button type="button" onClick={() => void reload()} className="underline">Try again</button>
+      </div>
+    );
+  }
+  if (!org) {
+    return <p className="text-sm text-[#a8a8ba]" data-testid="design-no-workspace">This account isn&apos;t a member of any workspace yet. Accept an invitation or create a workspace first.</p>;
   }
   if (error || !data) return <p role="alert" className="text-sm text-red-300">Couldn&apos;t load your design settings: {error?.detail}</p>;
 
