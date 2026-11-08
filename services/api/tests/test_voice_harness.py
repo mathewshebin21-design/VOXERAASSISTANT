@@ -110,3 +110,36 @@ def test_call_record_check_needs_every_turn_in_order():
     missing = {**good, "events": good["events"][:2]}
     failed = {ch["check"] for ch in vh.check_call_record(missing, turns) if not ch["ok"]}
     assert "call record has every caller turn, in order" in failed
+
+
+def test_script_share_counts_letters_by_script():
+    assert vh.script_share("नमस्ते, कैसे हैं?", "Deva") == 1.0
+    assert vh.script_share("Hello नमस्ते", "Deva") == 6 / 11
+    assert vh.script_share("مرحبا", "Arab") == 1.0 and vh.script_share("123 !", "Latn") == 0.0
+
+
+def test_caller_turns_carry_and_switch_language():
+    scenario = {"language": "en-GB", "caller": ["Hi", {"text": "नमस्ते", "language": "hi-IN"}, "आगे"]}
+    assert vh.caller_turns(scenario) == [("Hi", "en-GB"), ("नमस्ते", "hi-IN"), ("आगे", "hi-IN")]
+    assert vh.caller_turns({"caller": ["Hi"]}) == [("Hi", None)]
+
+
+def test_reply_script_is_checked_only_against_a_real_model():
+    scenario = {"expect": {"reply_script": "Deva"}}
+    english = [_turn(reply="Hello there")]
+    assert all(c["ok"] for c in vh.evaluate(scenario, english, "fake"))
+    failed = [c for c in vh.evaluate(scenario, english, "paid") if not c["ok"]]
+    assert failed and failed[0]["check"] == "last reply written in Deva"
+    hindi = [_turn(reply="नमस्ते, हम शनिवार को खुले हैं।")]
+    assert all(c["ok"] for c in vh.evaluate(scenario, hindi, "paid"))
+
+
+def test_every_scenario_language_is_in_the_registry():
+    import json as _json
+
+    from app.voice.languages import LANGUAGES
+
+    spec = _json.loads(vh.SCENARIOS.read_text())
+    for s in spec["scenarios"]:
+        for _, lang in vh.caller_turns(s):
+            assert lang is None or lang in LANGUAGES, (s["name"], lang)

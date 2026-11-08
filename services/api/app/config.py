@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     migration_database_url: str = "postgresql+psycopg://voxera_owner:owner-dev-only@localhost:5432/voxera"
 
     jwt_secret: SecretStr = SecretStr("dev-only-change-me-dev-only-change-me")
+    # Signs voice-worker tokens (app/worker_auth.py). Unset = the worker endpoint does not exist.
+    worker_secret: SecretStr | None = None
     jwt_issuer: str = "voxera-api"
     jwt_audience: str = "voxera-app"
     access_token_minutes: int = 15
@@ -67,6 +69,13 @@ class Settings(BaseSettings):
     def _secret_strength(cls, v: SecretStr) -> SecretStr:
         if len(v.get_secret_value()) < 32:
             raise ValueError("VOXERA_JWT_SECRET must be at least 32 characters")
+        return v
+
+    @field_validator("worker_secret")
+    @classmethod
+    def _worker_secret_strength(cls, v: SecretStr | None) -> SecretStr | None:
+        if v is not None and len(v.get_secret_value()) < 32:
+            raise ValueError("VOXERA_WORKER_SECRET must be at least 32 characters")
         return v
 
     @property
