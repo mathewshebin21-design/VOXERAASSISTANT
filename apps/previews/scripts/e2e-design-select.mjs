@@ -254,6 +254,47 @@ for (const design of ["command", "atelier", "flow"]) {
   });
 }
 
+// When a signed-in user's workspace list fails, no dashboard may fall back to demo data: each
+// design shows that the workspace is unavailable, recovers on retry, and offers demo data only
+// as an explicit choice.
+const DEMO_NAME = "Halden & Rye";
+const ORGS = "**/api/v1/me/organizations";
+const fail503 = (r) => r.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"Service unavailable"}' });
+for (const design of ["command", "atelier", "flow"]) {
+  await step(`${design}: a failed workspace list shows an error, never demo data, and recovers on retry`, async () => {
+    await m.route(ORGS, fail503);
+    await m.goto(`${BASE}${HOME[design]}`, { waitUntil: "networkidle" });
+    try {
+      await m.getByTestId("workspace-unavailable").waitFor({ timeout: 10000 });
+    } finally {
+      await m.unroute(ORGS);
+    }
+    const body = await m.locator("body").innerText();
+    if (body.includes(DEMO_NAME)) return "demo data shown";
+    if (!body.includes("Service unavailable")) return "error detail missing";
+    await m.getByRole("button", { name: "Try again" }).click();
+    await m.getByTestId("workspace-unavailable").waitFor({ state: "detached", timeout: 10000 });
+    await m.waitForLoadState("networkidle");
+    const after = await m.locator("body").innerText();
+    return after.includes(member.org) && !after.includes(DEMO_NAME) ? true : "workspace not shown after retry";
+  });
+}
+
+await step("from the error, demo data opens only when chosen, labelled as demo", async () => {
+  await m.route(ORGS, fail503);
+  await m.goto(`${BASE}/command/ops`, { waitUntil: "networkidle" });
+  try {
+    await m.getByTestId("workspace-unavailable").waitFor({ timeout: 10000 });
+    await m.getByRole("button", { name: "Explore demo data instead" }).click();
+    await m.getByTestId("workspace-unavailable").waitFor({ state: "detached", timeout: 10000 });
+  } finally {
+    await m.unroute(ORGS);
+  }
+  const labelled = (await m.getByText("Simulation mode").count()) > 0 && (await m.getByTestId("cmd-workspace").innerText()) === DEMO_NAME;
+  await m.evaluate(() => localStorage.removeItem("voxera-view-demo"));
+  return labelled;
+});
+
 await step("clean-up: delete all test accounts and their workspaces", async () => {
   const s = await call(b, "DELETE", "/me", { password: PW });
   const o = await call(a, "DELETE", "/me", { password: PW });

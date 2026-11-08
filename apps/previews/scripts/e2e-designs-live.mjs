@@ -13,7 +13,7 @@ const me = { name: "Nadia Ahmed", email: `nadia-${run}@e2e.example`, org: `Ahmed
 
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
-const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false, typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
+const step = async (name, fn) => { try { const r = await fn(); check(name, r !== false && typeof r !== "string", typeof r === "string" ? r : ""); } catch (e) { check(name, false, String(e).split("\n")[0].slice(0, 220)); } };
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
