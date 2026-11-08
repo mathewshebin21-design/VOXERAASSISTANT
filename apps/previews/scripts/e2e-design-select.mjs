@@ -147,6 +147,77 @@ await step("screens without real data stay labelled as demo in every design", as
   return cmd === 1 && atl === 1 && flw >= 1 ? true : `command ${cmd}, atelier ${atl}, flow ${flw}`;
 });
 
+// Authenticated navigation (regression for a production report: the chooser said "Sign in first"
+// while another page looked signed in). Each case uses a fresh browser context.
+const fresh = async () => (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+
+await step("a demo dashboard is not a session: the chooser says so and offers sign-in", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/command/ops`, { waitUntil: "networkidle" });
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-signed-out").waitFor({ timeout: 10000 });
+  const href = await p.getByTestId("design-signin").getAttribute("href");
+  await p.context().close();
+  return href === "/start?next=%2Fstart%2Fdesign" ? true : `href ${href}`;
+});
+
+await step("signing in from the chooser's prompt returns to the chooser", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-signin").click();
+  await p.waitForURL("**/start?next=*", { timeout: 10000 });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/start/design", { timeout: 15000 });
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  await p.context().close();
+  return true;
+});
+
+await step("signed in on Command's own sign-in page, the chooser opens with no second sign-in", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/command/login`, { waitUntil: "networkidle" });
+  await p.locator("#cmd-email").fill(owner.email);
+  await p.locator("#cmd-pw").fill(PW);
+  await p.locator("#cmd-pw").press("Enter");
+  await p.waitForURL("**/command/ops", { timeout: 15000 });
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  const wrong = await p.getByTestId("design-signed-out").count();
+  await p.context().close();
+  return wrong === 0;
+});
+
+await step("an unsafe ?next= is ignored: sign-in opens the workspace's own design", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start?next=${encodeURIComponent("https://evil.example/")}`, { waitUntil: "networkidle" });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/flow/app", { timeout: 15000 }); // the owner's own override is Flow
+  await p.context().close();
+  return true;
+});
+
+await step("if the workspace list fails, the chooser says so and recovers on retry", async () => {
+  const p = await fresh();
+  await p.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+  await p.getByLabel("Email").fill(owner.email);
+  await p.getByLabel("Password").fill(PW);
+  await p.getByRole("button", { name: "Sign in", exact: true }).last().click();
+  await p.waitForURL("**/flow/app", { timeout: 15000 });
+  await p.route("**/api/v1/me/organizations", (r) => r.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"Service unavailable"}' }));
+  await p.goto(`${BASE}/start/design`, { waitUntil: "networkidle" });
+  await p.getByTestId("design-orgs-error").waitFor({ timeout: 10000 });
+  const signedOutShown = await p.getByTestId("design-signed-out").count();
+  await p.unroute("**/api/v1/me/organizations");
+  await p.getByRole("button", { name: "Try again" }).click();
+  await p.getByRole("heading", { name: "Switch design" }).waitFor({ timeout: 10000 });
+  await p.context().close();
+  return signedOutShown === 0;
+});
+
 await step("clean-up: delete both test accounts and their workspaces", async () => {
   const s = await call(b, "DELETE", "/me", { password: PW });
   const o = await call(a, "DELETE", "/me", { password: PW });
