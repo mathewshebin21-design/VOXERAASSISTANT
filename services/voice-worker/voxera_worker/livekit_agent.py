@@ -11,9 +11,11 @@ Speech providers are NOT chosen here. They come from VOXERA's route for the call
 configures them. Running a room needs a LiveKit server (LiveKit Cloud or self-hosted): neither is
 provisioned, and doing so needs the owner's approval (ADR-0005 §4).
 
-    VOXERA_API_URL=… VOXERA_WORKER_TOKEN=… python -m voxera_worker.livekit_agent dev
+    VOXERA_API_URL=… VOXERA_WORKER_TOKEN_CMD="…/mint_worker_token.py --org <id>" \
+        python -m voxera_worker.livekit_agent dev
 
-``VOXERA_WORKER_TOKEN`` is a scoped worker token (services/api/scripts/mint_worker_token.py).
+``VOXERA_WORKER_TOKEN_CMD`` prints a fresh scoped worker token; the worker refreshes it before it
+expires (tokens last at most 15 minutes). ``VOXERA_WORKER_TOKEN`` (a single token) is for short tests.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, Worke
 
 from .brain import BrainClient
 from .session import CallSession, LanguageGate
+from .tokens import StaticToken, TokenSource, command_fetch
 
 log = logging.getLogger("voxera.worker")
 
@@ -58,7 +61,9 @@ class VoxeraAgent(Agent):
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
-    brain = BrainClient(os.environ["VOXERA_API_URL"], "", os.environ["VOXERA_WORKER_TOKEN"], worker=True)
+    cmd = os.environ.get("VOXERA_WORKER_TOKEN_CMD")
+    tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
+    brain = BrainClient(os.environ["VOXERA_API_URL"], "", tokens, worker=True)
     accepted = tuple(os.environ.get("VOXERA_LANGUAGES", "en-GB").split(","))
     call = CallSession(brain, language=LanguageGate(accepted=accepted, current=accepted[0]))
     session = AgentSession()  # STT/TTS/VAD come from the approved provider configuration (not set here)

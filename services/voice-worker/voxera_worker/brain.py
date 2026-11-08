@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from .tokens import StaticToken, TokenSource
+
 
 class BrainError(Exception):
     """The brain could not answer this turn. The message is safe to log (no caller text, no secrets)."""
@@ -33,12 +35,18 @@ class TurnEvents:
 
 class BrainClient:
     def __init__(
-        self, api: str, org_id: str, token: str, http: httpx.AsyncClient | None = None, *, worker: bool = False
+        self,
+        api: str,
+        org_id: str,
+        token: str | TokenSource | StaticToken,
+        http: httpx.AsyncClient | None = None,
+        *,
+        worker: bool = False,
     ) -> None:
         # A worker token names its workspace itself; the URL never chooses it.
         base = api.rstrip("/")
         self.url = f"{base}/v1/worker/live/brain" if worker else f"{base}/v1/orgs/{org_id}/live/brain"
-        self._headers = {"authorization": f"Bearer {token}"}
+        self.tokens = StaticToken(token) if isinstance(token, str) else token
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0))
 
     async def stream(
@@ -55,31 +63,49 @@ class BrainClient:
             body["language"] = language
         started = time.monotonic()
         done = False
-        async with self.http.stream("POST", self.url, json=body, headers=self._headers) as r:
-            if r.status_code != 200:
-                await r.aread()
-                raise BrainError(f"brain HTTP {r.status_code}")
-            async for line in r.aiter_lines():
-                if not line.startswith("data: "):
+        token = await self.tokens.get()
+        for attempt in (1, 2):
+            headers = {"authorization": f"Bearer {token}"}
+            async with self.http.stream("POST", self.url, json=body, headers=headers) as r:
+                if r.status_code == 401 and attempt == 1:
+                    # Expired or rotated between our check and the request: refresh once and retry.
+                    # Safe: nothing has been streamed or spent yet.
+                    await r.aread()
+                    token = await self.tokens.refresh(stale=token)
                     continue
-                try:
-                    e = json.loads(line[6:])
-                except ValueError:
-                    continue
-                kind = e.get("type")
-                if kind == "text" and e.get("text"):
-                    if out.first_text_ms is None:
-                        out.first_text_ms = int((time.monotonic() - started) * 1000)
-                    out.text.append(e["text"])
-                    yield e["text"]
-                elif kind == "tool":
-                    out.tools.append({"name": e.get("name"), "ok": bool(e.get("ok"))})
-                elif kind == "handoff":
-                    out.handoff = {k: e.get(k) for k in ("outcome", "staff", "case")}
-                elif kind == "error":
-                    raise BrainError("brain reported an error")
-                elif kind == "done":
-                    out.metrics = e.get("metrics") or {}
-                    done = True
+                async for piece in self._read(r, started, out):
+                    yield piece
+                done = True
+                break
+        if not done:
+            raise BrainError("brain HTTP 401")
+
+    async def _read(self, r: httpx.Response, started: float, out: TurnEvents) -> AsyncIterator[str]:
+        done = False
+        if r.status_code != 200:
+            await r.aread()
+            raise BrainError(f"brain HTTP {r.status_code}")
+        async for line in r.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                e = json.loads(line[6:])
+            except ValueError:
+                continue
+            kind = e.get("type")
+            if kind == "text" and e.get("text"):
+                if out.first_text_ms is None:
+                    out.first_text_ms = int((time.monotonic() - started) * 1000)
+                out.text.append(e["text"])
+                yield e["text"]
+            elif kind == "tool":
+                out.tools.append({"name": e.get("name"), "ok": bool(e.get("ok"))})
+            elif kind == "handoff":
+                out.handoff = {k: e.get(k) for k in ("outcome", "staff", "case")}
+            elif kind == "error":
+                raise BrainError("brain reported an error")
+            elif kind == "done":
+                out.metrics = e.get("metrics") or {}
+                done = True
         if not done:
             raise BrainError("brain stream ended without done")

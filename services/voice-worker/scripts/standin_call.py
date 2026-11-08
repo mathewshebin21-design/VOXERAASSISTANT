@@ -26,16 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from voxera_worker.brain import BrainClient  # noqa: E402
 from voxera_worker.session import CallSession, LanguageGate  # noqa: E402
+from voxera_worker.tokens import TokenSource, command_fetch  # noqa: E402
 
 PRODUCTION = {"voxera-api-two.vercel.app", "voxera-api-ai-e399.vercel.app"}
-
-
-def mint_token(cmd: str, org: str) -> str:
-    import shlex
-    import subprocess
-
-    out = subprocess.run([*shlex.split(cmd), "--org", org], capture_output=True, text=True, check=True)
-    return out.stdout.strip().splitlines()[-1]
 
 
 async def main(api: str, mint: str | None) -> int:
@@ -56,7 +49,8 @@ async def main(api: str, mint: str | None) -> int:
         org = (await http.get("/v1/me/organizations", headers=auth)).json()[0]["organization"]["id"]
         try:
             if mint:
-                brain = BrainClient(api, org, mint_token(mint, org), http, worker=True)
+                tokens = TokenSource(command_fetch(f"{mint} --org {org}"))
+                brain = BrainClient(api, org, tokens, http, worker=True)
             else:
                 brain = BrainClient(api, org, token, http)
             session = CallSession(brain, language=LanguageGate(accepted=("en-GB", "hi-IN")))

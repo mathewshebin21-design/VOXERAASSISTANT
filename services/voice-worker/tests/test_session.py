@@ -195,3 +195,84 @@ def test_worker_mode_uses_the_scoped_endpoint_and_never_the_org_in_the_url():
     c = BrainClient("http://api.test/", "org-should-not-appear", "t", worker=True)
     assert c.url == "http://api.test/v1/worker/live/brain"
     assert BrainClient("http://api.test", "org-1", "t").url == "http://api.test/v1/orgs/org-1/live/brain"
+
+
+# ---- token refresh -------------------------------------------------------------------------------
+
+
+def jwt_with_exp(exp: float, tag: str = "a") -> str:
+    import base64
+
+    def b64(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+
+    return f"{b64({'alg': 'HS256'})}.{b64({'exp': exp, 'tag': tag})}.sig"
+
+
+async def test_token_source_refreshes_before_expiry_and_only_once_concurrently():
+    from voxera_worker.tokens import TokenSource
+
+    now = [1000.0]
+    minted = []
+
+    async def fetch():
+        minted.append(now[0])
+        await asyncio.sleep(0.01)
+        return jwt_with_exp(now[0] + 900, tag=str(len(minted)))
+
+    ts = TokenSource(fetch, margin=60, clock=lambda: now[0])
+    first = await ts.get()
+    assert await ts.get() == first and ts.refreshes == 1
+    now[0] += 845  # 55 s left: inside the margin
+    results = await asyncio.gather(*(ts.get() for _ in range(5)))
+    assert len(set(results)) == 1 and results[0] != first and ts.refreshes == 2
+
+
+async def test_an_expired_token_from_the_supervisor_is_refused():
+    from voxera_worker.tokens import TokenSource
+
+    async def fetch():
+        return jwt_with_exp(10)
+
+    with pytest.raises(RuntimeError, match="expired"):
+        await TokenSource(fetch, clock=lambda: 1000.0).get()
+
+
+async def test_a_401_refreshes_the_token_once_and_retries_before_anything_is_streamed():
+    from voxera_worker.tokens import TokenSource
+
+    seen = []
+    tokens = iter([jwt_with_exp(9e9, "old"), jwt_with_exp(9e9, "new")])
+
+    async def fetch():
+        return next(tokens)
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        auth = req.headers["authorization"]
+        seen.append(auth)
+        if len(seen) == 1:
+            return httpx.Response(401)
+        return httpx.Response(200, stream=Stream(ok("Hello.")))
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = BrainClient("http://api.test", "", TokenSource(fetch), http, worker=True)
+    s = CallSession(client)
+    assert await say(s, "Hi") == "Hello."
+    assert len(seen) == 2 and seen[0] != seen[1]
+
+
+async def test_a_second_401_is_a_failed_turn_not_a_loop():
+    from voxera_worker.tokens import TokenSource
+
+    calls = []
+
+    async def fetch():
+        return jwt_with_exp(9e9, str(len(calls)))
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    s = CallSession(BrainClient("http://api.test", "", TokenSource(fetch), http, worker=True))
+    assert await say(s, "Hi") == RECOVERY and len(calls) == 2
