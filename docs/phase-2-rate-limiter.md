@@ -33,7 +33,7 @@ Cost: one short round trip to Postgres per login attempt, on a request that alre
 
 Not changed: what is limited (each email and address pair) and how much (5 a minute).
 
-## Tests (`tests/test_ratelimit.py`, 18 tests; full API suite 298 passed)
+## Tests (`tests/test_ratelimit.py`, 19 tests; full API suite 298 passed)
 
 - **Concurrency.** 20 simultaneous attempts through two engines (two "instances" with separate pools) against a limit of 5: **exactly 5 allowed**.
 - **Counting.** Counts are sequential (1, 2, 3, 4). Keys and limiters do not share counts.
