@@ -14,6 +14,7 @@ from ..deps import OrgContext, require
 from ..live import providers as live_providers
 from ..permissions import Perm
 from ..schemas import Strict
+from ..voice import launch
 from ..voice.languages import LANGUAGES, PROVIDERS, coverage
 from ..voice.routing import NoCompliantRoute, VoicePolicy, select_route
 
@@ -54,6 +55,7 @@ def list_languages(ctx: Annotated[OrgContext, Depends(require(Perm.read))]) -> d
             for p in PROVIDERS.values()
             if not p.id.startswith("standin")
         ],
+        "launch": launch.status(),
         "evidence_levels": {
             "tested": "VOXERA ran its own scenarios with recorded results",
             "advertised": "listed by the vendor; not verified by VOXERA",

@@ -158,6 +158,25 @@ export default function Languages() {
         )}
       </Glass>
 
+      <Glass className="mb-4">
+        <GHead title="Launch readiness by country" right={<Chip tone="amber">no country cleared for real callers</Chip>} />
+        <div className="grid gap-3 p-4 md:grid-cols-2" data-testid="launch-table">
+          {(reg.data?.launch ?? []).map((c) => (
+            <div key={c.country} className="rounded-xl border border-flw-line/60 p-3">
+              <div className="flex items-center justify-between">
+                <span className="capitalize">{c.name.replace(/^the /, "")}</span>
+                {c.ready ? <Chip tone="lime">ready</Chip> : <Chip tone="pink">{c.blockers.length} checks outstanding</Chip>}
+              </div>
+              {!c.ready && (
+                <ul className="mt-2 space-y-1 text-xs text-flw-mute">
+                  {c.blockers.map((b) => <li key={b}>· {b}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      </Glass>
+
       <Glass>
         <GHead title="Providers" />
         <div className="overflow-x-auto p-4">

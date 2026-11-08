@@ -28,10 +28,12 @@ from ..live import budget as budget_mod
 from ..live import providers, setup_agent, toolcheck
 from ..live.budget import budget
 from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool, system_prompt
-from ..models import Organization, UsageKind
+from ..models import Organization, UsageKind, WorkspaceSettings
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
+from ..voice import launch
 from ..voice.languages import LANGUAGES
+from ..voice.regions import country_of
 from ..voice.routing import language_instruction
 
 log = logging.getLogger("voxera.live")
@@ -187,12 +189,17 @@ def worker_brain(body: BrainIn, request: Request, db: DB) -> StreamingResponse:
     if not header.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Worker token required")
     try:
-        org_id = worker_auth.verify(header[7:].strip())
+        org_id, mode = worker_auth.verify(header[7:].strip())
     except worker_auth.WorkerAuthError as e:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from None
     set_tenant(db, org_id=org_id)
     if db.get(Organization, org_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found")
+    if mode == "live":  # real callers only where the business's country passed its launch review
+        ws = db.get(WorkspaceSettings, org_id)
+        country = country_of(ws.locale if ws else None) or ""
+        if not launch.ready(country):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Live calls are not enabled for this country yet")
     return _brain(body, org_id, None, db)
 
 

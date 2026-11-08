@@ -27,9 +27,17 @@ export interface ProviderRow {
   note: string;
 }
 
+export interface LaunchRow {
+  country: string;
+  name: string;
+  ready: boolean;
+  blockers: string[];
+}
+
 export interface LanguagesResponse {
   languages: LanguageRow[];
   providers: ProviderRow[];
+  launch: LaunchRow[];
   evidence_levels: Record<Evidence, string>;
 }
 

@@ -39,12 +39,19 @@ def enabled() -> bool:
     return _secret() is not None
 
 
-def mint(org_id: uuid.UUID, ttl: timedelta = MAX_TTL, now: datetime | None = None) -> str:
+MODES = ("test", "live")
+
+
+def mint(org_id: uuid.UUID, ttl: timedelta = MAX_TTL, now: datetime | None = None, mode: str = "test") -> str:
+    """``mode`` "live" is for real callers and is refused for a business whose country is not
+    launch-ready (app/voice/launch.py); "test" is for simulated and internal calls."""
     secret = _secret()
     if secret is None:
         raise WorkerAuthError("Worker credentials are not enabled")
     if not timedelta(0) < ttl <= MAX_TTL:
         raise WorkerAuthError("Worker tokens last at most 15 minutes")
+    if mode not in MODES:
+        raise WorkerAuthError("Unknown worker mode")
     now = now or datetime.now(UTC)
     claims = {
         "iss": ISSUER,
@@ -52,6 +59,7 @@ def mint(org_id: uuid.UUID, ttl: timedelta = MAX_TTL, now: datetime | None = Non
         "sub": "voice-worker",
         "org": str(org_id),
         "scope": SCOPE,
+        "mode": mode,
         "iat": int(now.timestamp()),
         "exp": int((now + ttl).timestamp()),
         "jti": uuid.uuid4().hex,
@@ -59,8 +67,8 @@ def mint(org_id: uuid.UUID, ttl: timedelta = MAX_TTL, now: datetime | None = Non
     return jwt.encode(claims, secret, algorithm="HS256")
 
 
-def verify(token: str) -> uuid.UUID:
-    """The workspace the token is for. Raises WorkerAuthError for anything else."""
+def verify(token: str) -> tuple[uuid.UUID, str]:
+    """The workspace the token is for and its mode. Raises WorkerAuthError for anything else."""
     secret = _secret()
     if secret is None:
         raise WorkerAuthError("Worker credentials are not enabled")
@@ -71,15 +79,17 @@ def verify(token: str) -> uuid.UUID:
             algorithms=["HS256"],
             audience=AUDIENCE,
             issuer=ISSUER,
-            options={"require": ["exp", "iat", "aud", "iss", "org", "scope"]},
+            options={"require": ["exp", "iat", "aud", "iss", "org", "scope", "mode"]},
         )
     except jwt.PyJWTError:
         raise WorkerAuthError("Invalid or expired worker token") from None
     if claims.get("scope") != SCOPE:
         raise WorkerAuthError("Token is not for the brain")
+    if claims.get("mode") not in MODES:
+        raise WorkerAuthError("Unknown worker mode")
     if claims["exp"] - claims["iat"] > MAX_TTL.total_seconds():
         raise WorkerAuthError("Token lifetime too long")
     try:
-        return uuid.UUID(claims["org"])
+        return uuid.UUID(claims["org"]), claims["mode"]
     except (ValueError, TypeError):
         raise WorkerAuthError("Invalid workspace in token") from None

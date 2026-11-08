@@ -35,14 +35,21 @@ def test_endpoint_does_not_exist_until_enabled(client):
 
 def test_tokens_are_scoped_short_lived_and_signed_separately(worker):
     org = uuid.uuid4()
-    assert worker_auth.verify(worker_auth.mint(org)) == org
+    assert worker_auth.verify(worker_auth.mint(org)) == (org, "test")
     with pytest.raises(worker_auth.WorkerAuthError):
         worker_auth.mint(org, ttl=timedelta(hours=1))
     expired = worker_auth.mint(org, now=datetime.now(UTC) - timedelta(minutes=20))
     with pytest.raises(worker_auth.WorkerAuthError, match="expired"):
         worker_auth.verify(expired)
     now = int(datetime.now(UTC).timestamp())
-    base = {"iss": "voxera-api", "aud": "voxera-worker-brain", "org": str(org), "iat": now, "exp": now + 60}
+    base = {
+        "iss": "voxera-api",
+        "aud": "voxera-worker-brain",
+        "org": str(org),
+        "iat": now,
+        "exp": now + 60,
+        "mode": "test",
+    }
     for bad in (
         {**base, "scope": "admin"},
         {**base, "scope": "live:brain", "aud": "voxera-app"},
@@ -100,3 +107,20 @@ def test_worker_secret_must_be_strong():
 
     with pytest.raises(ValueError):
         Settings(worker_secret="short")
+
+
+def test_live_mode_is_refused_until_the_country_passes_its_launch_review(worker, live, make_account, monkeypatch):  # noqa: F811
+    from app.voice import launch
+
+    a = make_account("a@example.com")
+    setup_business(a)
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live")
+    r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
+    assert r.status_code == 403 and live["llm_requests"] == []
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 10, 2))]
+    r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    with pytest.raises(worker_auth.WorkerAuthError):
+        worker_auth.mint(uuid.UUID(a.org_id), mode="production")

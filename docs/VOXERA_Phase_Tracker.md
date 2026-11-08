@@ -57,6 +57,8 @@ run. All voice results are **simulated** (stand-in providers); none is a real-ca
 | 29 | Receptionist wording by business country (currency, emergency numbers) | Branch `claude/phase2-global` | `93a3ec7`; `tests/test_regions.py`; no number marked verified; unknown country gets no guessed number |
 | 30 | Scoped worker credential, worker brain endpoint, token refresh | Branch `claude/phase2-global` | `f96c480`, `df12e32`; 6 API + 5 worker tests; stand-in call via minted, refreshing token; endpoint off unless `VOXERA_WORKER_SECRET` set |
 | 31 | Languages page (registry, route preview, providers) | Branch `claude/phase2-global` | `5414e21`; browser e2e 8/8 against the real API; in the integration workflow |
+| 32 | Multilingual safety scenarios (injection in ar/ml, yes-before-booking in hi, emergency by business country) | Branch `claude/phase2-global` | `797c3a1`; harness 17/17 stand-in scenarios (plumbing); API test: UAE business gives UAE numbers whatever the caller speaks |
+| 33 | Launch gate per country; live worker tokens refused until signed off | Branch `claude/phase2-global` | `app/voice/launch.py`; no country signed off; `docs/launch-country-checklist.md`; Languages page shows outstanding checks (browser e2e 9/9) |
 | 28 | Real-model, real-audio and telephony validation (Sprint E) | Not run | Needs paid keys with caps, hosting and a test number: owner approval |
 
 ## Defects found and fixed in this phase

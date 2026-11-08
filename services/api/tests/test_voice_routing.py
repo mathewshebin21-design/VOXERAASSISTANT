@@ -187,6 +187,8 @@ def test_languages_endpoint_reports_evidence_and_configuration(make_account):
     by_id = {p["id"]: p for p in body["providers"]}
     assert "standin-stt" not in by_id and by_id["deepgram"]["integrated"] is False
     assert by_id["kokoro"]["configured"] and not by_id["anthropic"]["configured"]  # no key in tests
+    launch = {row["country"]: row for row in body["launch"]}
+    assert launch["GB"]["ready"] is False and launch["GB"]["blockers"]
 
 
 def test_route_preview_respects_configuration_and_policy(make_account):

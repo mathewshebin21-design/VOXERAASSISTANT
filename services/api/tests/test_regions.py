@@ -69,3 +69,33 @@ def test_emergency_numbers_follow_the_business_country_not_the_caller_language(m
     prompts = [json.loads(r.content)["system"][0]["text"] for r in live["llm_requests"]]
     for p in prompts:  # same business (UAE) whatever the caller speaks
         assert "998 for an ambulance" in p and "NHS" not in p
+
+
+# ---- launch gate --------------------------------------------------------------------------------
+
+
+def test_no_country_is_ready_for_real_callers_yet():
+    from app.voice import launch
+
+    assert launch.SIGN_OFFS == {}
+    for row in launch.status():
+        assert not row["ready"] and len(row["blockers"]) == len(launch.CHECKS)
+
+
+def test_a_country_is_ready_only_when_every_check_is_signed_off(monkeypatch):
+    from app.voice import launch
+
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full[:-1])
+    assert launch.blockers("GB") == [launch.CHECKS["language_tested"]]
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    assert launch.ready("GB")
+    incomplete = (launch.SignOff("telephony", "owner", "2026-12-01", ""),)  # no evidence: does not count
+    monkeypatch.setitem(launch.SIGN_OFFS, "IN", incomplete)
+    assert launch.CHECKS["telephony"] in launch.blockers("IN")
+
+
+def test_an_unknown_country_also_needs_a_profile():
+    from app.voice import launch
+
+    assert launch.blockers("FR")[0].startswith("No country profile")

@@ -91,6 +91,12 @@ try {
       : `unexpected: ${text}`;
   });
 
+  await step("launch readiness shows every profiled country blocked, with its outstanding checks", async () => {
+    const text = await page.getByTestId("launch-table").innerText();
+    return text.includes("United Kingdom") && text.includes("India") && !/\bready\b/.test(text.replace(/readiness/g, ""))
+      && text.includes("Emergency and urgent-advice numbers");
+  });
+
   if (shot) await page.screenshot({ path: shot, fullPage: true });
 
   await step("clean up the synthetic account", async () => (await call("DELETE", "/me", { password: PW })).status === 204);
