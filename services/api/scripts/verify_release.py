@@ -13,6 +13,7 @@ Checks:
   - connected AS the runtime role with no tenant set, every tenant table returns no rows;
   - Agent Studio's published versions are append-only for the runtime role (from 0008);
   - the design columns and check constraints exist, with no NULL or invalid values (from 0009);
+  - the shared rate-limit store exists and the runtime role can only call its function (from 0010);
   - with --baseline: no table in the baseline has fewer rows (nothing was lost or dropped).
 
 Connections come from the same variables as migrate.py: DATABASE_URL_UNPOOLED (owner) and
@@ -117,6 +118,28 @@ def owner_checks(c, env: str, expect: str) -> tuple[list[tuple[str, bool, str]],
         for name in ("ck_settings_ui_design", "ck_membership_ui_design"):
             n = c.execute(text("SELECT count(*) FROM pg_constraint WHERE conname = :n"), {"n": name}).scalar()
             out.append((f"check constraint {name}", n == 1, ""))
+
+    if _rev_at_least(rev, "0010"):
+        exists = c.execute(text("SELECT to_regclass('public.rate_limit_hits') IS NOT NULL")).scalar()
+        out.append(("0010 table rate_limit_hits exists", bool(exists), ""))
+        definer = c.execute(
+            text(
+                "SELECT prosecdef FROM pg_proc "
+                "WHERE proname = 'rate_limit_hit' AND pronamespace = 'public'::regnamespace"
+            )
+        ).scalar()
+        out.append(("0010 function rate_limit_hit is security definer", definer is True, f"{definer}"))
+        if role is not None and exists and definer is not None:
+            can_call = c.execute(
+                text("SELECT has_function_privilege(:r, 'public.rate_limit_hit(text, integer)', 'EXECUTE')"),
+                {"r": APP_ROLE},
+            ).scalar()
+            out.append(("runtime role may call rate_limit_hit", bool(can_call), ""))
+            for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                ok = not c.execute(
+                    text("SELECT has_table_privilege(:r, 'public.rate_limit_hits', :p)"), {"r": APP_ROLE, "p": priv}
+                ).scalar()
+                out.append((f"rate_limit_hits: runtime role has no {priv}", ok, ""))
 
     counts = {
         t: c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608 (names from the catalog)

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     invitation_days: int = 7
 
     login_attempts_per_minute: int = 5
+    # Where rate-limit counts live. "postgres" is shared by every instance (migration 0010);
+    # "memory" is per process and only correct with one instance: the rollback setting.
+    rate_limit_backend: str = Field("postgres", pattern="^(postgres|memory)$")
 
     # ---- live AI and speech providers (Phase 3) ----
     # Nothing here is called unless BOTH a key and a non-zero monthly cap are set.
