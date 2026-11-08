@@ -25,6 +25,8 @@ def test_owner_checks_pass_at_head_and_never_write(owner_engine, make_account):
         "check constraint ck_settings_ui_design",
         "0010 table rate_limit_hits exists",
         "rate_limit_hits: runtime role has no SELECT",
+        "0011 table calls exists",
+        "call events: runtime role has no DELETE",
     } <= names
     assert "workspace_settings" in tenant and counts["organizations"] == 1
 

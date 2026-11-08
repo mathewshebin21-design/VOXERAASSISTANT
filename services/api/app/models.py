@@ -7,11 +7,13 @@ from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -452,3 +454,53 @@ class DeskAgent(Base):
     status: Mapped[DeskStatus] = mapped_column(Enum(DeskStatus, name="desk_status"), nullable=False)
     status_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Call(Base):
+    """One receptionist call (simulated, web or phone). See migration 0011 for the lifecycle rules."""
+
+    __tablename__ = "calls"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(24))
+    external_ref: Mapped[str | None] = mapped_column(String(64))
+    caller_number: Mapped[str | None] = mapped_column(String(32))
+    caller_name: Mapped[str | None] = mapped_column(String(120))
+    ai_disclosure_played: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    recording_notice_played: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Transcript text is kept only when the caller heard the recording notice; otherwise events
+    # are stored without their words.
+    transcript_retained: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    audio_stored: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    event_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    summary: Mapped[dict] = mapped_column(default=dict, nullable=False)
+    end_reason: Mapped[str | None] = mapped_column(String(200))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = _created()
+    last_activity_at: Mapped[datetime] = _created()
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CallEvent(Base):
+    """One thing that happened on a call, in order. Append-only for the API role."""
+
+    __tablename__ = "call_events"
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    call_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    at: Mapped[datetime] = _created()
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    speaker: Mapped[str | None] = mapped_column(String(8))
+    text: Mapped[str | None] = mapped_column(String(4000))
+    data: Mapped[dict] = mapped_column(default=dict, nullable=False)
