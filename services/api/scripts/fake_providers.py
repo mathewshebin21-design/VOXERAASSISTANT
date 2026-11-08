@@ -6,23 +6,42 @@ path (browser → Next proxy → API → provider) can be exercised without keys
 Usage: python scripts/fake_providers.py [port] [mp3 file]
 """
 
+import hashlib
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MP3 = b"ID3"
-if len(sys.argv) > 2:
-    with open(sys.argv[2], "rb") as f:
-        MP3 = f.read()
+MP3 = b"ID3"  # replaced by the file given on the command line
 
 
 def sse(events: list[dict]) -> bytes:
     return b"".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode() for e in events)
 
 
-def reply(blocks: list[dict], stop: str) -> bytes:
+# A simulated prompt cache, so tests can see cache metrics flow end to end. It imitates the
+# shape of the real API's usage figures only: it says nothing about real cache behaviour.
+_SEEN_PREFIXES: set[str] = set()
+_cache_lock = threading.Lock()
+
+
+def usage_for(body: dict) -> dict:
+    """800 input tokens per request; with a cache breakpoint, 700 of them are written to the
+    simulated cache the first time a prefix is seen and read from it afterwards."""
+    system = body.get("system")
+    if not (isinstance(system, list) and system and system[0].get("cache_control")):
+        return {"input_tokens": 800, "output_tokens": 1}
+    key = hashlib.sha256(json.dumps([body.get("tools"), system[0]["text"]], sort_keys=True).encode()).hexdigest()
+    with _cache_lock:
+        hit = key in _SEEN_PREFIXES
+        _SEEN_PREFIXES.add(key)
+    cached = {"cache_read_input_tokens": 700} if hit else {"cache_creation_input_tokens": 700}
+    return {"input_tokens": 100, "output_tokens": 1, **cached}
+
+
+def reply(blocks: list[dict], stop: str, usage: dict | None = None) -> bytes:
     start = {"id": "msg_fake", "type": "message", "role": "assistant", "model": "fake", "content": []}
-    start |= {"stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 800, "output_tokens": 1}}
+    start |= {"stop_reason": None, "stop_sequence": None, "usage": usage or {"input_tokens": 800, "output_tokens": 1}}
     evs: list[dict] = [{"type": "message_start", "message": start}]
     for i, b in enumerate(blocks):
         if b["type"] == "text":
@@ -78,6 +97,7 @@ class H(BaseHTTPRequestHandler):
         if self.path.endswith("/chat/completions"):
             self._send(200, "text/event-stream", chat_reply(body["messages"]))
         elif self.path.startswith("/v1/messages"):
+            usage = usage_for(body)
             last = body["messages"][-1]["content"]
             said = next((m["content"] for m in reversed(body["messages"]) if isinstance(m["content"], str)), "")
             if (
@@ -87,7 +107,7 @@ class H(BaseHTTPRequestHandler):
                 and "outcome" in last[0]["content"]
             ):
                 out = reply(
-                    [{"type": "text", "text": "Of course. I'm putting you through to the team now."}], "end_turn"
+                    [{"type": "text", "text": "Of course. I'm putting you through to the team now."}], "end_turn", usage
                 )
             elif isinstance(last, str) and "someone" in said.lower():
                 args = {
@@ -97,14 +117,14 @@ class H(BaseHTTPRequestHandler):
                     "caller_phone": None,
                     "urgent": False,
                 }
-                out = reply([{"type": "tool_use", "name": "transfer_to_staff", "input": args}], "tool_use")
+                out = reply([{"type": "tool_use", "name": "transfer_to_staff", "input": args}], "tool_use", usage)
             elif isinstance(last, list) and last and last[0].get("type") == "tool_result":
                 services = json.loads(last[0]["content"])
                 names = ", ".join(s["name"] for s in services) or "no services listed"
                 answer = f"We offer {names}. Is there one you'd like to know more about?"
-                out = reply([{"type": "text", "text": answer}], "end_turn")
+                out = reply([{"type": "text", "text": answer}], "end_turn", usage)
             else:
-                out = reply([{"type": "tool_use", "name": "list_services"}], "tool_use")
+                out = reply([{"type": "tool_use", "name": "list_services"}], "tool_use", usage)
             self._send(200, "text/event-stream", out)
         elif "/v1/text-to-speech/" in self.path:
             self._send(200, "audio/mpeg", MP3)
@@ -120,4 +140,7 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 2:
+        with open(sys.argv[2], "rb") as f:
+            MP3 = f.read()
     ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 8090), H).serve_forever()
