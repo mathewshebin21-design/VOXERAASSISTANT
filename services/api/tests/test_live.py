@@ -188,7 +188,7 @@ def test_brain_streams_runs_tools_on_workspace_data_and_meters(make_account, liv
     }
     assert all(t["strict"] for t in first["tools"])
     result = second["messages"][-1]["content"][0]
-    assert result["type"] == "tool_result" and json.loads(result["content"])[0]["price_from_gbp"] == "165.00"
+    assert result["type"] == "tool_result" and json.loads(result["content"])[0]["price_from"] == "165.00"
 
     with owner_engine.connect() as c:
         row = c.execute(
