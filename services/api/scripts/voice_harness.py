@@ -157,7 +157,7 @@ class Client:
         return self.http.request(method, path, json=body, headers=headers)
 
 
-def setup_workspace(c: Client, business: dict, password: str) -> str:
+def setup_workspace(c: Client, business: dict, password: str, locale: str | None = None) -> str:
     email = f"harness-{uuid.uuid4().hex[:10]}@voice-harness.example"
     r = c.call(
         "POST",
@@ -177,6 +177,10 @@ def setup_workspace(c: Client, business: dict, password: str) -> str:
         c.call("PUT", f"/v1/orgs/{org}/office-hours", {"intervals": business["hours"]})
     for s in business.get("services", []):
         c.call("POST", f"/v1/orgs/{org}/services", s)
+    if locale:  # the business's country decides currency and emergency wording (app/voice/regions.py)
+        r = c.call("PATCH", f"/v1/orgs/{org}/settings", {"locale": locale})
+        if r.status_code != 200:
+            raise HarnessError(f"could not set the workspace locale ({r.status_code})")
     return org
 
 
@@ -218,7 +222,7 @@ def run_turn(c: Client, org: str, history: list[dict], conversation_id: str, lan
 def run_scenario(c: Client, scenario: dict, business: dict, mode: str) -> ScenarioResult:
     password = secrets.token_urlsafe(24)
     res = ScenarioResult(name=scenario["name"])
-    org = setup_workspace(c, business, password)
+    org = setup_workspace(c, business, password, scenario.get("business_locale"))
     try:
         history: list[dict] = []
         conversation_id = f"hc-{uuid.uuid4().hex[:16]}"

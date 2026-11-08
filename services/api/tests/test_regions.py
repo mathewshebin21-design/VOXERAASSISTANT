@@ -3,6 +3,8 @@
 from app.live.receptionist import BusinessContext, system_prompt
 from app.voice.regions import GENERIC, PROFILES, country_of, profile_for
 
+from .test_live import live  # noqa: F401  (fixture)
+
 
 def prompt(locale):
     return system_prompt(BusinessContext(name="Halden", greeting="", disclosure=None, locale=locale))
@@ -49,3 +51,21 @@ def test_services_report_the_currency(make_account):
         ctx = load_context(db, uuid.UUID(a.org_id))
     assert ctx.services[0]["price_from"] == "45.00" and ctx.services[0]["currency"] == "GBP"
     assert ctx.locale == "en-GB"
+
+
+def test_emergency_numbers_follow_the_business_country_not_the_caller_language(make_account, live):  # noqa: F811
+    import json
+
+    from .test_live import message, setup_business
+
+    a = make_account("ada@example.com")
+    setup_business(a)
+    assert a.patch(a.o("/settings"), json={"locale": "ar-AE"}).status_code == 200
+    reply = message([("text", {"parts": ["…"]})], "end_turn", 20, 2)
+    live["llm"] = [(200, reply), (200, reply)]
+    for rid, lang in (("emerg-ar-0001", "ar-AE"), ("emerg-hi-0001", "hi-IN")):
+        body = {"request_id": rid, "language": lang, "messages": [{"role": "user", "text": "help"}]}
+        assert a.post(a.o("/live/brain"), json=body).status_code == 200
+    prompts = [json.loads(r.content)["system"][0]["text"] for r in live["llm_requests"]]
+    for p in prompts:  # same business (UAE) whatever the caller speaks
+        assert "998 for an ambulance" in p and "NHS" not in p
