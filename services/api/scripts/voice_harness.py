@@ -24,6 +24,7 @@ import math
 import secrets
 import sys
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -79,6 +80,7 @@ class TurnResult:
     client_first_text_ms: int | None = None
     client_total_ms: int = 0
     server: dict = field(default_factory=dict)  # the done event's metrics
+    language: str | None = None
 
 
 @dataclass
@@ -90,6 +92,32 @@ class ScenarioResult:
     @property
     def ok(self) -> bool:
         return all(c["ok"] for c in self.checks)
+
+
+SCRIPTS = {"Latn": [(0x41, 0x24F)], "Deva": [(0x900, 0x97F)], "Mlym": [(0xD00, 0xD7F)], "Arab": [(0x600, 0x6FF)]}
+
+
+def script_share(text: str, script: str) -> float:
+    """Share of letters in ``text`` that belong to ``script`` (0 when there are no letters)."""
+    # Letters and combining marks: Devanagari and Malayalam vowel signs are marks, not letters.
+    letters = [ch for ch in text if unicodedata.category(ch)[0] in "LM"]
+    if not letters:
+        return 0.0
+    ranges = SCRIPTS[script]
+    return sum(any(lo <= ord(ch) <= hi for lo, hi in ranges) for ch in letters) / len(letters)
+
+
+def caller_turns(scenario: dict) -> list[tuple[str, str | None]]:
+    """Each caller turn as (text, language). A turn may switch language, as the worker does after
+    detection; otherwise it inherits the previous turn's language, starting with the scenario's."""
+    lang, out = scenario.get("language"), []
+    for t in scenario["caller"]:
+        if isinstance(t, dict):
+            lang = t.get("language", lang)
+            out.append((t["text"], lang))
+        else:
+            out.append((t, lang))
+    return out
 
 
 def evaluate(scenario: dict, turns: list[TurnResult], mode: str) -> list[dict]:
@@ -111,6 +139,9 @@ def evaluate(scenario: dict, turns: list[TurnResult], mode: str) -> list[dict]:
         checks.append({"check": f"did not use {tool}", "ok": tool not in used, "detail": ", ".join(sorted(used))})
     for words in expect.get("reply_includes", []):
         checks.append({"check": f"said '{words}'", "ok": words.lower() in said, "detail": ""})
+    if (script := expect.get("reply_script")) and turns:
+        share = script_share(turns[-1].reply, script)
+        checks.append({"check": f"last reply written in {script}", "ok": share >= 0.6, "detail": f"{share:.0%}"})
     for words in expect.get("reply_excludes", []):
         checks.append({"check": f"did not say '{words}'", "ok": words.lower() not in said, "detail": ""})
     return checks
@@ -149,9 +180,11 @@ def setup_workspace(c: Client, business: dict, password: str) -> str:
     return org
 
 
-def run_turn(c: Client, org: str, history: list[dict], conversation_id: str) -> TurnResult:
-    t = TurnResult(caller=history[-1]["text"])
+def run_turn(c: Client, org: str, history: list[dict], conversation_id: str, language: str | None = None) -> TurnResult:
+    t = TurnResult(caller=history[-1]["text"], language=language)
     body = {"request_id": f"h-{uuid.uuid4().hex[:16]}", "conversation_id": conversation_id, "messages": history}
+    if language:
+        body["language"] = language
     started = time.monotonic()
     with c.http.stream(
         "POST", f"/v1/orgs/{org}/live/brain", json=body, headers={"authorization": f"Bearer {c.token}"}
@@ -189,9 +222,9 @@ def run_scenario(c: Client, scenario: dict, business: dict, mode: str) -> Scenar
     try:
         history: list[dict] = []
         conversation_id = f"hc-{uuid.uuid4().hex[:16]}"
-        for line in scenario["caller"]:
+        for line, language in caller_turns(scenario):
             history.append({"role": "user", "text": line})
-            turn = run_turn(c, org, history, conversation_id)
+            turn = run_turn(c, org, history, conversation_id, language)
             res.turns.append(turn)
             if turn.outcome != "done":
                 break
