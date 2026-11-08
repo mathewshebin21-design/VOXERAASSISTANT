@@ -2,4 +2,4 @@
 # Target: PR #28's isolated Neon validation branch only (br-divine-poetry-zaxsxbs0,
 # endpoint ep-cool-butterfly-zasyi8tz). 0009 -> 0010 -> 0011, then verify_release --expect 0011.
 # Not production, not shared staging, not PR #27's branch.
-requested_at: 2026-11-08T19:25Z
+requested_at: 2026-11-08T19:35Z (re-run after the environment secrets were added)
