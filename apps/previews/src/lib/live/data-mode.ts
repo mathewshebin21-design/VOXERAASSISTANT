@@ -5,6 +5,8 @@
 // demo data"); a signed-in user can switch to it and back without signing out.
 // "unavailable": signed in, but the workspace list could not be loaded. Screens must say
 // so rather than silently substitute demo data.
+// "no_workspace": signed in with no workspace at all. Screens offer to create one rather than
+// show demo data as if it were theirs.
 
 import { create } from "zustand";
 import { useActiveOrg, useSession } from "./session";
@@ -19,13 +21,13 @@ export const useDemoView = create<{ on: boolean; hydrated: boolean; set: (on: bo
   hydrate: () => set({ on: read(), hydrated: true }),
 }));
 
-export type DataMode = "loading" | "live" | "demo" | "unavailable";
+export type DataMode = "loading" | "live" | "demo" | "unavailable" | "no_workspace";
 
 export function dataModeFor(s: { status: "loading" | "anonymous" | "signed_in"; hydrated: boolean; hasOrg: boolean; demoOn: boolean; orgsError: string | null }): DataMode {
   if (s.status === "loading" || !s.hydrated) return "loading";
   if (s.status !== "signed_in" || s.demoOn) return "demo";
   if (s.hasOrg) return "live";
-  return s.orgsError ? "unavailable" : "demo";
+  return s.orgsError ? "unavailable" : "no_workspace";
 }
 
 export function useDataMode() {

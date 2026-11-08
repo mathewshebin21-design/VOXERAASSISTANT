@@ -295,6 +295,21 @@ await step("from the error, demo data opens only when chosen, labelled as demo",
   return labelled;
 });
 
+await step("a signed-in user with no workspace is offered to create one, never shown demo data", async () => {
+  const del = await call(m, "DELETE", `/orgs/${memberOrg}`, { confirm_name: member.org });
+  if (del.status !== 204) return `delete workspace ${del.status}`;
+  await m.goto(`${BASE}/atelier/studio`, { waitUntil: "networkidle" });
+  await m.getByTestId("workspace-none").waitFor({ timeout: 10000 });
+  if ((await m.locator("body").innerText()).includes(DEMO_NAME)) return "demo data shown";
+  const fresh = `Ruiz Again ${run}`;
+  await m.getByLabel("Business name").fill(fresh);
+  await m.getByRole("button", { name: "Create workspace" }).click();
+  await m.getByTestId("workspace-none").waitFor({ state: "detached", timeout: 10000 });
+  await m.waitForLoadState("networkidle");
+  const orgs = (await call(m, "GET", "/me/organizations")).json ?? [];
+  return orgs.length === 1 && orgs[0].organization.name === fresh ? true : `workspaces ${orgs.length}`;
+});
+
 await step("clean-up: delete all test accounts and their workspaces", async () => {
   const s = await call(b, "DELETE", "/me", { password: PW });
   const o = await call(a, "DELETE", "/me", { password: PW });

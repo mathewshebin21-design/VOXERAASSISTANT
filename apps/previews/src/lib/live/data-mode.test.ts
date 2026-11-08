@@ -22,6 +22,10 @@ describe("dataModeFor", () => {
     expect(dataModeFor({ ...base, hasOrg: false, orgsError: "Service unavailable" })).toBe("unavailable");
     expect(dataModeFor({ ...base, hasOrg: false, orgsError: "Network error" })).toBe("unavailable");
   });
+  it("offers to create a workspace, never demo data, when a signed-in user has none", () => {
+    expect(dataModeFor({ ...base, hasOrg: false })).toBe("no_workspace");
+    expect(dataModeFor({ ...base, hasOrg: false, demoOn: true })).toBe("demo");
+  });
   it("a workspace that loaded wins over a stale error", () => {
     expect(dataModeFor({ ...base, orgsError: "old" })).toBe("live");
   });
