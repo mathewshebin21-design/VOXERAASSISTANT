@@ -1,11 +1,31 @@
-"""Clients for the AI and speech providers. Tests replace these factories with fakes."""
+"""Clients for the AI and speech providers. Tests replace these factories with fakes.
+
+Each provider client is created once per server process and reused, so consecutive requests
+(model rounds, one TTS request per sentence) keep their connection open instead of paying for a
+new TCP and TLS handshake each time. The clients are thread-safe. Callers close the responses
+they open, never the shared client. ``CLIENTS_CREATED`` counts constructions, for metrics.
+"""
 
 import copy
+import functools
+import threading
 
 import anthropic
 import httpx
 
 from ..config import get_settings
+
+CLIENTS_CREATED = {"anthropic": 0, "openai_http": 0, "tts_http": 0}
+_count_lock = threading.Lock()
+
+# Idle connections are kept for a short time only, so a provider that closes them first is rare.
+_LIMITS = httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=15.0)
+
+
+def _created(kind: str) -> None:
+    with _count_lock:
+        CLIENTS_CREATED[kind] += 1
+
 
 # OpenAI-compatible chat endpoints. Each is free to try within its own limits; check the
 # provider's terms before real customer data goes through it (see docs/phase-3-live-providers.md).
@@ -32,8 +52,10 @@ def llm_ready() -> bool:
     return bool(s.llm_model) and has_url and (s.llm_api_key is not None or s.llm_provider == "ollama")
 
 
+@functools.cache
 def openai_http() -> httpx.Client:
-    return httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0))
+    _created("openai_http")
+    return httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0), limits=_LIMITS)
 
 
 def openai_request(client: httpx.Client, body: dict) -> httpx.Request:
@@ -89,16 +111,20 @@ def openai_tools(tools: list[dict], provider: str) -> list[dict]:
 def llm_client() -> anthropic.Anthropic:
     s = get_settings()
     assert s.anthropic_api_key is not None
+    return _anthropic(s.anthropic_api_key.get_secret_value())
+
+
+@functools.lru_cache(maxsize=2)  # keyed by the key, so a rotated key gets a fresh client
+def _anthropic(api_key: str) -> anthropic.Anthropic:
+    _created("anthropic")
     # One retry only: on a phone call a slow retry is worse than the recovery line.
-    return anthropic.Anthropic(
-        api_key=s.anthropic_api_key.get_secret_value(),
-        max_retries=1,
-        timeout=anthropic.Timeout(30.0, connect=5.0),
-    )
+    return anthropic.Anthropic(api_key=api_key, max_retries=1, timeout=anthropic.Timeout(30.0, connect=5.0))
 
 
+@functools.cache
 def tts_http() -> httpx.Client:
-    return httpx.Client(timeout=httpx.Timeout(20.0, connect=5.0))
+    _created("tts_http")
+    return httpx.Client(timeout=httpx.Timeout(20.0, connect=5.0), limits=_LIMITS)
 
 
 def tts_request(client: httpx.Client, text: str) -> httpx.Request:

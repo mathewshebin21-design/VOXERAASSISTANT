@@ -166,7 +166,13 @@ def test_brain_streams_runs_tools_on_workspace_data_and_meters(make_account, liv
     )
     assert first["model"] == "claude-opus-5-5" and first["fallbacks"] == "default"
     assert first["output_config"] == {"effort": "low"} and "temperature" not in first
-    assert "Halden & Rye" in first["system"] and "999" in first["system"]
+    # Prompt caching: tools, then the stable instructions with the breakpoint, then the clock.
+    stable, clock = first["system"]
+    assert stable["cache_control"] == {"type": "ephemeral"} and "cache_control" not in clock
+    assert "Halden & Rye" in stable["text"] and "999" in stable["text"]
+    assert "It is now" not in stable["text"] and clock["text"].startswith("It is now ")
+    assert second["system"][0] == stable and second["tools"] == first["tools"]  # same cached prefix each round
+    assert ev[-1]["metrics"]["rounds"] == 2 and ev[-1]["metrics"]["output_tokens"] == 30 + 12
     assert first["messages"][0]["role"] == "user"  # synthetic opener before the greeting
     assert {t["name"] for t in first["tools"]} == {
         "get_business_info",

@@ -89,3 +89,21 @@ apply then.
 | Whether to approve a test provider key (and its monthly cap) for measurements | It spends money |
 | Which model the receptionist uses after measurement (V4) | Quality, cost and latency trade-off |
 | Voice worker hosting and telephony provider (V1) | New infrastructure and recurring cost |
+
+## 7. Step 1 results: V2, V3, V6 and part of V7 (branch `claude/phase2-voice-step1`)
+
+| Finding | Change | Evidence |
+|---|---|---|
+| V2 no prompt caching | The system prompt is sent as blocks: the stable instructions carry a cache breakpoint, which also covers the tool definitions sent before them | `test_live.py`: the request's first system block has `cache_control`, and the second round of a turn resends the identical tools and first block |
+| V3 clock in the prefix | The clock line (`CLOCK_LINE`) goes after the breakpoint | `test_cached_prefix_is_identical_at_different_times`: the cached block is byte-identical at 09:00 and 16:47 |
+| V6 a connection per sentence | One Anthropic, one OpenAI-compatible and one TTS client per server process (thread-safe, keep-alive 15 s, a rotated key gets a new client). Requests close only their own response, including on errors and when the listener stops early | `test_each_provider_client_is_created_once_per_process`; `test_tts_reuses_one_client_and_releases_each_response`. Local live suite: 5 TTS sentences used 1 client (before: 5); 2 brain turns used 1 Anthropic client |
+| V7 metrics (part) | Each turn logs and returns in its `done` event: rounds, uncached input, cache read and write, output tokens, time to first text, tool time, total time and clients created. Each TTS request logs time to headers and first byte, bytes, completion and clients. Logged under one allow-listed `metrics` key (numbers and flags only, never text) | `test_cache_hits_are_reported_and_still_counted_against_the_cap`, `test_openai_compatible_cached_tokens_are_reported`, `test_metrics_reach_the_json_log_and_nothing_else_does` |
+
+Unchanged on purpose: the default model, effort `low`, the monthly caps (cached tokens still count
+toward the cap, conservatively), authentication, tool permissions, the prompt-injection instructions,
+and streaming error handling. No migration.
+
+**Limitations:**
+- A real cache hit has not been observed. The stand-in provider used in CI reports no cache figures, and seeing one needs a paid call, which is held for owner approval.
+- Whether the cached prefix reaches the model's minimum cacheable length is unconfirmed until that call; with the receptionist's tool list and instructions it is expected to.
+- Connection reuse helps only while a serverless instance stays warm. A cold start creates new clients.
