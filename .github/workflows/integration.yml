@@ -70,5 +70,15 @@ jobs:
           LIVE_FAKES=1 BASE_URL=http://localhost:3000 node scripts/e2e-live.mjs
           BASE_URL=http://localhost:3000 node scripts/e2e-designs-live.mjs
           BASE_URL=http://localhost:3000 node scripts/e2e-design-select.mjs
+      - name: Scripted-call harness (stand-in providers; checks plumbing and metrics, not real performance)
+        working-directory: services/api
+        run: uv run python scripts/voice_harness.py --api http://127.0.0.1:8000 --mode fake --out voice-harness-report.json
+      - name: Harness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-harness-report-${{ github.sha }}
+          path: services/api/voice-harness-report.json
+          if-no-files-found: ignore
       - if: failure()
         run: tail -n 100 services/api/api.log apps/previews/web.log
