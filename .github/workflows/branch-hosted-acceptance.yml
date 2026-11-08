@@ -1,0 +1,57 @@
+name: Branch hosted acceptance
+
+# Hosted acceptance for a feature branch against ITS OWN isolated previews (branch web ->
+# branch API -> branch-only Neon database). Branches opt in by being listed below; the
+# isolation gate refuses the production, staging and RC-1 branches and any origin that is not
+# that branch's own preview. Runs after Vercel has deployed the pushed commit.
+
+on:
+  push:
+    branches: [claude/start-auth-routing]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-hosted-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  hosted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - name: Install browser test dependencies
+        run: |
+          npm ci
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Resolve this branch's preview origins (refuses protected branches)
+        id: origins
+        run: |
+          node -e '
+            import("./scripts/branch-isolation.mjs").then(({ previewOrigins }) => {
+              const o = previewOrigins(process.env.GITHUB_REF_NAME);
+              console.log(`api=${o.api}`); console.log(`web=${o.web}`);
+            });' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+      - name: Wait for this commit's deployments
+        run: node scripts/wait-for-deploy.mjs "${{ steps.origins.outputs.api }}" "${{ steps.origins.outputs.web }}" "${GITHUB_SHA::7}"
+      - name: Isolation gate (nothing else runs unless this passes)
+        id: gate
+        run: node scripts/branch-isolation.mjs "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Design selection, persistence, permissions, switching, authenticated navigation, clean-up
+        run: BASE_URL="${{ steps.origins.outputs.web }}" node scripts/e2e-design-select.mjs
+      - name: Isolation unchanged after the suite
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: node scripts/branch-isolation.mjs "$GITHUB_REF_NAME" "$GITHUB_SHA"
