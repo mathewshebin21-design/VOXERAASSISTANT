@@ -24,14 +24,17 @@ Updated 2026-11-06. Validation branch `codex/rc1-validation` at `ad98ff6`. **Pha
 ## Phase 0/1 completion: production releases
 
 Updated 2026-11-08. **Phase 0/1 is complete: design selection and authenticated design navigation
-are released and verified in production at `931138e`.**
+are released and verified in production at `931138e`, and the full customer-workflow suite passed
+in production at `667eec1` (item 16).**
 
 | # | Item | Status | Evidence / blocker |
 |---|------|--------|--------------------|
 | 12 | PR #20 design selection (schema 0009) in production | Verified | Merge `dd29ca1`; production API `dpl_EF3sA2hLu3t4XenobFqUWQDsDb9f` (2026-11-07 18:49 UTC). Procedure: `docs/release-pr20-design-selection.md` |
 | 13 | PR #21 authenticated design navigation, no silent demo data | Verified | Merge `931138e`; production API `dpl_8gt2Pfqf9dbuLM58RQSDPY3U8GkE`, web `dpl_FZYuDuaSjXK35Z4pNnBcEpPQDUyR`. All six release gates passed. Production smoke 13/13 (run 42459985605) with probe clean-up proven; hosted acceptance 28/28 (run 42458272416). Record: `docs/release-pr21.md` |
 | 14 | Rollback candidates retained | Verified | `dd29ca1` deployments: API `dpl_EF3sA2hLu3t4XenobFqUWQDsDb9f`, web `dpl_JD731LPMjNcYqhM6egAYsj28LsZU` |
-| 15 | PR #21 temporary infrastructure clean-up | Pending owner approval | Dependency review and resource list in `docs/release-pr21.md` → "Infrastructure clean-up record". RC-1 variables stay unchanged |
+| 15 | PR #21 temporary infrastructure clean-up | In progress | Neon branch `pr21-start-auth-isolated` deleted by the owner (2026-11-08). Remaining: branch `claude/pr21-prod-smoke`, GitHub environment `pr21-isolated`, three Vercel variables on `claude/start-auth-routing`, and review of the PR #20 production-branch exception. RC-1 variables stay unchanged |
+| 16 | Customer-workflow acceptance in production (RC-1 review requirement) | Verified | Run 42464039694 against `667eec1`: 108 passed, 0 test failures, 0 clean-up failures; 4 synthetic accounts and workspaces deleted and refused sign-in. Artifact 13611066471. Record: `docs/phase1-production-acceptance.md` |
+| 17 | Agent Studio (PR #2) scope | Provisional: Phase 2 | Unmerged; targets an old branch. Classified as Phase 2 pending the owner's master roadmap |
 
 ## Defects found and fixed in this phase
 
