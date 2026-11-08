@@ -189,3 +189,9 @@ def test_language_gate_manual_choice_wins():
     g = LanguageGate(accepted=("en-GB", "ar-SA"))
     assert g.choose("ar-SA") and not g.observe("en", 0.99) and g.current == "ar-SA"
     assert not g.choose("fr-FR")
+
+
+def test_worker_mode_uses_the_scoped_endpoint_and_never_the_org_in_the_url():
+    c = BrainClient("http://api.test/", "org-should-not-appear", "t", worker=True)
+    assert c.url == "http://api.test/v1/worker/live/brain"
+    assert BrainClient("http://api.test", "org-1", "t").url == "http://api.test/v1/orgs/org-1/live/brain"

@@ -20,6 +20,8 @@ Production: `claude/confident-shannon-7nb05f` at `0b04695` (PRs #25 and #26). St
 | Languages API and route preview; per-turn `language` in the brain | Branch `claude/phase2-global` | Same tests; the cached prefix is unchanged with a language set |
 | Voice-worker prototype: session, brain client, LiveKit adapter | Branch `claude/phase2-global` | 13 session tests; adapter run against livekit-agents 1.8.11; stand-in call through the real API |
 | Multilingual harness scenarios (hi, ml, ar, switching, Hinglish) | Branch `claude/phase2-global` | 12/12 scenarios in stand-in mode (plumbing only) |
+| Receptionist wording by business country (currency, emergency numbers) | Branch `claude/phase2-global` | `tests/test_regions.py`; no number marked verified |
+| Scoped worker credential and `/v1/worker/live/brain` | Branch `claude/phase2-global` | `tests/test_worker_auth.py` (6); stand-in call uses a minted token; off unless `VOXERA_WORKER_SECRET` is set |
 
 ## What does not exist yet
 
@@ -28,11 +30,10 @@ Production: `claude/confident-shannon-7nb05f` at `0b04695` (PRs #25 and #26). St
 | Telephony: numbers, SIP, transfer to a phone, voicemail | Provider choice and number purchase (owner approval) |
 | Server-side STT and TTS for calls | Paid keys and caps (owner approval) |
 | LiveKit server (Cloud or self-hosted); hosted worker | Hosting approval |
-| Scoped worker service credential | Design is done (ADR-0005 §3); implementation follows the hosting decision |
 | Workspace voice policy stored per workspace | Migration (approval) |
 | Number-to-workspace mapping | Migration (approval) |
 | Any measured latency, audio quality, language accuracy or cost | Paid run (Sprint E) |
-| Non-UK safety wording, currency and emergency numbers | Locale configuration work (next) |
+| Verified emergency numbers per launch country | Launch review per country (all entries unverified) |
 | CRM, order-status and other integrations; billing | Later phases |
 
 **Nothing above is claimed as supported for real callers.** Every voice result so far is simulated.

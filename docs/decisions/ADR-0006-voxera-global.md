@@ -96,16 +96,11 @@ No country is "supported" until its full call flow has been tested. Before a cou
 - data-transfer rules (for example UK and EU GDPR adequacy, India's DPDP Act, Gulf data-residency expectations);
 - the local emergency number, wording and transfer behaviour.
 
-**Hard-coded UK assumptions to remove before non-UK pilots:**
-- the receptionist prompt says "999 / NHS 111", "pounds" and "patch test";
-- prices are in GBP;
-- the default time zone is Europe/London.
-
-They become workspace and locale configuration.
+**UK assumptions removed.** Emergency numbers, currency, country and English variant now follow the workspace locale (`app/voice/regions.py`, implemented). Every emergency number is marked unverified until a launch review, and an unknown country gets "your local emergency number", never a guessed number. Still UK-shaped: the setup assistant takes prices as `price_from_gbp`, and the time zone defaults to Europe/London.
 
 ### 8. Data and security
 - Workspace isolation, RLS, tool authorisation, caps and audit are unchanged.
-- **The worker currently authenticates with an operator-supplied member token** (prototype only). Before any hosted worker, a scoped, signed service credential (ADR-0005 §3) is required.
+- **The worker authenticates with a scoped worker token** (`app/worker_auth.py`): its own secret, one workspace, brain only, at most 15 minutes, minted by `scripts/mint_worker_token.py`. The endpoint `POST /v1/worker/live/brain` does not exist unless `VOXERA_WORKER_SECRET` is set (off by default). Automatic rotation by a supervisor comes with hosting.
 - Call records (PR #28) store transcripts only when the recording notice was played, and never store audio.
 
 ## Consequences
@@ -117,7 +112,6 @@ They become workspace and locale configuration.
 **Not built:**
 - telephony;
 - server-side STT and TTS integrations;
-- the worker service credential;
 - persisting workspace voice policy (needs a migration);
 - real measurements.
 

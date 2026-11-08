@@ -2,8 +2,9 @@
 
 The worker never contains receptionist logic: prompts, tools, booking confirmation, tenancy and
 spending caps all stay in the API (ADR-0005). This client only streams one turn and reports what
-happened. The API does not yet issue a scoped service credential for workers (ADR-0005 §3); the
-prototype uses a bearer token supplied by the operator, and never logs it.
+happened. With ``worker=True`` it uses the scoped worker endpoint and a worker token (one workspace,
+brain only, at most 15 minutes; ADR-0005 §3); otherwise a member's token (development only). The
+token is never logged.
 """
 
 from __future__ import annotations
@@ -31,8 +32,12 @@ class TurnEvents:
 
 
 class BrainClient:
-    def __init__(self, api: str, org_id: str, token: str, http: httpx.AsyncClient | None = None) -> None:
-        self.url = f"{api.rstrip('/')}/v1/orgs/{org_id}/live/brain"
+    def __init__(
+        self, api: str, org_id: str, token: str, http: httpx.AsyncClient | None = None, *, worker: bool = False
+    ) -> None:
+        # A worker token names its workspace itself; the URL never chooses it.
+        base = api.rstrip("/")
+        self.url = f"{base}/v1/worker/live/brain" if worker else f"{base}/v1/orgs/{org_id}/live/brain"
         self._headers = {"authorization": f"Bearer {token}"}
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0))
 

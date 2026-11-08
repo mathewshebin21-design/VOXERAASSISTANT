@@ -11,7 +11,9 @@ Speech providers are NOT chosen here. They come from VOXERA's route for the call
 configures them. Running a room needs a LiveKit server (LiveKit Cloud or self-hosted): neither is
 provisioned, and doing so needs the owner's approval (ADR-0005 §4).
 
-    VOXERA_API_URL=… VOXERA_ORG_ID=… VOXERA_BRAIN_TOKEN=… python -m voxera_worker.livekit_agent dev
+    VOXERA_API_URL=… VOXERA_WORKER_TOKEN=… python -m voxera_worker.livekit_agent dev
+
+``VOXERA_WORKER_TOKEN`` is a scoped worker token (services/api/scripts/mint_worker_token.py).
 """
 
 from __future__ import annotations
@@ -56,7 +58,7 @@ class VoxeraAgent(Agent):
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
-    brain = BrainClient(os.environ["VOXERA_API_URL"], os.environ["VOXERA_ORG_ID"], os.environ["VOXERA_BRAIN_TOKEN"])
+    brain = BrainClient(os.environ["VOXERA_API_URL"], "", os.environ["VOXERA_WORKER_TOKEN"], worker=True)
     accepted = tuple(os.environ.get("VOXERA_LANGUAGES", "en-GB").split(","))
     call = CallSession(brain, language=LanguageGate(accepted=accepted, current=accepted[0]))
     session = AgentSession()  # STT/TTS/VAD come from the approved provider configuration (not set here)

@@ -1,7 +1,8 @@
 """Stand-in call: the worker's CallSession against a running VOXERA API (normally with the stand-in
 model provider, scripts/fake_providers.py). Simulated: no audio, no LiveKit server, no paid call.
 
-Creates a synthetic account, plays a short multilingual conversation through the real brain endpoint
+Creates a synthetic account, mints a scoped worker token for its workspace when --mint is given
+(otherwise uses the member token), plays a short multilingual conversation through the real brain endpoint
 (tenancy, caps, tools and the language field all exercised), checks the session's behaviour, prints a
 JSON summary and deletes the account. Refuses production.
 
@@ -29,7 +30,15 @@ from voxera_worker.session import CallSession, LanguageGate  # noqa: E402
 PRODUCTION = {"voxera-api-two.vercel.app", "voxera-api-ai-e399.vercel.app"}
 
 
-async def main(api: str) -> int:
+def mint_token(cmd: str, org: str) -> str:
+    import shlex
+    import subprocess
+
+    out = subprocess.run([*shlex.split(cmd), "--org", org], capture_output=True, text=True, check=True)
+    return out.stdout.strip().splitlines()[-1]
+
+
+async def main(api: str, mint: str | None) -> int:
     host = urlsplit(api).hostname or ""
     if host in PRODUCTION or "confident-shannon" in host:
         print("standin_call: refusing to run against production", file=sys.stderr)
@@ -46,7 +55,10 @@ async def main(api: str) -> int:
         auth = {"authorization": f"Bearer {token}"}
         org = (await http.get("/v1/me/organizations", headers=auth)).json()[0]["organization"]["id"]
         try:
-            brain = BrainClient(api, org, token, http)
+            if mint:
+                brain = BrainClient(api, org, mint_token(mint, org), http, worker=True)
+            else:
+                brain = BrainClient(api, org, token, http)
             session = CallSession(brain, language=LanguageGate(accepted=("en-GB", "hi-IN")))
             script = [
                 ("Hello, are you open on Saturday?", None, 0.0),
@@ -65,6 +77,7 @@ async def main(api: str) -> int:
                 "context kept across the switch": sum(m["role"] == "user" for m in session.history) == 3,
                 "server metrics reported": all(t.server_metrics for t in session.turns),
             }
+            checks["used the scoped worker credential" if mint else "used a member token (development)"] = True
             print(json.dumps({"summary": summary, "checks": checks, "simulated": True}, indent=2))
             return 0 if all(checks.values()) else 1
         finally:
@@ -74,4 +87,6 @@ async def main(api: str) -> int:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--api", required=True)
-    sys.exit(asyncio.run(main(ap.parse_args().api)))
+    ap.add_argument("--mint", help="command that prints a worker token for --org <id>")
+    a = ap.parse_args()
+    sys.exit(asyncio.run(main(a.api, a.mint)))

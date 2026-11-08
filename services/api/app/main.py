@@ -170,6 +170,7 @@ def create_app() -> FastAPI:
         desk.router,
         design.router,
         languages.router,
+        live.worker_router,
     ):
         app.include_router(r)
     return app
