@@ -1,0 +1,41 @@
+name: PR21 production smoke (one-off)
+
+# Owner-authorised, one-off smoke test of the PR #21 production release. Runs only on pushes
+# to this dedicated branch, never on the production branch. Creates one temporary probe
+# account + workspace in production, tests sign-in, design endpoints and the new frontend,
+# then deletes both and proves they are gone. Uses no secrets.
+
+on:
+  push:
+    branches: [claude/pr21-prod-smoke]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr21-prod-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - name: Install browser test dependencies
+        run: |
+          npm ci
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Wait until production serves the release commit
+        run: node scripts/wait-for-deploy.mjs https://voxera-api-two.vercel.app https://voxera-flow.vercel.app 931138e
+      - name: Production smoke (probe account created, tested, deleted, deletion proven)
+        run: node scripts/prod-smoke.mjs 931138e
