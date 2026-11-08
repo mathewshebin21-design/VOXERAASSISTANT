@@ -327,7 +327,12 @@ await area("reliability", async () => {
 // ---------- clean-up (members first; owners last) ----------
 await area("cleanup", async () => {
   for (const a of [...accounts].reverse()) {
-    const r = await call("DELETE", "/v1/me", { token: a.token, body: { password: PW } });
+    let r = await call("DELETE", "/v1/me", { token: a.token, body: { password: PW } });
+    if (r.status === 401) {
+      // The sign-up token has expired or its session was revoked: sign in again and retry.
+      const fresh = await call("POST", "/v1/auth/login", { body: { email: a.email, password: PW } });
+      if (fresh.json?.access_token) r = await call("DELETE", "/v1/me", { token: fresh.json.access_token, body: { password: PW } });
+    }
     check("cleanup", `synthetic account ${a.label} deleted`, r.status === 204, r.status);
   }
   if (proveCleanup) {
