@@ -8,11 +8,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Chip, FBtn, finput, finputAuto, Glass, GHead, Heading } from "@/components/flow/ui";
 import { APPOINTMENTS, CALLS, callById, serviceById, staffById, transcriptFor } from "@/lib/demo-data";
 import { computeMetrics, INTENT_LABEL, OUTCOME_LABEL } from "@/lib/metrics";
+import { LiveCalls } from "@/components/flow/live-calls";
+import { useDataMode } from "@/lib/live/data-mode";
 import { usePreview } from "@/lib/store";
 import { fmtDate, fmtDuration, fmtTime, gbp, relativeDay } from "@/lib/time";
 
 export function CallsView({ id }: { id?: string }) {
   const sp = useSearchParams();
+  const { mode } = useDataMode();
   const router = useRouter();
   const intent = sp.get("intent") ?? "", outcome = sp.get("outcome") ?? "", status = sp.get("status") ?? "";
   const [q, setQ] = useState("");
@@ -38,6 +41,7 @@ export function CallsView({ id }: { id?: string }) {
   return (
     <>
       <Heading kicker="Calls" title="Conversation traces"><FBtn onClick={exportCsv}><FileSpreadsheet size={14} /> Export CSV</FBtn><Chip tone="amber">demo records</Chip></Heading>
+      {mode === "live" && !id && <LiveCalls />}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-flw-mute" /><input aria-label="Search calls" className={finput + " pl-8"} placeholder="Search caller, summary, ID…" value={q} onChange={(e) => { setQ(e.target.value); setN(40); }} /></div>
         <select aria-label="Outcome" className={finputAuto} value={outcome} onChange={(e) => setParam("outcome", e.target.value)}><option value="">All outcomes</option>{Object.entries(OUTCOME_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
