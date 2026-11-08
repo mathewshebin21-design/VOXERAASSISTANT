@@ -495,9 +495,7 @@ class CallEvent(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    call_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), nullable=False
-    )
+    call_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     at: Mapped[datetime] = _created()
     kind: Mapped[str] = mapped_column(String(16), nullable=False)

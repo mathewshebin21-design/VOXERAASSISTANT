@@ -11,7 +11,7 @@
   request, or deleting the workspace).
 - ``call_housekeeping(limit)``: a SECURITY DEFINER function for a scheduled job. It deletes calls
   older than their workspace's retention period (``recording_retention_days``, 7–365, so a
-  shorter setting also applies to existing calls), and marks calls with no activity for two
+  shorter setting also applies to existing calls; 90 days if a workspace has no settings row), and marks calls with no activity for two
   hours as abandoned. It returns counts only.
 
 Both tables are tenant tables with row-level security, like every other.
@@ -71,6 +71,7 @@ def upgrade() -> None:
         sa.Column("last_activity_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("organization_id", "external_ref", name="uq_call_external_ref"),
+        sa.UniqueConstraint("id", "organization_id", name="uq_call_id_org"),  # target of the events' tenant FK
         sa.CheckConstraint(CHANNELS, name="ck_call_channel"),
         sa.CheckConstraint(STATUSES, name="ck_call_status"),
         sa.CheckConstraint(OUTCOMES, name="ck_call_outcome"),
@@ -89,13 +90,20 @@ def upgrade() -> None:
         "call_events",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
         sa.Column("organization_id", sa.UUID(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("call_id", sa.UUID(), sa.ForeignKey("calls.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("call_id", sa.UUID(), nullable=False),
         sa.Column("seq", sa.Integer(), nullable=False),
         sa.Column("at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("kind", sa.String(16), nullable=False),
         sa.Column("speaker", sa.String(8), nullable=True),
         sa.Column("text", sa.String(4000), nullable=True),
         sa.Column("data", postgresql.JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
+        # An event always belongs to a call in its own workspace, enforced by the database.
+        sa.ForeignKeyConstraint(
+            ["call_id", "organization_id"],
+            ["calls.id", "calls.organization_id"],
+            name="fk_call_event_call_same_org",
+            ondelete="CASCADE",
+        ),
         sa.UniqueConstraint("call_id", "seq", name="uq_call_event_seq"),
         sa.CheckConstraint(KINDS, name="ck_call_event_kind"),
         sa.CheckConstraint(SPEAKERS, name="ck_call_event_speaker"),
@@ -122,8 +130,8 @@ def upgrade() -> None:
             END IF;
             WITH expired AS (
                 SELECT c.id FROM calls c
-                JOIN workspace_settings s ON s.organization_id = c.organization_id
-                WHERE c.started_at < now() - make_interval(days => s.recording_retention_days)
+                LEFT JOIN workspace_settings s ON s.organization_id = c.organization_id
+                WHERE c.started_at < now() - make_interval(days => coalesce(s.recording_retention_days, 90))
                 ORDER BY c.started_at LIMIT p_limit
             )
             DELETE FROM calls WHERE id IN (SELECT id FROM expired);

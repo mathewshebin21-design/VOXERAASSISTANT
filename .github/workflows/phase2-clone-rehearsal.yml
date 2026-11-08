@@ -1,0 +1,85 @@
+name: Phase 2 clone rehearsal (migrations 0010 and 0011)
+
+# Rehearses the Phase 2 migrations (0010 rate limiter, 0011 call records) against a DISPOSABLE
+# Neon clone of production, with the real migration runner and verifier, including the
+# documented rollback (downgrade to 0009) and re-upgrade. See docs/phase-2-migration-rehearsal.md.
+#
+# Credentials: ONLY the clone's, stored as secrets of the GitHub environment `phase2-rehearsal`:
+#   PHASE2_REHEARSAL_DATABASE_URL_UNPOOLED  (clone, direct connection, owner role)
+#   PHASE2_REHEARSAL_DATABASE_URL           (clone, pooled connection; may equal the direct one)
+# This workflow never reads production, staging or RC-1 secrets.
+#
+# Trigger: a push to claude/phase2-call-records that changes .github/rehearsal/phase2-clone.request.
+# Nothing runs until the owner has created the clone and the environment, and that file is pushed.
+
+on:
+  push:
+    branches: [claude/phase2-call-records]
+    paths: [.github/rehearsal/phase2-clone.request]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-clone-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    if: github.ref == 'refs/heads/claude/phase2-call-records'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: phase2-rehearsal
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.PHASE2_REHEARSAL_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.PHASE2_REHEARSAL_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Require the clone credentials and mask every part of them
+        run: |
+          if [ -z "$DATABASE_URL_UNPOOLED" ] || [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set PHASE2_REHEARSAL_DATABASE_URL_UNPOOLED and PHASE2_REHEARSAL_DATABASE_URL on the phase2-rehearsal environment"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit, unquote
+          for key in ("DATABASE_URL_UNPOOLED", "DATABASE_URL"):
+              p = urlsplit(os.environ[key].strip())
+              for part in (p.hostname, p.username, p.password, unquote(p.password or ""), (p.path or "").lstrip("/")):
+                  if part:
+                      print(f"::add-mask::{part}")
+          PY
+      - run: uv sync --frozen
+      - name: 1. Baseline at 0009 (read-only)
+        run: uv run python scripts/verify_release.py --env production --expect 0009 --save baseline.json
+      - name: 2. Migration check (changes nothing)
+        run: uv run python scripts/migrate.py --env production --check
+      - name: 3. Migrate the clone 0009 -> 0011
+        run: uv run python scripts/migrate.py --env production
+      - name: 4. Verify 0011 against the baseline (read-only)
+        run: uv run python scripts/verify_release.py --env production --expect 0011 --baseline baseline.json
+      - name: 5. Rollback rehearsal - downgrade the clone to 0009
+        run: uv run python scripts/migrate.py --env production --downgrade-to 0009 --yes
+      - name: 6. Verify 0009 again against the baseline (nothing lost)
+        run: uv run python scripts/verify_release.py --env production --expect 0009 --baseline baseline.json
+      - name: 7. Re-upgrade to 0011 and verify
+        run: |
+          uv run python scripts/migrate.py --env production
+          uv run python scripts/verify_release.py --env production --expect 0011 --baseline baseline.json
+      - name: Nothing left pending
+        run: uv run python scripts/migrate.py --env production --check
+      - name: Evidence (table row counts only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-clone-rehearsal-${{ github.sha }}
+          path: services/api/baseline.json
+          if-no-files-found: ignore

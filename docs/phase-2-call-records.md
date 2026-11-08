@@ -63,7 +63,7 @@ The scripted-call harness now runs every scenario as a simulated call. It checks
 
 | | |
 |---|---|
-| RLS | Both tables use the standard `tenant_isolation` policy. With no tenant set, the runtime role sees no rows (tested) |
+| RLS | Both tables use the standard `tenant_isolation` policy. With no tenant set, the runtime role sees no rows (tested). An event's workspace must equal its call's: composite foreign key `(call_id, organization_id)` |
 | Grants | `calls`: SELECT, INSERT, UPDATE, DELETE. `call_events`: **SELECT and INSERT only**, so the transcript is a record. Events go only with their call |
 | Start, events, end, brain with `call_id` | `agent_write` (owner and admin), the same as testing the agent today |
 | List and read | `read` (every role) |
@@ -76,7 +76,7 @@ The scripted-call harness now runs every scenario as a simulated call. It checks
 - **AI disclosure and recording notice.** Each call records whether the AI disclosure and the recording notice were played.
 - **Transcript text is kept only if the recording notice was played** (`transcript_retained`). Otherwise events are stored with their kind, speaker and data, but no words (`data.text_withheld = true`). This is tested at the database level.
 - **No audio.** Audio is never stored. The check constraint means a future recording feature needs its own approved migration.
-- **Retention.** Each call follows its workspace's `recording_retention_days` (7–365). The setting is applied when housekeeping runs, so shortening it also covers existing calls.
+- **Retention.** Each call follows its workspace's `recording_retention_days` (7–365; 90 if a workspace has no settings row). The setting is applied when housekeeping runs, so shortening it also covers existing calls.
 - **Erasure.** The owner can delete a single call (an erasure request). Deleting the workspace or account removes everything (`ON DELETE CASCADE`).
 - **Export.** The workspace export includes `calls` and `call_events`.
 
@@ -102,7 +102,7 @@ The scripted-call harness now runs every scenario as a simulated call. It checks
 
 ## Tests
 
-- **`tests/test_calls.py`, 24 tests:**
+- **`tests/test_calls.py`, 25 tests:**
   - lifecycle, summary and audit;
   - ending once, and no events after the end;
   - idempotent start;
@@ -113,6 +113,7 @@ The scripted-call harness now runs every scenario as a simulated call. It checks
   - consent: no words stored without the notice, and audio can never be marked stored;
   - roles;
   - cross-workspace 404s;
+  - an event cannot point at another workspace's call (database foreign key);
   - RLS with no tenant, and events append-only;
   - erasure with nothing left behind, and no transcript in the audit log;
   - export;
@@ -124,7 +125,8 @@ The scripted-call harness now runs every scenario as a simulated call. It checks
   - the brain refusing an ended or foreign call before any provider request.
 - **Harness:** `tests/test_voice_harness.py` checks the harness's call-record checks. Run locally against a live API and the stand-ins, all 7 scenarios and 9 turns were recorded completely.
 - **Release verifier:** for 0011 or later, the tables exist, `ck_call_no_audio` exists, and the runtime role has no UPDATE or DELETE on `call_events`.
-- **Full API suite:** 323 passed.
+- **Full API suite:** 324 passed.
+- **Migration rehearsal:** see `docs/phase-2-migration-rehearsal.md`. A local production-shaped clone went 0009 → 0011 → 0009 → 0011 with 350 checks passing and row counts unchanged.
 
 ## Migration proposal (needs owner approval)
 

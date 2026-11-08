@@ -142,6 +142,16 @@ def test_without_the_recording_notice_no_words_are_stored(make_account, owner_en
         assert conn.execute(text("SELECT count(*) FROM call_events WHERE text IS NOT NULL")).scalar() == 0
 
 
+def test_an_event_cannot_point_at_another_workspaces_call(owner_engine, make_account):
+    a, b = make_account("a@example.com"), make_account("b@example.com")
+    c = start(a)
+    with pytest.raises(DBAPIError, match="fk_call_event_call_same_org"), owner_engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO call_events (organization_id, call_id, seq, kind) VALUES (:o, :c, 1, 'system')"),
+            {"o": b.org_id, "c": c["id"]},
+        )
+
+
 def test_audio_can_never_be_marked_stored(owner_engine, make_account):
     a = make_account("ada@example.com")
     c = start(a)
