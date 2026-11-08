@@ -344,8 +344,17 @@ await area("cleanup", async () => {
 });
 
 const failed = results.filter((r) => r.ok === false);
-writeFileSync(OUT, JSON.stringify({ api: API, web: WEB, commit: SHA, run, identity, results }, null, 2));
-console.log(`\n${results.filter((r) => r.ok).length} passed, ${failed.length} failed, ${results.filter((r) => r.ok === null).length} notes`);
+// Clean-up failures are reported separately: they mean synthetic data may remain.
+const summary = {
+  passed: results.filter((r) => r.ok).length,
+  test_failures: failed.filter((r) => r.area !== "cleanup").length,
+  cleanup_failures: failed.filter((r) => r.area === "cleanup").length,
+  notes: results.filter((r) => r.ok === null).length,
+};
+writeFileSync(OUT, JSON.stringify({ api: API, web: WEB, commit: SHA, run, identity, summary, results }, null, 2));
+console.log(`\n${summary.passed} passed, ${failed.length} failed, ${summary.notes} notes`);
+console.log(`TEST FAILURES: ${summary.test_failures}`);
+console.log(`CLEANUP FAILURES: ${summary.cleanup_failures}${summary.cleanup_failures ? "  — synthetic accounts may remain; see the cleanup results" : ""}`);
 return failed.length;
 }
 

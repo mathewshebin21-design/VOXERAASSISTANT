@@ -39,7 +39,30 @@ jobs:
       - name: Read-only production gate (nothing is written unless this passes)
         run: node -e 'import("./scripts/prod-acceptance.mjs").then((m) => m.verifyProduction(m.PROD_API, m.PROD_WEB, process.env.EXPECTED_SHA)).then(() => console.log("gate passed"))'
       - name: Synthetic customer-workflow acceptance, clean-up and clean-up proof
+        id: run
+        # Its own exit status is ignored here; the two result steps below decide, separately.
+        continue-on-error: true
         run: node scripts/prod-acceptance.mjs https://voxera-api-two.vercel.app https://voxera-flow.vercel.app "$EXPECTED_SHA" prod-acceptance.json
+      - name: Clean-up result (fails if any synthetic account may remain)
+        if: always() && steps.run.outcome != 'skipped'
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (!fs.existsSync("prod-acceptance.json")) { console.log("::error::No evidence file: the suite did not finish. Check for remaining synthetic accounts (@prod-acceptance.example)."); process.exit(1); }
+            const e = JSON.parse(fs.readFileSync("prod-acceptance.json", "utf8"));
+            for (const r of e.results.filter((r) => r.area === "cleanup")) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok ? "" : "  — " + r.detail}`);
+            if (e.summary.cleanup_failures) { console.log(`::error::CLEANUP FAILURES: ${e.summary.cleanup_failures}. Synthetic accounts may remain in production.`); process.exit(1); }
+            console.log("Clean-up verified: every synthetic account deleted and refused sign-in.");'
+      - name: Test result (fails if any acceptance check failed)
+        if: always() && steps.run.outcome != 'skipped'
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (!fs.existsSync("prod-acceptance.json")) process.exit(1);
+            const e = JSON.parse(fs.readFileSync("prod-acceptance.json", "utf8"));
+            for (const r of e.results.filter((r) => r.ok === false && r.area !== "cleanup")) console.log(`FAIL  [${r.area}] ${r.name}  — ${r.detail}`);
+            console.log(`passed ${e.summary.passed}, test failures ${e.summary.test_failures}, notes ${e.summary.notes}`);
+            if (e.summary.test_failures) { console.log(`::error::TEST FAILURES: ${e.summary.test_failures}`); process.exit(1); }'
       - name: Evidence
         if: always()
         uses: actions/upload-artifact@v4
