@@ -3,9 +3,9 @@ name: integration
 # Flow front end ↔ Next.js session proxy ↔ VOXERA API ↔ PostgreSQL, driven by a real browser.
 on:
   push:
-    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+    paths: ["apps/previews/**", "services/api/**", "services/voice-worker/**", ".github/workflows/integration.yml"]
   pull_request:
-    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+    paths: ["apps/previews/**", "services/api/**", "services/voice-worker/**", ".github/workflows/integration.yml"]
 
 permissions:
   contents: read
@@ -73,6 +73,11 @@ jobs:
       - name: Scripted-call harness (stand-in providers; checks plumbing and metrics, not real performance)
         working-directory: services/api
         run: uv run python scripts/voice_harness.py --api http://127.0.0.1:8000 --mode fake --out voice-harness-report.json
+      - name: Voice-worker stand-in call through the real brain endpoint (simulated)
+        working-directory: services/voice-worker
+        run: |
+          uv sync
+          uv run python scripts/standin_call.py --api http://127.0.0.1:8000
       - name: Harness report
         if: always()
         uses: actions/upload-artifact@v4
