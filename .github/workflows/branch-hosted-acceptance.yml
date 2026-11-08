@@ -7,7 +7,7 @@ name: Branch hosted acceptance
 
 on:
   push:
-    branches: [claude/start-auth-routing]
+    branches: [claude/phase2-pr1]
   workflow_dispatch:
 
 permissions:
