@@ -85,6 +85,7 @@ jobs:
           uv run python - <<'PY'
           from sqlalchemy import create_engine, text
           from app.platform import migration_owner_url
+          from scripts.migrate import runtime_role_status
           engine = create_engine(
               migration_owner_url(),
               connect_args={"options": "-c default_transaction_read_only=on"},
@@ -103,7 +104,9 @@ jobs:
                   )).scalar()
                   if (claim, revision, no_table, no_function) != ("production", "0009", True, True):
                       raise SystemExit("STOP: production identity/revision is not the approved 0009 baseline")
-                  print("Production claim and exact 0009 pre-migration schema verified")
+                  if runtime_role_status(c, migration_owner_url()) != "match":
+                      raise SystemExit("STOP: production runtime-role password does not match the migration owner")
+                  print("Production claim, exact 0009 schema and runtime-role credential compatibility verified")
           finally:
               engine.dispose()
           PY
