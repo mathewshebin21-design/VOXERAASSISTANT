@@ -47,3 +47,5 @@ jobs:
           assert asyncio.run(run()) == "Hello there."
           print("LiveKit adapter OK")
           PY
+      - name: Rehearse SIP launch gates with LiveKit (no network, keys or paid calls)
+        run: uv run --extra livekit pytest -q tests/test_livekit_entrypoint.py
