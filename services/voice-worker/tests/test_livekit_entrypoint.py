@@ -88,7 +88,15 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
 
     class MediaSession:
         def __init__(self):
+            self.callbacks = {}
             sessions.append(self)
+
+        def on(self, name):
+            def register(callback):
+                self.callbacks[name] = callback
+                return callback
+
+            return register
 
         async def start(self, *, agent, room):
             assert isinstance(agent.call, CallSession)
