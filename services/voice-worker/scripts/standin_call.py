@@ -25,6 +25,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from voxera_worker.brain import BrainClient  # noqa: E402
+from voxera_worker.recording import CallRecorder  # noqa: E402
 from voxera_worker.session import CallSession, LanguageGate  # noqa: E402
 from voxera_worker.tokens import TokenSource, command_fetch  # noqa: E402
 
@@ -48,12 +49,18 @@ async def main(api: str, mint: str | None) -> int:
         auth = {"authorization": f"Bearer {token}"}
         org = (await http.get("/v1/me/organizations", headers=auth)).json()[0]["organization"]["id"]
         try:
+            recorder = None
             if mint:
                 tokens = TokenSource(command_fetch(f"{mint} --org {org}"))
                 brain = BrainClient(api, org, tokens, http, worker=True)
+                recorder = CallRecorder(api, tokens, http)
             else:
                 brain = BrainClient(api, org, token, http)
-            session = CallSession(brain, language=LanguageGate(accepted=("en-GB", "hi-IN")))
+            session = CallSession(brain, language=LanguageGate(accepted=("en-GB", "hi-IN")), recorder=recorder)
+            # A synthetic caller: the stand-in says both notices were played, so the words are kept.
+            call_id = await session.begin(
+                external_ref=f"standin-{uuid.uuid4().hex[:12]}", ai_disclosure_played=True, recording_notice_played=True
+            )
             script = [
                 ("Hello, are you open on Saturday?", None, 0.0),
                 ("Namaste", "hi", 0.93),
@@ -62,6 +69,7 @@ async def main(api: str, mint: str | None) -> int:
             for text, lang, conf in script:
                 reply = "".join([p async for p in session.reply(text, detected_language=lang, confidence=conf)])
                 print(json.dumps({"caller": text, "language": session.language.current, "reply_chars": len(reply)}))
+            await session.finish()
             summary = session.summary()
             checks = {
                 "every turn answered by the brain": summary["outcomes"].get("done", 0)
@@ -72,6 +80,16 @@ async def main(api: str, mint: str | None) -> int:
                 "server metrics reported": all(t.server_metrics for t in session.turns),
             }
             checks["used the scoped worker credential" if mint else "used a member token (development)"] = True
+            if mint:
+                # The owner reads the worker's call record back through the normal member API.
+                rec = (await http.get(f"/v1/orgs/{org}/calls/{call_id}", headers=auth)).json() if call_id else {}
+                evs = rec.get("events", [])
+                callers = [e.get("text") for e in evs if e.get("kind") == "utterance" and e.get("speaker") == "caller"]
+                checks["call recorded by the worker, as a simulated call"] = rec.get("channel") == "simulated"
+                checks["call record closed as completed"] = rec.get("status") == "completed"
+                checks["every caller turn recorded in order"] = callers == [t for t, _, _ in script]
+                checks["call events numbered 1..n"] = [e["seq"] for e in evs] == list(range(1, len(evs) + 1))
+                checks["recording never failed"] = recorder is not None and not recorder.failed
             print(json.dumps({"summary": summary, "checks": checks, "simulated": True}, indent=2))
             return 0 if all(checks.values()) else 1
         finally:

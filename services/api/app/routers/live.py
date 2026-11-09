@@ -15,13 +15,12 @@ from typing import Annotated, Literal
 
 import anthropic
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy.orm import Session
 
 from .. import calls as calls_mod
-from .. import worker_auth
 from ..config import get_settings
 from ..db import SessionLocal, set_tenant
 from ..deps import DB, OrgContext, require
@@ -29,13 +28,12 @@ from ..live import budget as budget_mod
 from ..live import providers, setup_agent, toolcheck
 from ..live.budget import budget
 from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool, system_prompt
-from ..models import Organization, UsageKind, WorkspaceSettings
+from ..models import UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
-from ..voice import launch
 from ..voice.languages import LANGUAGES
-from ..voice.regions import country_of
 from ..voice.routing import language_instruction
+from ..worker_deps import WorkerContext, worker_context
 
 log = logging.getLogger("voxera.live")
 router = APIRouter(prefix="/v1/orgs/{org_id}/live", tags=["live"])
@@ -183,27 +181,13 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
 
 
 @worker_router.post("/live/brain")
-def worker_brain(body: BrainIn, request: Request, db: DB) -> StreamingResponse:
+def worker_brain(body: BrainIn, worker: Annotated[WorkerContext, Depends(worker_context)], db: DB) -> StreamingResponse:
     """The same brain for a voice worker holding a scoped worker token (ADR-0005 §3). The workspace
-    comes from the token, never from the request. 404 unless worker credentials are enabled."""
-    if not worker_auth.enabled():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    header = request.headers.get("authorization", "")
-    if not header.lower().startswith("bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Worker token required")
-    try:
-        org_id, mode = worker_auth.verify(header[7:].strip())
-    except worker_auth.WorkerAuthError as e:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from None
-    set_tenant(db, org_id=org_id)
-    if db.get(Organization, org_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found")
-    if mode == "live":  # real callers only where the business's country passed its launch review
-        ws = db.get(WorkspaceSettings, org_id)
-        country = country_of(ws.locale if ws else None) or ""
-        if not launch.ready(country):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Live calls are not enabled for this country yet")
-    return _brain(body, org_id, None, db)
+    comes from the token, never from the request. 404 unless worker credentials are enabled.
+
+    A worker records its own calls through /v1/worker/calls (one writer per call, in spoken order),
+    so it does not send ``call_id`` here."""
+    return _brain(body, worker.org_id, None, db)
 
 
 def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Session) -> StreamingResponse:

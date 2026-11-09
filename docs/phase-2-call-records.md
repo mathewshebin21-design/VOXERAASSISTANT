@@ -59,6 +59,55 @@ POST /calls ──▶ in_progress ──(events: POST /calls/{id}/events, or /li
 
 The scripted-call harness now runs every scenario as a simulated call. It checks that the server recorded every caller turn in order, an agent reply per answered turn, numbering from 1 to *n*, and a summary. CI runs this against the stand-in providers.
 
+### The voice worker records its own calls
+
+Added on `claude/phase2-worker-recording`, which combines this branch with the worker endpoint from
+`claude/phase2-global`.
+
+- **Endpoints:** `POST /v1/worker/calls` (start, idempotent on `external_ref`),
+  `POST /v1/worker/calls/{id}/events` and `POST /v1/worker/calls/{id}/end`.
+  - They take a scoped worker token, the same as `/v1/worker/live/brain`, and return 404 unless
+    `VOXERA_WORKER_SECRET` is set.
+- **Workspace and channel come from the token.**
+  - A test token records a `simulated` call; there is no channel field to send.
+  - A `phone` record needs a live phone token, and live tokens are refused (403) until the
+    business's country passes its launch review.
+  - Members still cannot create phone records.
+- **A worker only writes to its own calls.** It cannot add to or end a member's test call (404),
+  even in its own workspace, or reuse that call's reference (409).
+  - Audit rows say `by: worker`, with no member and no transcript text.
+- **One writer, in spoken order.** The worker writes each finished turn itself:
+  - the caller's words (with the call's language);
+  - the holding line, if one was said before the reply;
+  - tools, with name and success only, never their results;
+  - any hand-off;
+  - the brain's reply, with timings and server metrics, marked if the caller interrupted;
+  - an error event for a failed turn;
+  - the worker's own recovery, message-taking or closing line, marked `by: worker`.
+
+  It does not send `call_id` to the brain, so no turn is written twice. Writes run in the
+  background, one after another, so they never delay speech.
+- **Best effort.** After a refused or failed write the worker stops writing, so a record never has
+  unexplained gaps, but it still closes the record. The call itself always carries on.
+- **Outcome, from what happened.** The latest decisive action decides it:
+  - a transfer gives `transferred`;
+  - a queued or callback hand-off, or a successful `take_message`, gives `message_taken`;
+  - a successful booking gives `booked`, and a successful cancellation gives `cancelled`.
+
+  Without one of those:
+  - deterministic message-taking gives `message_taken`, or `no_action` if nothing was collected;
+  - a call where the brain never answered and turns failed is `failed`;
+  - otherwise the call is `answered`, or `no_action` if nothing was answered.
+- **Consent.** The LiveKit prototype plays no AI-disclosure or recording notice yet, and reports
+  that it played none. So the API keeps a phone call's events but not its words. The reference is
+  a hash of the room name, because a telephone room's name can contain the caller's number.
+- **Tests:**
+  - 11 API tests in `tests/test_worker_calls.py`;
+  - 9 worker tests in `tests/test_recording.py` (order, slow API, failure, outcomes, token refresh,
+    reference);
+  - the stand-in call now records through a minted worker token, and the owner reads it back: all
+    10 checks pass against a local API and the stand-in model provider (simulated).
+
 ## Tenant isolation, permissions, audit
 
 | | |

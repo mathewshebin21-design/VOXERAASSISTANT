@@ -28,6 +28,7 @@ from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, Worke
 
 from .brain import BrainClient
 from .guard import refusal
+from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
 
@@ -69,15 +70,22 @@ async def entrypoint(ctx: JobContext) -> None:
         log.warning("refusing call", extra={"reason": why})
         ctx.shutdown(reason=why)  # never answer a real caller with a test token (launch gate)
         return
-    brain = BrainClient(os.environ["VOXERA_API_URL"], "", tokens, worker=True)
+    api = os.environ["VOXERA_API_URL"]
+    brain = BrainClient(api, "", tokens, worker=True)
     accepted = tuple(os.environ.get("VOXERA_LANGUAGES", "en-GB").split(","))
-    call = CallSession(brain, language=LanguageGate(accepted=accepted, current=accepted[0]))
+    call = CallSession(
+        brain, language=LanguageGate(accepted=accepted, current=accepted[0]), recorder=CallRecorder(api, tokens)
+    )
+    # The prototype plays no AI-disclosure or recording notice yet, so it says so: the API then keeps
+    # the call's events without the caller's words. The room name makes the record restart-safe.
+    await call.begin(external_ref=room_ref(ctx.room.name))
     session = AgentSession()  # STT/TTS/VAD come from the approved provider configuration (not set here)
     await session.start(agent=VoxeraAgent(call), room=ctx.room)
-    ctx.add_shutdown_callback(lambda: _log_summary(call))
+    ctx.add_shutdown_callback(lambda: _close(call))
 
 
-async def _log_summary(call: CallSession) -> None:
+async def _close(call: CallSession) -> None:
+    await call.finish()
     log.info("call ended", extra={"metrics": call.summary()})
 
 
