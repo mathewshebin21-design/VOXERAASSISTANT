@@ -205,6 +205,7 @@ async def test_sip_rejects_unapproved_flag_value(monkeypatch):
     assert events == ["connect", "participant", "shutdown"]
     assert recordings == [] and sessions == []
 
+
 async def test_disabled_speech_refuses_before_any_call_record_or_media(monkeypatch):
     ctx, events, recordings, sessions = setup(
         monkeypatch, mode="test", channel="simulated", kind=0, record_id="would-not-be-used"
