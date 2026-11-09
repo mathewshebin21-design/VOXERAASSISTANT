@@ -13,7 +13,7 @@ from . import deploy_env, rc1_preview
 from .config import get_settings
 from .db import SessionLocal
 from .logging_setup import configure_logging, request_id_var
-from .routers import agents, auth, business, design, desk, languages, live, orgs, records, voice
+from .routers import agents, auth, business, calls, design, desk, languages, live, orgs, records, voice
 
 log = logging.getLogger("voxera.api")
 
@@ -169,6 +169,7 @@ def create_app() -> FastAPI:
         live.router,
         desk.router,
         design.router,
+        calls.router,
         languages.router,
         live.worker_router,
     ):

@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy.orm import Session
 
+from .. import calls as calls_mod
 from .. import worker_auth
 from ..config import get_settings
 from ..db import SessionLocal, set_tenant
@@ -57,6 +58,8 @@ class BrainIn(Strict):
     # One id per call: makes bookings idempotent if a turn is retried.
     conversation_id: RequestId | None = None
     messages: list[LiveMessage] = Field(min_length=1, max_length=40)
+    # A call record (POST /calls) to add this turn to: the caller's words, tools, the reply, metrics.
+    call_id: uuid.UUID | None = None
     # The language the call is being conducted in (BCP 47, from the language registry). The model
     # replies directly in it; the instruction sits after the cache breakpoint, like the clock.
     language: str | None = Field(None, pattern=r"^[a-z]{2,3}-[A-Z]{2}$")
@@ -208,6 +211,13 @@ def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Sess
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
     if body.messages[-1].role != "user":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The last message must be the caller's")
+    if body.call_id is not None:  # refuse before spending anything
+        try:
+            call = calls_mod.get(db, org_id, body.call_id)
+        except calls_mod.CallError as e:
+            raise HTTPException(e.status, str(e)) from None
+        if call.status != "in_progress":
+            raise HTTPException(status.HTTP_409_CONFLICT, "The call has ended")
     bctx = load_context(db, org_id)
     msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
     if msgs[0]["role"] == "assistant":  # the conversation must open with a user turn
@@ -246,7 +256,58 @@ def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Sess
         reference="voice lab brain",
         reserved=allowance,
     )
+    if body.call_id is not None:
+        gen = _record_call(gen, org_id, user_id, body.call_id, body.messages[-1].text)
     return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
+
+
+def _record_call(gen: Iterator[str], org_id: uuid.UUID, user_id: uuid.UUID | None, call_id: uuid.UUID, said: str):
+    """Passes the stream through unchanged, then adds the turn to the call record.
+
+    Recording runs after the stream ends (or the listener leaves), in its own session, and is best
+    effort: a failure is logged and never breaks the caller's turn.
+    """
+    reply, tools, handoffs, errors, metrics = [], [], [], [], None
+    try:
+        for chunk in gen:
+            with contextlib.suppress(ValueError, KeyError):
+                e = json.loads(chunk.removeprefix("data: "))
+                kind = e.get("type")
+                if kind == "text":
+                    reply.append(e["text"])
+                elif kind == "tool":
+                    tools.append({"name": e.get("name"), "ok": bool(e.get("ok"))})
+                elif kind == "handoff":
+                    handoffs.append({"outcome": e.get("outcome")})
+                elif kind == "error":
+                    errors.append({"message": str(e.get("message", ""))[:300]})
+                elif kind == "done":
+                    metrics = e.get("metrics")
+            yield chunk
+    finally:
+        events: list[dict] = [{"kind": "utterance", "speaker": "caller", "text": said[:4000]}]
+        events += [{"kind": "tool", "speaker": "agent", "data": t} for t in tools]
+        events += [{"kind": "handoff", "speaker": "agent", "data": h} for h in handoffs]
+        text = "".join(reply).strip()
+        if text:
+            events.append({"kind": "utterance", "speaker": "agent", "text": text[:4000], "data": {"metrics": metrics}})
+        elif metrics:
+            events.append({"kind": "system", "speaker": "system", "data": {"metrics": metrics}})
+        events += [{"kind": "error", "speaker": "system", "data": er} for er in errors]
+        _save_call_events(org_id, user_id, call_id, events)
+
+
+def _save_call_events(org_id: uuid.UUID, user_id: uuid.UUID | None, call_id: uuid.UUID, events: list[dict]) -> None:
+    rdb = SessionLocal()
+    try:
+        set_tenant(rdb, org_id=org_id, user_id=user_id)
+        calls_mod.append(rdb, org_id, call_id, events)
+        rdb.commit()
+    except Exception as e:  # noqa: BLE001 — recording must never break the turn
+        rdb.rollback()
+        log.warning("call record not updated", extra={"error": type(e).__name__, "reason": str(e)[:200]})
+    finally:
+        rdb.close()
 
 
 class _HideThinking:

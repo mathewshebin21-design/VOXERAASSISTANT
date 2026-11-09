@@ -20,7 +20,14 @@ def test_owner_checks_pass_at_head_and_never_write(owner_engine, make_account):
     # The test database is not claimed for an environment; everything else must hold.
     assert failed <= {"database claimed for the expected environment"}
     names = {name for name, _, _ in results}
-    assert {"0008 table agent_flows exists", "check constraint ck_settings_ui_design"} <= names
+    assert {
+        "0008 table agent_flows exists",
+        "check constraint ck_settings_ui_design",
+        "0010 table rate_limit_hits exists",
+        "rate_limit_hits: runtime role has no SELECT",
+        "0011 table calls exists",
+        "call events: runtime role has no DELETE",
+    } <= names
     assert "workspace_settings" in tenant and counts["organizations"] == 1
 
 

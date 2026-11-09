@@ -93,6 +93,25 @@ def test_stand_in_simulates_cache_writes_then_reads_only_with_a_breakpoint():
     assert fake_providers.usage_for({"system": "plain"}) == {"input_tokens": 800, "output_tokens": 1}
 
 
+def test_call_record_check_needs_every_turn_in_order():
+    turns = [_turn(), vh.TurnResult(caller="second", reply="Sure", server={})]
+    turns[0].caller = "first"
+    good = {
+        "status": "completed",
+        "summary": {"caller_turns": 2},
+        "events": [
+            {"seq": 1, "kind": "utterance", "speaker": "caller", "text": "first"},
+            {"seq": 2, "kind": "utterance", "speaker": "agent", "text": "Hello"},
+            {"seq": 3, "kind": "utterance", "speaker": "caller", "text": "second"},
+            {"seq": 4, "kind": "utterance", "speaker": "agent", "text": "Sure"},
+        ],
+    }
+    assert all(ch["ok"] for ch in vh.check_call_record(good, turns))
+    missing = {**good, "events": good["events"][:2]}
+    failed = {ch["check"] for ch in vh.check_call_record(missing, turns) if not ch["ok"]}
+    assert "call record has every caller turn, in order" in failed
+
+
 def test_script_share_counts_letters_by_script():
     assert vh.script_share("नमस्ते, कैसे हैं?", "Deva") == 1.0
     assert vh.script_share("Hello नमस्ते", "Deva") == 6 / 11

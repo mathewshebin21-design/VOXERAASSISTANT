@@ -3,7 +3,9 @@
 Plays scripted caller conversations against a VOXERA API's live brain, the way the Voice lab
 does, and reports per turn: client-side time to first text and total time, the server's own
 metrics (rounds, uncached/cached/output tokens, time to first text, tool time) and the tools used.
-Each scenario runs on its own synthetic workspace, which is deleted afterwards.
+Each scenario runs on its own synthetic workspace, which is deleted afterwards, as one simulated
+call record: the harness starts the call, sends each turn with its call_id, ends the call, and
+checks that the server recorded every turn (caller and agent utterances) and a summary.
 
 Modes:
   --mode fake   against stand-in providers (scripts/fake_providers.py). Checks the plumbing,
@@ -88,6 +90,7 @@ class ScenarioResult:
     name: str
     turns: list[TurnResult] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)  # {"check", "ok", "detail"}
+    call: dict = field(default_factory=dict)  # the recorded call's summary
 
     @property
     def ok(self) -> bool:
@@ -184,9 +187,44 @@ def setup_workspace(c: Client, business: dict, password: str, locale: str | None
     return org
 
 
-def run_turn(c: Client, org: str, history: list[dict], conversation_id: str, language: str | None = None) -> TurnResult:
+def check_call_record(call: dict, turns: list[TurnResult]) -> list[dict]:
+    """The server's record of the call must hold every turn the harness played, in order."""
+    evs = call.get("events", [])
+    caller = [e.get("text") for e in evs if e.get("kind") == "utterance" and e.get("speaker") == "caller"]
+    agent = [e for e in evs if e.get("kind") == "utterance" and e.get("speaker") == "agent"]
+    done = [t for t in turns if t.outcome == "done"]
+    seqs = [e.get("seq") for e in evs]
+    return [
+        {"check": "call ended as completed", "ok": call.get("status") == "completed", "detail": call.get("status", "")},
+        {
+            "check": "call record has every caller turn, in order",
+            "ok": caller == [t.caller for t in turns],
+            "detail": f"{len(caller)} recorded, {len(turns)} played",
+        },
+        {
+            "check": "call record has an agent reply per answered turn",
+            "ok": len(agent) == sum(bool(t.reply.strip()) for t in done),
+            "detail": f"{len(agent)} recorded",
+        },
+        {"check": "call events are numbered 1..n", "ok": seqs == list(range(1, len(seqs) + 1)), "detail": ""},
+        {
+            "check": "call summary counts the turns",
+            "ok": call.get("summary", {}).get("caller_turns") == len(caller),
+            "detail": "",
+        },
+    ]
+
+
+def run_turn(
+    c: Client, org: str, history: list[dict], conversation_id: str, call_id: str, language: str | None = None
+) -> TurnResult:
     t = TurnResult(caller=history[-1]["text"], language=language)
-    body = {"request_id": f"h-{uuid.uuid4().hex[:16]}", "conversation_id": conversation_id, "messages": history}
+    body = {
+        "request_id": f"h-{uuid.uuid4().hex[:16]}",
+        "conversation_id": conversation_id,
+        "call_id": call_id,
+        "messages": history,
+    }
     if language:
         body["language"] = language
     started = time.monotonic()
@@ -226,14 +264,31 @@ def run_scenario(c: Client, scenario: dict, business: dict, mode: str) -> Scenar
     try:
         history: list[dict] = []
         conversation_id = f"hc-{uuid.uuid4().hex[:16]}"
+        started = c.call(
+            "POST",
+            f"/v1/orgs/{org}/calls",
+            {
+                "channel": "simulated",
+                "external_ref": conversation_id,
+                "ai_disclosure_played": True,
+                "recording_notice_played": True,
+            },
+        )
+        if started.status_code != 201:
+            raise HarnessError(f"could not start a call record ({started.status_code})")
+        call_id = started.json()["id"]
         for line, language in caller_turns(scenario):
             history.append({"role": "user", "text": line})
-            turn = run_turn(c, org, history, conversation_id, language)
+            turn = run_turn(c, org, history, conversation_id, call_id, language)
             res.turns.append(turn)
             if turn.outcome != "done":
                 break
             history.append({"role": "assistant", "text": turn.reply.strip() or "(no reply)"})
-        res.checks = evaluate(scenario, res.turns, mode)
+        ok = all(t.outcome == "done" for t in res.turns)
+        c.call("POST", f"/v1/orgs/{org}/calls/{call_id}/end", {"status": "completed" if ok else "failed"})
+        call = c.call("GET", f"/v1/orgs/{org}/calls/{call_id}").json()
+        res.call = {k: call.get(k) for k in ("status", "event_count", "summary")}
+        res.checks = evaluate(scenario, res.turns, mode) + check_call_record(call, res.turns)
     finally:
         deleted = c.call("DELETE", "/v1/me", {"password": password}).status_code
         res.checks.append({"check": "synthetic workspace deleted", "ok": deleted == 204, "detail": str(deleted)})
@@ -295,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
         "mode": a.mode,
         "summary": summarise(results),
         "scenarios": [
-            {"name": r.name, "ok": r.ok, "checks": r.checks, "turns": [asdict(t) for t in r.turns]} for r in results
+            {"name": r.name, "ok": r.ok, "checks": r.checks, "call": r.call, "turns": [asdict(t) for t in r.turns]}
+            for r in results
         ],
     }
     a.out.write_text(json.dumps(report, indent=2))

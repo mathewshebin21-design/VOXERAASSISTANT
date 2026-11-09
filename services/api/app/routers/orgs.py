@@ -18,7 +18,9 @@ from ..models import (
     AuditLog,
     AuthSession,
     BusinessProfile,
+    Call,
     CallerMessage,
+    CallEvent,
     DeletionReceipt,
     Invitation,
     Membership,
@@ -225,6 +227,8 @@ def export_org(ctx: Annotated[OrgContext, Depends(require(Perm.data_export))], d
         "voice_test_sessions": rows(VoiceTestSession, VoiceTestSession.started_at),
         "appointments": rows(Appointment, Appointment.starts_at),
         "caller_messages": rows(CallerMessage, CallerMessage.created_at),
+        "calls": rows(Call, Call.started_at),
+        "call_events": rows(CallEvent, CallEvent.call_id, CallEvent.seq),
         "audit_logs": rows(AuditLog, AuditLog.created_at),
     }
     audit.record(db, oid, ctx.user.id, "organization.exported", "organization", oid, None, client_meta(request))
