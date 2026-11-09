@@ -27,7 +27,7 @@ from collections.abc import AsyncIterable
 from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, llm
 
 from .brain import BrainClient
-from .guard import CallBoundTokens, may_answer
+from .guard import CallBoundTokens, is_phone, may_answer
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
@@ -64,6 +64,12 @@ class VoxeraAgent(Agent):
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     caller = await ctx.wait_for_participant()
+    # An explicit, separate operational approval is needed even after the API's
+    # country launch gate. Staging and all unconfigured workers refuse SIP.
+    if is_phone(caller) and os.environ.get("VOXERA_SIP_ENABLED") != "true":
+        log.warning("refusing telephone call: SIP disabled by operator")
+        ctx.shutdown(reason="telephone channel disabled")
+        return
     cmd = os.environ.get("VOXERA_WORKER_TOKEN_CMD")
     raw_tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
     tokens = CallBoundTokens(raw_tokens, caller)
