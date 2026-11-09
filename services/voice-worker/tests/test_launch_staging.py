@@ -35,6 +35,8 @@ def test_explicit_staging_configuration_is_accepted_without_contacting_providers
         ("VOXERA_WORKER_ENV", "production"),
         ("VOXERA_SIP_ENABLED", "true"),
         ("VOXERA_SIP_ENABLED", "TRUE"),
+        ("VOXERA_MEDIA_ENABLED", "true"),
+        ("VOXERA_MEDIA_ENABLED", "TRUE"),
         ("VOXERA_API_URL", "https://voxera-api-two.vercel.app"),
         ("VOXERA_API_URL", "https://voxera-api-ai-e399.vercel.app"),
         ("VOXERA_API_URL", "http://staging-api.example.test"),
