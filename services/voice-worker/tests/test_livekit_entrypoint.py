@@ -9,6 +9,7 @@ fake recorder returning an ID, not claimed to be exercised in this test.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
@@ -65,6 +66,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
         def __init__(self, api, tokens):
             assert api == "http://isolated-api.test"
             self.tokens = tokens
+            self.ends: list[tuple] = []
             recordings.append(self)
 
         async def start(self, **kwargs):
@@ -75,6 +77,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             return record_id
 
         async def end(self, *args):
+            self.ends.append(args)
             events.append("record_end")
 
     class MediaSession:
@@ -146,3 +149,28 @@ async def test_simulated_participant_may_start_without_record_on_best_effort_pat
     assert ctx.shutdown_reason is None
     assert events == ["connect", "participant", "record", "media_start", "callback"]
     assert len(recordings) == len(sessions) == 1
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shuts_down(monkeypatch, error_type):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="verified-call-id"
+    )
+
+    class FailingMediaSession:
+        def __init__(self):
+            sessions.append(self)
+
+        async def start(self, *, agent, room):
+            events.append("media_start")
+            raise error_type("simulated media startup failure")
+
+    monkeypatch.setattr(worker, "AgentSession", FailingMediaSession)
+    with pytest.raises(error_type):
+        await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "media startup failed"
+    assert events == ["connect", "participant", "record", "media_start", "record_end", "shutdown"]
+    assert len(recordings) == len(sessions) == 1
+    assert recordings[0].ends == [("failed", None, "media startup failed")]
+    assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered

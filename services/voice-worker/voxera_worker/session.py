@@ -261,7 +261,7 @@ class CallSession:
         if self.recorder is None:
             return
         status, outcome = call_outcome(self)
-        if self.close_reason == "credential mismatch":
+        if self.close_reason in ("credential mismatch", "media startup failed"):
             status, outcome = "failed", None
         await self.recorder.end(status, outcome, self.close_reason or reason)
 

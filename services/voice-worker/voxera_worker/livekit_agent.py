@@ -88,8 +88,18 @@ async def entrypoint(ctx: JobContext) -> None:
         log.warning("refusing telephone call: API authorization or call start failed")
         ctx.shutdown(reason="telephone authorization failed")
         return
-    session = AgentSession()  # STT/TTS/VAD come from the approved provider configuration (not set here)
-    await session.start(agent=VoxeraAgent(call), room=ctx.room)
+    # Once the API has authorized a phone call, the record must be closed even if
+    # media initialization fails. Otherwise the call can remain open indefinitely.
+    try:
+        session = AgentSession()  # STT/TTS/VAD require separately approved providers
+        await session.start(agent=VoxeraAgent(call), room=ctx.room)
+    except BaseException:  # also includes cancellation while a job is starting
+        call.closed, call.close_reason = True, "media startup failed"
+        try:
+            await call.finish()
+        finally:
+            ctx.shutdown(reason="media startup failed")
+        raise
     ctx.add_shutdown_callback(lambda: _close(call))
 
 
