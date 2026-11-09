@@ -8,12 +8,12 @@ from ..config import get_settings
 from ..deps import DB, CurrentPrincipal, client_meta
 from ..models import AuthSession, RefreshToken, User
 from ..provisioning import provision_organization
-from ..ratelimit import SlidingWindowLimiter
+from ..ratelimit import LimiterUnavailable, make_limiter
 from ..schemas import LoginIn, RefreshIn, SignupIn, TokenOut
 from ..security import create_access_token, hash_password, needs_rehash, new_opaque_token, token_digest, verify_password
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
-login_limiter = SlidingWindowLimiter(get_settings().login_attempts_per_minute)
+login_limiter = make_limiter("login", get_settings().login_attempts_per_minute, 60)
 _BAD_LOGIN = HTTPException(status.HTTP_401_UNAUTHORIZED, "Email or password is incorrect")
 
 
@@ -52,8 +52,18 @@ def signup(body: SignupIn, db: DB, request: Request) -> TokenOut:
 def login(body: LoginIn, db: DB, request: Request) -> TokenOut:
     email = body.email.lower()
     meta = client_meta(request)
-    if not login_limiter.allow(f"{email}|{meta['ip']}"):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many attempts. Try again in a minute.")
+    try:
+        decision = login_limiter.check(f"{email}|{meta['ip']}")
+    except LimiterUnavailable:  # fail closed: never let attempts through uncounted
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable. Try again shortly."
+        ) from None
+    if not decision.allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many attempts. Try again in a minute.",
+            headers={"Retry-After": str(decision.retry_after)},
+        )
     user = db.scalar(select(User).where(func.lower(User.email) == email))
     if not verify_password(body.password, user.password_hash if user else None) or user is None:
         raise _BAD_LOGIN

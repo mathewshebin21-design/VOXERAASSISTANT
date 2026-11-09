@@ -5,6 +5,7 @@ import os
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from .conftest import join
@@ -138,7 +139,8 @@ def test_migration_0009_round_trip_keeps_existing_data(owner_engine, make_accoun
     finally:
         command.upgrade(cfg, "head")
     with owner_engine.connect() as c:
-        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0009"
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == head
         assert c.execute(text("SELECT count(*) FROM organizations")).scalar() == 1
         assert c.execute(text("SELECT ui_design FROM workspace_settings")).scalar() == "atelier"
         assert c.execute(text("SELECT ui_design FROM memberships")).scalar() is None

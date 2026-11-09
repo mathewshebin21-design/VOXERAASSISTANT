@@ -21,7 +21,7 @@ from app.routers.auth import login_limiter
 
 OWNER_URL = os.environ["VOXERA_MIGRATION_DATABASE_URL"]
 APP_URL = os.environ["VOXERA_DATABASE_URL"]
-TABLES = ["users", "organizations", "deletion_receipts"]  # everything else cascades
+TABLES = ["users", "organizations", "deletion_receipts", "rate_limit_hits"]  # everything else cascades
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -1,0 +1,61 @@
+name: Phase 2 hosted acceptance (PRs #27 and #28)
+
+# Hosted acceptance for the Phase 2 branches against THEIR OWN isolated previews: branch web ->
+# branch API -> a dedicated Neon branch of staging (never shared staging, never production).
+#   claude/phase2-rate-limiter  -> Neon branch pr27-phase2-ratelimit-validation (schema 0010), scope ratelimit
+#   claude/phase2-call-records  -> Neon branch pr27-28-phase2-validation (schema 0011), scope all
+# The isolation gate runs first and again afterwards; nothing else runs unless it passes.
+# No paid provider is called. Reads no secrets.
+#
+# Trigger: a push that changes .github/rehearsal/phase2-hosted.request on one of the two branches,
+# made only after the owner has approved the migration and the branch-scoped Preview variables.
+
+on:
+  push:
+    branches: [claude/phase2-rate-limiter, claude/phase2-call-records]
+    paths: [.github/rehearsal/phase2-hosted.request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-hosted-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  hosted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/previews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/previews/package-lock.json
+      - run: npm ci
+      - name: Resolve this branch's preview origins (refuses protected branches)
+        id: origins
+        run: |
+          node -e '
+            import("./scripts/branch-isolation.mjs").then(({ previewOrigins }) => {
+              const o = previewOrigins(process.env.GITHUB_REF_NAME);
+              console.log(`api=${o.api}`); console.log(`web=${o.web}`);
+            });' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+      - name: Wait for this commit's deployments
+        run: node scripts/wait-for-deploy.mjs "${{ steps.origins.outputs.api }}" "${{ steps.origins.outputs.web }}" "${GITHUB_SHA::7}"
+      - name: Isolation gate (nothing else runs unless this passes)
+        id: gate
+        run: node scripts/branch-isolation.mjs "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Phase 2 acceptance (rate limiter; call records on PR #28)
+        run: |
+          scope=all
+          if [ "$GITHUB_REF_NAME" = "claude/phase2-rate-limiter" ]; then scope=ratelimit; fi
+          node scripts/phase2-hosted-acceptance.mjs "$GITHUB_REF_NAME" "$GITHUB_SHA" --scope "$scope"
+      - name: Isolation unchanged after the suite
+        if: (success() || failure()) && steps.gate.outcome == 'success'
+        run: node scripts/branch-isolation.mjs "$GITHUB_REF_NAME" "$GITHUB_SHA"
