@@ -341,3 +341,53 @@ async def test_worker_token_channel_remains_bound_across_refresh():
     assert refusal(browser, token("live", "phone")) is not None
     assert refusal(browser, token("test", "simulated")) is None
     assert refusal(phone, "x.W10.sig") is not None  # JSON array cannot grant permission
+
+
+async def test_a_mid_call_credential_downgrade_ends_the_call_instead_of_crashing_the_turn():
+    import base64
+    from types import SimpleNamespace
+
+    from voxera_worker.guard import SIP_KIND, CallBoundTokens
+    from voxera_worker.session import ENDED
+
+    def token(mode, channel):
+        body = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+        return f"x.{body}.sig"
+
+    class Rotating:  # the supervisor hands out a test token after the call started
+        def __init__(self):
+            self.tok = token("live", "phone")
+
+        async def get(self):
+            return self.tok
+
+        async def refresh(self, stale=None):
+            return self.tok
+
+    source = Rotating()
+    fb = FakeBrain([(200, ok("Hello."), 0, 0)])
+    brain = fb.client()
+    brain.tokens = CallBoundTokens(source, SimpleNamespace(kind=SIP_KIND))
+    s = CallSession(brain)
+    assert await say(s, "Hi") == "Hello."
+    source.tok = token("test", "simulated")
+    assert await say(s, "Are you open?") == ENDED  # no exception escapes to the media layer
+    assert s.closed and s.close_reason == "credential mismatch" and s.turns[-1].outcome == "closed"
+    assert s.history[-1] == {"role": "assistant", "text": "Hello."}  # the refused turn left no trace
+    assert await say(s, "Hello?") == ENDED and len(fb.requests) == 1  # the brain is never called again
+
+
+async def test_a_failed_token_fetch_is_a_failed_turn_not_a_crash():
+    class Broken:
+        async def get(self):
+            raise RuntimeError("worker token command failed")
+
+        async def refresh(self, stale=None):
+            raise RuntimeError("worker token command failed")
+
+    fb = FakeBrain([])
+    brain = fb.client()
+    brain.tokens = Broken()
+    s = CallSession(brain)
+    assert await say(s, "Hi") == RECOVERY and s.turns[0].outcome == "failed" and not s.closed
+    assert await say(s, "Hello?") == MESSAGE_START and s.message_mode

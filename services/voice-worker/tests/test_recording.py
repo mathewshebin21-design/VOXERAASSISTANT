@@ -202,3 +202,13 @@ def test_room_reference_is_stable_and_never_contains_the_callers_number():
     assert ref == room_ref("_+447700900123_sip_abcd") and ref.startswith("room-")
     assert "447700900123" not in ref and 8 <= len(ref) <= 64
     assert room_ref(None) is None and room_ref("") is None
+
+
+async def test_a_call_ended_for_a_credential_mismatch_is_recorded_as_failed_with_its_reason():
+    fb = FakeBrain([])
+    fr = FakeRecords()
+    s = CallSession(fb.client(), recorder=fr.recorder())
+    await s.begin()
+    s.closed, s.close_reason = True, "credential mismatch"
+    await s.finish()
+    assert fr.ended == [{"status": "failed", "reason": "credential mismatch"}]

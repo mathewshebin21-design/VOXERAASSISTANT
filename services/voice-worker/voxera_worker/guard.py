@@ -40,6 +40,11 @@ def refusal(participant: object, token: str) -> str | None:
     return None
 
 
+class ChannelMismatch(RuntimeError):
+    """The worker's credential no longer matches the call's real channel (e.g. a test token handed
+    to a telephone call mid-call). The call must end; it is never retried or treated as a glitch."""
+
+
 class CallBoundTokens:
     """Recheck the physical call channel on EVERY token fetch and refresh.
 
@@ -55,7 +60,7 @@ class CallBoundTokens:
     def _check(self, token: str) -> str:
         reason = refusal(self.participant, token)
         if reason is not None:
-            raise RuntimeError(reason)
+            raise ChannelMismatch(reason)
         return token
 
     async def get(self) -> str:
