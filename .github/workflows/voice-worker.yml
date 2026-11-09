@@ -1,0 +1,49 @@
+name: voice-worker
+
+# The voice-worker prototype: session core and LiveKit adapter (ADR-0005/0006). Simulated only:
+# no LiveKit server, no audio, no paid provider.
+on:
+  push:
+    paths: ["services/voice-worker/**", ".github/workflows/voice-worker.yml"]
+  pull_request:
+    paths: ["services/voice-worker/**", ".github/workflows/voice-worker.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/voice-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: uv sync
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run pytest -q
+      - name: LiveKit adapter imports and streams against the real livekit-agents package
+        run: |
+          uv sync --extra livekit
+          uv run python - <<'PY'
+          import asyncio
+          from livekit.agents import llm
+          from voxera_worker import livekit_agent as la
+          from voxera_worker.session import CallSession
+
+          class Fake:
+              async def stream(self, history, cid, lang, out):
+                  yield "Hello there."
+                  out.metrics = {"rounds": 1}
+
+          ctx = llm.ChatContext()
+          ctx.add_message(role="user", content="Are you open today?")
+          agent = la.VoxeraAgent(CallSession(Fake()))
+          async def run():
+              return "".join([p async for p in agent.llm_node(ctx, [], None)])
+          assert asyncio.run(run()) == "Hello there."
+          print("LiveKit adapter OK")
+          PY

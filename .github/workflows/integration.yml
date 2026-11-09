@@ -3,9 +3,9 @@ name: integration
 # Flow front end ↔ Next.js session proxy ↔ VOXERA API ↔ PostgreSQL, driven by a real browser.
 on:
   push:
-    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+    paths: ["apps/previews/**", "services/api/**", "services/voice-worker/**", ".github/workflows/integration.yml"]
   pull_request:
-    paths: ["apps/previews/**", "services/api/**", ".github/workflows/integration.yml"]
+    paths: ["apps/previews/**", "services/api/**", "services/voice-worker/**", ".github/workflows/integration.yml"]
 
 permissions:
   contents: read
@@ -53,6 +53,7 @@ jobs:
           VOXERA_LIVE_LLM_TOKENS_GLOBAL_MONTH: "1000000"
           VOXERA_LIVE_TTS_CHARS_PER_ORG_MONTH: "20000"
           VOXERA_LIVE_TTS_CHARS_GLOBAL_MONTH: "100000"
+          VOXERA_WORKER_SECRET: ci-only-worker-secret-ci-only-worker-0001
         run: |
           nohup uv run python scripts/fake_providers.py 8090 ../../apps/previews/scripts/fixtures/beep.mp3 > fake.log 2>&1 &
           nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
@@ -71,9 +72,18 @@ jobs:
           BASE_URL=http://localhost:3000 node scripts/e2e-designs-live.mjs
           BASE_URL=http://localhost:3000 node scripts/e2e-design-select.mjs
           BASE_URL=http://localhost:3000 node scripts/e2e-calls.mjs
+          BASE_URL=http://localhost:3000 node scripts/e2e-languages.mjs
       - name: Scripted-call harness (stand-in providers; checks plumbing and metrics, not real performance)
         working-directory: services/api
         run: uv run python scripts/voice_harness.py --api http://127.0.0.1:8000 --mode fake --out voice-harness-report.json
+      - name: Voice-worker stand-in call with a scoped worker token (simulated)
+        working-directory: services/voice-worker
+        env:
+          VOXERA_WORKER_SECRET: ci-only-worker-secret-ci-only-worker-0001
+        run: |
+          uv sync
+          uv run python scripts/standin_call.py --api http://127.0.0.1:8000 \
+            --mint "uv run --directory ../api python scripts/mint_worker_token.py"
       - name: Harness report
         if: always()
         uses: actions/upload-artifact@v4

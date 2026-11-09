@@ -15,12 +15,13 @@ from typing import Annotated, Literal
 
 import anthropic
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 from sqlalchemy.orm import Session
 
 from .. import calls as calls_mod
+from .. import worker_auth
 from ..config import get_settings
 from ..db import SessionLocal, set_tenant
 from ..deps import DB, OrgContext, require
@@ -28,12 +29,17 @@ from ..live import budget as budget_mod
 from ..live import providers, setup_agent, toolcheck
 from ..live.budget import budget
 from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool, system_prompt
-from ..models import UsageKind
+from ..models import Organization, UsageKind, WorkspaceSettings
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
+from ..voice import launch
+from ..voice.languages import LANGUAGES
+from ..voice.regions import country_of
+from ..voice.routing import language_instruction
 
 log = logging.getLogger("voxera.live")
 router = APIRouter(prefix="/v1/orgs/{org_id}/live", tags=["live"])
+worker_router = APIRouter(prefix="/v1/worker", tags=["worker"])
 
 MAX_ROUNDS = 6  # model turns per caller turn (e.g. check availability → book → confirm)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -54,6 +60,9 @@ class BrainIn(Strict):
     messages: list[LiveMessage] = Field(min_length=1, max_length=40)
     # A call record (POST /calls) to add this turn to: the caller's words, tools, the reply, metrics.
     call_id: uuid.UUID | None = None
+    # The language the call is being conducted in (BCP 47, from the language registry). The model
+    # replies directly in it; the instruction sits after the cache breakpoint, like the clock.
+    language: str | None = Field(None, pattern=r"^[a-z]{2,3}-[A-Z]{2}$")
 
 
 class TtsIn(Strict):
@@ -170,19 +179,46 @@ def _usage_total(u: object) -> int:
 @router.post("/brain")
 def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_write))], db: DB) -> StreamingResponse:
     """Streams one receptionist reply as server-sent events: text, tool, error, done."""
+    return _brain(body, ctx.org_id, ctx.user.id, db)
+
+
+@worker_router.post("/live/brain")
+def worker_brain(body: BrainIn, request: Request, db: DB) -> StreamingResponse:
+    """The same brain for a voice worker holding a scoped worker token (ADR-0005 §3). The workspace
+    comes from the token, never from the request. 404 unless worker credentials are enabled."""
+    if not worker_auth.enabled():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Worker token required")
+    try:
+        org_id, mode = worker_auth.verify(header[7:].strip())
+    except worker_auth.WorkerAuthError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from None
+    set_tenant(db, org_id=org_id)
+    if db.get(Organization, org_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found")
+    if mode == "live":  # real callers only where the business's country passed its launch review
+        ws = db.get(WorkspaceSettings, org_id)
+        country = country_of(ws.locale if ws else None) or ""
+        if not launch.ready(country):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Live calls are not enabled for this country yet")
+    return _brain(body, org_id, None, db)
+
+
+def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Session) -> StreamingResponse:
     if not _llm_ready():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
     if body.messages[-1].role != "user":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The last message must be the caller's")
     if body.call_id is not None:  # refuse before spending anything
         try:
-            call = calls_mod.get(db, ctx.org_id, body.call_id)
+            call = calls_mod.get(db, org_id, body.call_id)
         except calls_mod.CallError as e:
             raise HTTPException(e.status, str(e)) from None
         if call.status != "in_progress":
             raise HTTPException(status.HTTP_409_CONFLICT, "The call has ended")
-    bctx = load_context(db, ctx.org_id)
-    org_id, user_id = ctx.org_id, ctx.user.id
+    bctx = load_context(db, org_id)
     msgs: list[dict] = [{"role": m.role, "content": m.text} for m in body.messages]
     if msgs[0]["role"] == "assistant":  # the conversation must open with a user turn
         msgs.insert(0, {"role": "user", "content": "(The call has just connected.)"})
@@ -200,6 +236,11 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
             yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
 
     system = system_prompt(bctx)
+    if body.language is not None:
+        if body.language not in LANGUAGES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown language")
+        if (line := language_instruction(body.language)) is not None:
+            system += "\n" + line  # after the clock line, so in the per-turn (uncached) block
     # Hold this turn's worst case against the monthly caps before calling the provider (atomic).
     allowance = turn_allowance(system, TOOLS, msgs)
     budget_mod.reserve(db, org_id, UsageKind.llm_tokens, allowance, f"llm-{body.request_id}")
@@ -220,7 +261,7 @@ def brain(body: BrainIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_w
     return StreamingResponse(gen, media_type="text/event-stream", headers={"cache-control": "no-store"})
 
 
-def _record_call(gen: Iterator[str], org_id: uuid.UUID, user_id: uuid.UUID, call_id: uuid.UUID, said: str):
+def _record_call(gen: Iterator[str], org_id: uuid.UUID, user_id: uuid.UUID | None, call_id: uuid.UUID, said: str):
     """Passes the stream through unchanged, then adds the turn to the call record.
 
     Recording runs after the stream ends (or the listener leaves), in its own session, and is best
@@ -256,7 +297,7 @@ def _record_call(gen: Iterator[str], org_id: uuid.UUID, user_id: uuid.UUID, call
         _save_call_events(org_id, user_id, call_id, events)
 
 
-def _save_call_events(org_id: uuid.UUID, user_id: uuid.UUID, call_id: uuid.UUID, events: list[dict]) -> None:
+def _save_call_events(org_id: uuid.UUID, user_id: uuid.UUID | None, call_id: uuid.UUID, events: list[dict]) -> None:
     rdb = SessionLocal()
     try:
         set_tenant(rdb, org_id=org_id, user_id=user_id)

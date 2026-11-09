@@ -92,7 +92,7 @@ def test_groq_brain_runs_tools_streams_and_meters(make_account, oa):
         "function": {"name": "list_services", "arguments": "{}"},
     }
     assert result["role"] == "tool" and result["tool_call_id"] == "call_a1"
-    assert json.loads(result["content"])[0]["price_from_gbp"] == "165.00"
+    assert json.loads(result["content"])[0]["price_from"] == "165.00"
     assert a.get(a.o("/live/status")).json()["llm"]["org_used"] == 1700
 
 
