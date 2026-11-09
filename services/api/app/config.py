@@ -33,7 +33,14 @@ class Settings(BaseSettings):
     expose_invite_tokens: bool = True
     invitation_days: int = 7
 
-    login_attempts_per_minute: int = 5
+    login_attempts_per_minute: int = 5  # per email and client address, per minute
+    # Per email whatever the address, so rotating addresses cannot multiply the attempts.
+    login_attempts_per_email: int = 10
+    login_email_window_seconds: int = Field(900, ge=60, le=86400)
+    # The request header that carries the real client address, set by our hosting platform and
+    # never by the caller. Unset: on Vercel (VERCEL=1) it is x-vercel-forwarded-for, which Vercel
+    # writes itself; elsewhere the socket address is used and no header is trusted.
+    client_ip_header: str | None = Field(None, pattern=r"^[a-z0-9-]{1,64}$")
     # Where rate-limit counts live. "postgres" is shared by every instance (migration 0010);
     # "memory" is per process and only correct with one instance: the rollback setting.
     rate_limit_backend: str = Field("postgres", pattern="^(postgres|memory)$")
