@@ -318,7 +318,7 @@ async def test_worker_token_channel_remains_bound_across_refresh():
     import base64
     from types import SimpleNamespace
 
-    from voxera_worker.guard import CallBoundTokens, SIP_KIND, refusal
+    from voxera_worker.guard import SIP_KIND, CallBoundTokens, refusal
 
     def token(mode, channel):
         body = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
