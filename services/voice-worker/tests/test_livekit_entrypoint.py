@@ -107,9 +107,7 @@ async def test_sip_refuses_non_live_phone_token_before_any_record_or_speech(monk
 
 
 async def test_sip_refuses_even_valid_channel_when_api_denies_call_start(monkeypatch):
-    ctx, events, recordings, sessions = setup(
-        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None
-    )
+    ctx, events, recordings, sessions = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None)
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "telephone authorization failed"
@@ -142,9 +140,7 @@ async def test_non_sip_participant_cannot_use_phone_credential(monkeypatch):
 
 
 async def test_simulated_participant_may_start_without_record_on_best_effort_path(monkeypatch):
-    ctx, events, recordings, sessions = setup(
-        monkeypatch, mode="test", channel="simulated", kind=0, record_id=None
-    )
+    ctx, events, recordings, sessions = setup(monkeypatch, mode="test", channel="simulated", kind=0, record_id=None)
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason is None
