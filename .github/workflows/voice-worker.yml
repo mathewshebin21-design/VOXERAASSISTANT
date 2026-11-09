@@ -49,3 +49,45 @@ jobs:
           PY
       - name: Rehearse SIP launch gates with LiveKit (no network, keys or paid calls)
         run: uv run --extra livekit pytest -q tests/test_livekit_entrypoint.py
+
+  staging-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unprivileged staging worker with locked LiveKit dependency
+        run: docker build --file services/voice-worker/Dockerfile --tag voxera-staging-worker:ci services/voice-worker
+      - name: Fail closed without any configuration or network
+        run: |
+          if docker run --rm --network none voxera-staging-worker:ci /srv/.venv/bin/python -m voxera_worker.launch_staging check; then
+            echo "ERROR: unconfigured worker started"
+            exit 1
+          fi
+      - name: Accept only isolated staging and no SIP (no network)
+        run: |
+          docker run --rm --network none \
+            -e VOXERA_WORKER_ENV=staging \
+            -e VOXERA_SIP_ENABLED=false \
+            -e VOXERA_API_URL=https://staging-api.example.test \
+            -e VOXERA_STAGING_API_HOST=staging-api.example.test \
+            -e LIVEKIT_URL=wss://staging-livekit.example.test \
+            -e VOXERA_STAGING_LIVEKIT_HOST=staging-livekit.example.test \
+            -e LIVEKIT_API_KEY=ci-not-real \
+            -e LIVEKIT_API_SECRET=ci-not-real \
+            -e VOXERA_WORKER_TOKEN_CMD="echo unused" \
+            voxera-staging-worker:ci /srv/.venv/bin/python -m voxera_worker.launch_staging check
+      - name: Refuse SIP-enabled configuration (no network)
+        run: |
+          if docker run --rm --network none \
+            -e VOXERA_WORKER_ENV=staging \
+            -e VOXERA_SIP_ENABLED=true \
+            -e VOXERA_API_URL=https://staging-api.example.test \
+            -e VOXERA_STAGING_API_HOST=staging-api.example.test \
+            -e LIVEKIT_URL=wss://staging-livekit.example.test \
+            -e VOXERA_STAGING_LIVEKIT_HOST=staging-livekit.example.test \
+            -e LIVEKIT_API_KEY=ci-not-real \
+            -e LIVEKIT_API_SECRET=ci-not-real \
+            -e VOXERA_WORKER_TOKEN_CMD="echo unused" \
+            voxera-staging-worker:ci /srv/.venv/bin/python -m voxera_worker.launch_staging check; then
+            echo "ERROR: staging accepted SIP-enabled configuration"
+            exit 1
+          fi
