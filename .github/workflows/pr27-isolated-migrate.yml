@@ -1,0 +1,96 @@
+name: PR27 isolated Preview migration (0009 -> 0010)
+
+# Runs only when a reviewed request file is pushed on the PR27 branch.
+# Explicitly refuses production, shared staging, RC1, or any other Neon host.
+# Secrets exist ONLY in the pr27-isolated-validation GitHub environment.
+on:
+  push:
+    branches: [claude/phase2-rate-limiter]
+    paths: [.github/rehearsal/pr27-isolated-migrate.request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr27-isolated-migrate
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    if: github.ref == 'refs/heads/claude/phase2-rate-limiter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: pr27-isolated-validation
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.PR27_ISOLATED_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.PR27_ISOLATED_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert isolated target and mask credentials (no DB changes)
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          from urllib.parse import urlsplit, unquote
+          expected_direct = "ep-plain-sound-zay6qypd.c-2.eu-west-2.aws.neon.tech"
+          expected_pooled = "ep-plain-sound-zay6qypd-pooler.c-2.eu-west-2.aws.neon.tech"
+          for key, allowed in (
+              ("DATABASE_URL_UNPOOLED", (expected_direct,)),
+              ("DATABASE_URL", (expected_pooled, expected_direct)),
+          ):
+              value = os.environ.get(key, "")
+              try:
+                  p = urlsplit(value)
+                  for part in (p.hostname, p.username, p.password, unquote(p.password or ""), p.path.lstrip("/")):
+                      if part:
+                          print(f"::add-mask::{part}")
+                  valid = (
+                      p.scheme in ("postgres", "postgresql", "postgresql+psycopg")
+                      and p.hostname in allowed and p.port in (None, 5432)
+                      and p.path == "/neondb" and p.username == "neondb_owner"
+                      and bool(p.password) and "sslmode=require" in p.query
+                      and not p.fragment
+                  )
+              except (ValueError, TypeError):
+                  valid = False
+              if not valid:
+                  print(f"::error::Refusing migration: {key} is not the PR27 isolated connection")
+                  sys.exit(1)
+          print("PR27 isolated direct and runtime connection identifiers verified")
+          PY
+      - name: Install pinned migration environment
+        run: |
+          python3 -m pip install --disable-pip-version-check "uv==0.11.32"
+          uv sync --frozen
+      - name: Check claim and revision 0009, fail closed
+        run: |
+          uv run python - <<'PY'
+          from sqlalchemy import create_engine, text
+          from app.platform import migration_owner_url
+          engine = create_engine(migration_owner_url(),connect_args={"options":"-c default_transaction_read_only=on"})
+          try:
+              with engine.connect() as c:
+                  mark=c.execute(text("SELECT environment FROM deployment_environment WHERE id=1")).scalar()
+                  version=c.execute(text("SELECT version_num FROM alembic_version")).scalar()
+                  if mark != "staging" or version != "0009":
+                      raise SystemExit("STOP: expected isolated staging marker and revision 0009")
+                  print("Isolated staging claim, revision 0009: verified")
+          finally: engine.dispose()
+          PY
+      - name: Read-only baseline verification
+        run: uv run python scripts/verify_release.py --env staging --expect 0009 --save pr27-baseline.json
+      - name: Run approved Alembic migration 0010 on isolated branch ONLY
+        run: uv run python scripts/migrate.py --env staging
+      - name: Verify revision 0010, role privileges and baseline
+        run: uv run python scripts/verify_release.py --env staging --expect 0010 --baseline pr27-baseline.json
+      - name: Verify migration head is clean
+        run: uv run python scripts/migrate.py --env staging --check
+      - name: Save migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr27-isolated-migration-${{ github.sha }}
+          path: services/api/pr27-baseline.json
+          if-no-files-found: ignore
