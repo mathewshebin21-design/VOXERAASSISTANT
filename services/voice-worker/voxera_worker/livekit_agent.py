@@ -27,7 +27,7 @@ from collections.abc import AsyncIterable
 from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, llm
 
 from .brain import BrainClient
-from .guard import refusal
+from .guard import CallBoundTokens, may_answer
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
@@ -65,10 +65,13 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     caller = await ctx.wait_for_participant()
     cmd = os.environ.get("VOXERA_WORKER_TOKEN_CMD")
-    tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
-    if (why := refusal(caller, await tokens.get())) is not None:
-        log.warning("refusing call", extra={"reason": why})
-        ctx.shutdown(reason=why)  # never answer a real caller with a test token (launch gate)
+    raw_tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
+    tokens = CallBoundTokens(raw_tokens, caller)
+    try:
+        await tokens.get()  # bind every token (including future refreshes) to the actual call channel
+    except RuntimeError as e:
+        log.warning("refusing call", extra={"reason": str(e)})
+        ctx.shutdown(reason="worker channel mismatch")
         return
     api = os.environ["VOXERA_API_URL"]
     brain = BrainClient(api, "", tokens, worker=True)
@@ -78,7 +81,13 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     # The prototype plays no AI-disclosure or recording notice yet, so it says so: the API then keeps
     # the call's events without the caller's words. The room name makes the record restart-safe.
-    await call.begin(external_ref=room_ref(ctx.room.name))
+    record_id = await call.begin(external_ref=room_ref(ctx.room.name))
+    if not may_answer(caller, record_id):
+        # For SIP this API round-trip is the mandatory signed-token and country-gate check.
+        # Call recording stays best-effort for simulated/non-phone participants only.
+        log.warning("refusing telephone call: API authorization or call start failed")
+        ctx.shutdown(reason="telephone authorization failed")
+        return
     session = AgentSession()  # STT/TTS/VAD come from the approved provider configuration (not set here)
     await session.start(agent=VoxeraAgent(call), room=ctx.room)
     ctx.add_shutdown_callback(lambda: _close(call))
