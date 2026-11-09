@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from .guard import ChannelMismatch
 from .tokens import StaticToken, TokenSource
 
 
@@ -63,7 +64,7 @@ class BrainClient:
             body["language"] = language
         started = time.monotonic()
         done = False
-        token = await self.tokens.get()
+        token = await self._token()
         for attempt in (1, 2):
             headers = {"authorization": f"Bearer {token}"}
             async with self.http.stream("POST", self.url, json=body, headers=headers) as r:
@@ -71,7 +72,7 @@ class BrainClient:
                     # Expired or rotated between our check and the request: refresh once and retry.
                     # Safe: nothing has been streamed or spent yet.
                     await r.aread()
-                    token = await self.tokens.refresh(stale=token)
+                    token = await self._token(stale=token)
                     continue
                 async for piece in self._read(r, started, out):
                     yield piece
@@ -79,6 +80,16 @@ class BrainClient:
                 break
         if not done:
             raise BrainError("brain HTTP 401")
+
+    async def _token(self, stale: str | None = None) -> str:
+        """A token for this request. A channel mismatch ends the call (it propagates); any other
+        failure to get a token is a failed turn, like an unreachable brain."""
+        try:
+            return await (self.tokens.refresh(stale=stale) if stale is not None else self.tokens.get())
+        except ChannelMismatch:
+            raise
+        except RuntimeError as e:
+            raise BrainError("worker credential unavailable") from e
 
     async def _read(self, r: httpx.Response, started: float, out: TurnEvents) -> AsyncIterator[str]:
         done = False

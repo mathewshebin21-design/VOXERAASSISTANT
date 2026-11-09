@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 from .brain import BrainClient, BrainError, TurnEvents
+from .guard import ChannelMismatch
 from .recording import CallRecorder
 
 FILLER = "One moment, I'm just checking that."
@@ -39,6 +40,7 @@ MESSAGE_START = (
 MESSAGE_STEPS = ("And the best number to reach you on?", "And briefly, what is it about?")
 MESSAGE_DONE = "Thank you. I've passed that on and the team will call you back as soon as they can."
 CLOSING = "I'm sorry, we've reached the time limit for this call. The team will be happy to help if you call back."
+ENDED = "I'm sorry, I can't continue this call right now. Please call back and the team will be happy to help."
 
 
 @dataclass
@@ -119,6 +121,7 @@ class CallSession:
         self.message: list[str] = []  # caller answers collected in message mode
         self.handoffs: list[dict] = []
         self.closed = False
+        self.close_reason: str | None = None  # why the session closed itself, for the call record
 
     # ---- one caller turn ---------------------------------------------------------------------
 
@@ -130,8 +133,12 @@ class CallSession:
         self.turns.append(rec)
         t0 = self.clock()
         try:
-            if self.closed or self.clock() - self.started > self.max_call_seconds:
-                self.closed, rec.outcome = True, "closed"
+            if self.closed:
+                rec.outcome = "closed"
+                yield await self._say(rec, ENDED if self.close_reason == "credential mismatch" else CLOSING)
+                return
+            if self.clock() - self.started > self.max_call_seconds:
+                self.closed, self.close_reason, rec.outcome = True, "time limit reached", "closed"
                 yield await self._say(rec, CLOSING)
                 return
             self.language.observe(detected_language, confidence)
@@ -201,6 +208,12 @@ class CallSession:
                 self.handoffs.append(events.handoff)
                 if self.on_handoff:
                     self.on_handoff(events.handoff)
+        except ChannelMismatch:
+            # The credential no longer fits this call (e.g. a test token on a telephone call): end the
+            # call politely and never retry. The media layer hangs up when ``closed`` is set.
+            self.history.pop()
+            self.closed, self.close_reason, rec.outcome = True, "credential mismatch", "closed"
+            yield await self._say(rec, ENDED)
         except (BrainError, TimeoutError, OSError) as e:
             rec.outcome = "timeout" if isinstance(e, TimeoutError) else "failed"
             self.history.pop()  # the brain never answered this caller turn; keep history consistent
@@ -248,9 +261,9 @@ class CallSession:
         if self.recorder is None:
             return
         status, outcome = call_outcome(self)
-        if self.closed:
-            reason = "time limit reached"
-        await self.recorder.end(status, outcome, reason)
+        if self.close_reason == "credential mismatch":
+            status, outcome = "failed", None
+        await self.recorder.end(status, outcome, self.close_reason or reason)
 
     # ---- reporting -----------------------------------------------------------------------------
 
