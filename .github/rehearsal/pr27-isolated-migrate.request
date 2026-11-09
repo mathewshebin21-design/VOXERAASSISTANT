@@ -1,0 +1,5 @@
+# Owner-approved request (2026-11-09): run pr27-isolated-migrate.yml once.
+# Target: PR #27's isolated Neon validation branch only (br-red-cherry-zaxx9s1o,
+# endpoint ep-plain-sound-zay6qypd). 0009 -> 0010, then verify_release --expect 0010.
+# Not production, not shared staging, not PR #28's branch.
+requested_at: 2026-11-09T04:15Z
