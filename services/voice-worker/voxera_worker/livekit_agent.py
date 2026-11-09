@@ -6,10 +6,10 @@ speech recognition and speech output, and barge-in. VOXERA replaces only the rea
 yields its reply text. When the caller interrupts, LiveKit cancels this generator, which closes the
 brain request.
 
-Speech providers are NOT chosen here. They come from VOXERA's route for the call's language
-(``POST /v1/orgs/{org}/voice/route``) and need paid keys, so nothing below starts unless an operator
-configures them. Running a room needs a LiveKit server (LiveKit Cloud or self-hosted): neither is
-provisioned, and doing so needs the owner's approval (ADR-0005 §4).
+Speech recognition, voice synthesis, and voice-activity detection are selected only through
+explicit model configuration (see media.py). This code does not enable any provider by default.
+Voice choices are temporary staging configuration until workspace-level routing is approved.
+Running a room needs an approved LiveKit server and paid-provider budget gate (ADR-0005 §4).
 
     VOXERA_API_URL=… VOXERA_WORKER_TOKEN_CMD="…/mint_worker_token.py --org <id>" \
         python -m voxera_worker.livekit_agent dev
@@ -24,10 +24,11 @@ import logging
 import os
 from collections.abc import AsyncIterable
 
-from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, llm
+from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, inference, llm
 
 from .brain import BrainClient
 from .guard import CallBoundTokens, is_phone, may_answer
+from .media import MediaConfigError, MediaSettings, speech_settings
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
@@ -61,6 +62,15 @@ class VoxeraAgent(Agent):
             yield piece
 
 
+def build_media_session(settings: MediaSettings) -> AgentSession:
+    """Construct an explicit STT -> VOXERA brain -> TTS session without starting providers."""
+    return AgentSession(
+        stt=inference.STT(model=settings.stt_model),
+        tts=inference.TTS(model=settings.tts_model, voice=settings.tts_voice),
+        vad=inference.VAD(model="silero"),
+    )
+
+
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     caller = await ctx.wait_for_participant()
@@ -78,6 +88,14 @@ async def entrypoint(ctx: JobContext) -> None:
     except RuntimeError as e:
         log.warning("refusing call", extra={"reason": str(e)})
         ctx.shutdown(reason="worker channel mismatch")
+        return
+    # Validate before opening a call record: an unconfigured worker must not
+    # admit a caller, create records, or silently trigger provider inference.
+    try:
+        media = speech_settings(os.environ)
+    except MediaConfigError:
+        log.warning("refusing call: speech media is not configured or approved")
+        ctx.shutdown(reason="speech media unavailable")
         return
     api = os.environ["VOXERA_API_URL"]
     brain = BrainClient(api, "", tokens, worker=True)
@@ -97,7 +115,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Once the API has authorized a phone call, the record must be closed even if
     # media initialization fails. Otherwise the call can remain open indefinitely.
     try:
-        session = AgentSession()  # STT/TTS/VAD require separately approved providers
+        session = build_media_session(media)
         await session.start(agent=VoxeraAgent(call), room=ctx.room)
     except BaseException:  # also includes cancellation while a job is starting
         call.closed, call.close_reason = True, "media startup failed"

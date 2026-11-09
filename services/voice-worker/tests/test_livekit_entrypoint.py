@@ -60,6 +60,11 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
     monkeypatch.delenv("VOXERA_WORKER_TOKEN_CMD", raising=False)
     monkeypatch.setenv("VOXERA_WORKER_TOKEN", token(mode, channel))
     monkeypatch.setenv("VOXERA_SIP_ENABLED", "true")  # explicit opt-in for offline admission-path tests
+    monkeypatch.setenv("VOXERA_MEDIA_ENABLED", "true")  # mocked; never reaches inference
+    monkeypatch.setenv("VOXERA_MEDIA_PROVIDER", "livekit-inference")
+    monkeypatch.setenv("VOXERA_STT_MODEL", "mock/stt-model")
+    monkeypatch.setenv("VOXERA_TTS_MODEL", "mock/tts-model")
+    monkeypatch.setenv("VOXERA_TTS_VOICE", "offline-voice")
     monkeypatch.setenv("VOXERA_API_URL", "http://isolated-api.test")
     monkeypatch.setenv("VOXERA_LANGUAGES", "en-GB,hi-IN")
 
@@ -91,7 +96,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             events.append("media_start")
 
     monkeypatch.setattr(worker, "CallRecorder", Recorder)
-    monkeypatch.setattr(worker, "AgentSession", MediaSession)
+    monkeypatch.setattr(worker, "build_media_session", lambda settings: MediaSession())
     return context, events, recordings, sessions
 
 
@@ -166,7 +171,7 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
             events.append("media_start")
             raise error_type("simulated media startup failure")
 
-    monkeypatch.setattr(worker, "AgentSession", FailingMediaSession)
+    monkeypatch.setattr(worker, "build_media_session", lambda settings: FailingMediaSession())
     with pytest.raises(error_type):
         await worker.entrypoint(ctx)
 
@@ -197,5 +202,29 @@ async def test_sip_rejects_unapproved_flag_value(monkeypatch):
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "telephone channel disabled"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
+
+
+async def test_disabled_speech_refuses_before_any_call_record_or_media(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="test", channel="simulated", kind=0, record_id="would-not-be-used"
+    )
+    monkeypatch.delenv("VOXERA_MEDIA_ENABLED")
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "speech media unavailable"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_missing_tts_model_refuses_before_call_record_or_media(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="test", channel="simulated", kind=0, record_id="would-not-be-used"
+    )
+    monkeypatch.delenv("VOXERA_TTS_MODEL")
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "speech media unavailable"
     assert events == ["connect", "participant", "shutdown"]
     assert recordings == [] and sessions == []

@@ -45,6 +45,8 @@ def staging_errors(env: Mapping[str, str]) -> list[str]:
         errors.append("worker environment must be staging")
     if env.get("VOXERA_SIP_ENABLED") != "false":
         errors.append("staging SIP must be explicitly disabled")
+    if env.get("VOXERA_MEDIA_ENABLED", "false") != "false":
+        errors.append("staging paid speech inference must remain disabled")
 
     api_host = _host(env.get("VOXERA_API_URL", ""), "https")
     expected_api = env.get("VOXERA_STAGING_API_HOST", "").strip().lower()
