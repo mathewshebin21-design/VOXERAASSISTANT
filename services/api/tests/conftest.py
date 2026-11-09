@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app.main import app
-from app.routers.auth import login_limiter
+from app.routers.auth import login_email_limiter, login_limiter
 
 OWNER_URL = os.environ["VOXERA_MIGRATION_DATABASE_URL"]
 APP_URL = os.environ["VOXERA_DATABASE_URL"]
@@ -52,6 +52,7 @@ def clean(owner_engine):
     with owner_engine.begin() as c:
         c.execute(text(f"TRUNCATE {', '.join(TABLES)} CASCADE"))
     login_limiter.reset()
+    login_email_limiter.reset()
     yield
 
 

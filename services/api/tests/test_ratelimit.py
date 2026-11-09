@@ -113,7 +113,8 @@ def test_no_email_or_address_is_stored(client, make_account, owner_engine):
     client.post("/v1/auth/login", json={"email": "ada@example.com", "password": "wrong password"})
     with owner_engine.connect() as c:
         buckets = list(c.execute(text("SELECT bucket FROM rate_limit_hits")).scalars())
-    assert len(buckets) == 1 and len(buckets[0]) == 64 and "ada" not in buckets[0]
+    # One per-address bucket and one per-email bucket; both are digests, never the email itself.
+    assert len(buckets) == 2 and all(len(b) == 64 and "ada" not in b for b in buckets)
 
 
 def test_login_429_says_when_to_retry(client, make_account):
