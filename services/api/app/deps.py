@@ -1,5 +1,7 @@
 """Request dependencies: authentication, tenant context and permission checks."""
 
+import ipaddress
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .config import get_settings
 from .db import get_db, set_tenant
 from .models import AuthSession, Membership, User
 from .permissions import Perm, has_perm
@@ -85,8 +88,29 @@ def require(perm: Perm):
     return _dep
 
 
+def _trusted_ip_header() -> str | None:
+    configured = get_settings().client_ip_header
+    if configured:
+        return configured
+    return "x-vercel-forwarded-for" if os.environ.get("VERCEL") == "1" else None
+
+
+def client_ip(request: Request) -> str | None:
+    """The caller's address. Behind Vercel, the address Vercel itself puts in its own header (it
+    overwrites any value a caller sends); the socket address on Vercel is not the caller's.
+    Elsewhere only the socket address is used, so a forged header is never believed."""
+    header = _trusted_ip_header()
+    if header:
+        raw = (request.headers.get(header) or "").split(",")[0].strip()
+        try:
+            return str(ipaddress.ip_address(raw))
+        except ValueError:
+            pass  # missing or malformed: fall back to the socket address
+    return request.client.host if request.client else None
+
+
 def client_meta(request: Request) -> dict[str, str | None]:
     return {
-        "ip": request.client.host if request.client else None,
+        "ip": client_ip(request),
         "user_agent": (request.headers.get("user-agent") or "")[:300] or None,
     }

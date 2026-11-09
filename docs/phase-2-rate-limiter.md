@@ -62,7 +62,48 @@ Not changed: what is limited (each email and address pair) and how much (5 a min
 | Rollback, code | Revert the merge. The table and function are unused but harmless |
 | Rollback, schema | `alembic downgrade 0009` drops both. This is tested; it is only needed if the table itself is a problem |
 
+## Hardening after the production smoke test (2026-11-09)
+
+**What happened.** After #27 shipped, seven wrong passwords for one email against production landed in
+six different buckets within one minute and were all answered 401. The only limit was per email
+*and* address, and the address changed between requests, so the five-attempt limit never filled.
+The in-memory limiter before #27 had the same key, so this was not a regression.
+
+**Changes.**
+- **Per-email limit:** 10 attempts per email in 15 minutes, whatever the address
+  (`VOXERA_LOGIN_ATTEMPTS_PER_EMAIL`, `VOXERA_LOGIN_EMAIL_WINDOW_SECONDS`). It sits alongside the
+  existing 5 per minute per email and address. Every attempt counts against both limits, refused ones
+  included. A 429 carries the longer of the two waits.
+- **Trusted client address:** `deps.client_ip`.
+  - On Vercel (`VERCEL=1`) it reads `x-vercel-forwarded-for`, which Vercel sets itself. It takes the
+    first entry, validated as an IP address, and falls back to the socket address if the header is
+    missing or malformed.
+  - Elsewhere no header is trusted, so a caller cannot forge an address.
+  - `VOXERA_CLIENT_IP_HEADER` overrides the header name.
+  - The audit log records the same address.
+
+**Trade-off.** Someone who knows an email can keep that account at 429 by sending 10 wrong passwords
+every 15 minutes. Other accounts and every other address-and-email pair are unaffected, and the wait is
+bounded. This is the usual trade-off for per-account limits. Account lockout notices or a CAPTCHA would
+be later steps.
+
+**Tests (`tests/test_ratelimit_hardening.py`, 8 tests; full API suite 306 passed):**
+- **Rotating real socket addresses (the production failure, reproduced):** 10 wrong passwords from 10
+  addresses get 401, then 429 from any address. On the previous code this test fails with 15 × 401.
+- Rotating trusted addresses behind Vercel are blocked the same way, and even the right password waits.
+- One locked email does not affect another account.
+- The per-address limit still applies from a single address.
+- A forged header is ignored off Vercel.
+- The address is parsed and validated (first entry, IPv6, malformed, missing).
+- The audit log records the trusted address.
+- Both buckets are digests only.
+
+**Hosted acceptance** (`apps/previews/scripts/phase2-hosted-acceptance.mjs`) now also checks:
+- a forged `x-vercel-forwarded-for` does not buy new attempts, which proves on the real platform that the
+  header cannot be spoofed;
+- after waiting for the per-address window to clear, the 11th attempt in 15 minutes is refused with a long
+  `Retry-After`.
+
 ## Open items
 
-1. **Which address does the API see on Vercel?** `client_meta` uses `request.client.host`. If that is a proxy address rather than the caller's, every login shares one address, and the limit is effectively per email. Someone could then hold another person's sign-in at 429 for a minute; that risk exists today too. Check this on a preview deployment before relying on the per-address part, then read the platform's forwarded-for header if needed.
-2. **Other endpoints.** The same limiter can protect sign-up, refresh, invitation acceptance and the live endpoints (per workspace). Each is a one-line `make_limiter(...)` plus a test. They are not added here, to keep this change small.
+1. **Other endpoints.** The same limiter can protect sign-up, refresh, invitation acceptance and the live endpoints (per workspace). Each is a one-line `make_limiter(...)` plus a test. They are not added here, to keep this change small.
