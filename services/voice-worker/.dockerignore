@@ -1,0 +1,17 @@
+# Do not send local files, credentials or test artifacts into build context.
+.env
+.env.*
+*.pem
+*.key
+*.log
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/
+scripts/
+*.egg-info/
+dist/
+build/
+.git/
