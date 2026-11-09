@@ -73,6 +73,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             assert api == "http://isolated-api.test"
             self.tokens = tokens
             self.ends: list[tuple] = []
+            self.writes: list[dict] = []
             recordings.append(self)
 
         async def start(self, **kwargs):
@@ -81,6 +82,9 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             assert kwargs["recording_notice_played"] is False
             assert kwargs["external_ref"].startswith("room-")
             return record_id
+
+        def add(self, rows):
+            self.writes.extend(rows)
 
         async def end(self, *args):
             self.ends.append(args)
@@ -102,6 +106,12 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             assert isinstance(agent.call, CallSession)
             assert room is context.room
             events.append("media_start")
+
+        def say(self, text, *, allow_interruptions, add_to_chat_ctx):
+            events.append("media_say")
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(None)
+            return future
 
     monkeypatch.setattr(worker, "CallRecorder", Recorder)
     monkeypatch.setattr(worker, "build_media_session", lambda settings: MediaSession())
@@ -236,3 +246,24 @@ async def test_missing_tts_model_refuses_before_call_record_or_media(monkeypatch
     assert ctx.shutdown_reason == "speech media unavailable"
     assert events == ["connect", "participant", "shutdown"]
     assert recordings == [] and sessions == []
+
+
+async def test_entrypoint_attaches_transcription_guard_and_closes_failed_call(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="test", channel="simulated", kind=0, record_id="authorized-simulated-id"
+    )
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason is None
+    assert "user_input_transcribed" in sessions[0].callbacks
+    assert "user_transcription_timeout" in sessions[0].callbacks
+
+    timeout = sessions[0].callbacks["user_transcription_timeout"]
+    timeout(SimpleNamespace())
+    timeout(SimpleNamespace())
+    await asyncio.sleep(0)
+    assert ctx.shutdown_reason == "speech transcription unavailable"
+    assert len(recordings[0].writes) == 2
+    assert all(event["data"]["outcome"] == "transcription_timeout" for event in recordings[0].writes)
+    await ctx.callbacks[0]()
+    assert recordings[0].ends == [("failed", None, "speech transcription unavailable")]
+    assert events[-4:] == ["media_say", "media_say", "shutdown", "record_end"]
