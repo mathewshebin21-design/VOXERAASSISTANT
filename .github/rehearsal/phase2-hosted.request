@@ -1,0 +1,4 @@
+# Owner-approved request (2026-11-09): run phase2-hosted-acceptance.yml once on PR #27's branch.
+# Branch web Preview -> branch API Preview -> PR #27's isolated Neon branch at 0010.
+# Scope: ratelimit. Isolation gate runs before and after. No paid provider is called.
+requested_at: 2026-11-09T04:25Z
