@@ -22,6 +22,18 @@ def _start(client, token, **body):
     return client.post("/v1/worker/calls", json=body, headers=_h(token))
 
 
+def assign_number(owner_engine, org_id: str, e164: str = "+441179460000", status: str = "active") -> str:
+    """What scripts/phone_numbers.py does (as the owner): the API itself can never assign a number."""
+    with owner_engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO phone_numbers (id, organization_id, e164, status) VALUES (gen_random_uuid(), :o, :n, :s)"
+            ),
+            {"o": org_id, "n": e164, "s": status},
+        )
+    return e164
+
+
 TURN = [
     {"kind": "utterance", "speaker": "caller", "text": "Are you open on Saturday?", "data": {"language": "en-GB"}},
     {"kind": "tool", "speaker": "agent", "data": {"name": "get_opening_hours", "ok": True}},
@@ -139,17 +151,19 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     a.patch(a.o("/settings"), json={"locale": "en-GB"})
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
-    r = _start(a.client, phone, caller_number="+44 20 7946 0000", recording_notice_played=True)
+    number = assign_number(owner_engine, a.org_id)
+    r = _start(a.client, phone, called_number=number, caller_number="+44 20 7946 0000", recording_notice_played=True)
     assert r.status_code == 201 and r.json()["channel"] == "phone"
 
 
 @pytest.mark.parametrize("mode,channel", [("test", "simulated"), ("live", "phone")])
-def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkeypatch, mode, channel):  # noqa: F811
+def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkeypatch, owner_engine, mode, channel):  # noqa: F811
     from app.voice import launch
 
     a = make_account("a@example.com")
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
     a.patch(a.o("/settings"), json={"locale": "en-GB"})
-    r = _start(a.client, worker_auth.mint(uuid.UUID(a.org_id), mode=mode, channel=channel))
+    body = {"called_number": assign_number(owner_engine, a.org_id)} if channel == "phone" else {}
+    r = _start(a.client, worker_auth.mint(uuid.UUID(a.org_id), mode=mode, channel=channel), **body)
     assert r.status_code == 201 and r.json()["channel"] == ("phone" if mode == "live" else "simulated")
