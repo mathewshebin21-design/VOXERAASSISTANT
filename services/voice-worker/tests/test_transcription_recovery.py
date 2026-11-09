@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-
 from voxera_worker.session import ENDED, CallSession
 from voxera_worker.transcription_recovery import REASON, REPEAT, TranscriptionRecovery
 
