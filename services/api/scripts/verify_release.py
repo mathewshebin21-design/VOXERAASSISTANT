@@ -14,6 +14,7 @@ Checks:
   - Agent Studio's published versions are append-only for the runtime role (from 0008);
   - the design columns and check constraints exist, with no NULL or invalid values (from 0009);
   - the shared rate-limit store exists and the runtime role can only call its function (from 0010);
+  - call records exist, call events are append-only for the runtime role, audio is never stored (from 0011);
   - with --baseline: no table in the baseline has fewer rows (nothing was lost or dropped).
 
 Connections come from the same variables as migrate.py: DATABASE_URL_UNPOOLED (owner) and
@@ -140,6 +141,19 @@ def owner_checks(c, env: str, expect: str) -> tuple[list[tuple[str, bool, str]],
                     text("SELECT has_table_privilege(:r, 'public.rate_limit_hits', :p)"), {"r": APP_ROLE, "p": priv}
                 ).scalar()
                 out.append((f"rate_limit_hits: runtime role has no {priv}", ok, ""))
+
+    if _rev_at_least(rev, "0011"):
+        for t in ("calls", "call_events"):
+            exists = c.execute(text("SELECT to_regclass(:t) IS NOT NULL"), {"t": f"public.{t}"}).scalar()
+            out.append((f"0011 table {t} exists", bool(exists), ""))
+        n = c.execute(text("SELECT count(*) FROM pg_constraint WHERE conname = 'ck_call_no_audio'")).scalar()
+        out.append(("check constraint ck_call_no_audio", n == 1, ""))
+        if role is not None:
+            for priv in ("UPDATE", "DELETE"):
+                ok = not c.execute(
+                    text("SELECT has_table_privilege(:r, 'public.call_events', :p)"), {"r": APP_ROLE, "p": priv}
+                ).scalar()
+                out.append((f"call events: runtime role has no {priv}", ok, ""))
 
     counts = {
         t: c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608 (names from the catalog)
