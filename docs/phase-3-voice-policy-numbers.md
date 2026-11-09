@@ -19,8 +19,9 @@ a speech provider or a paid service.
 
 - **No workspace can claim a number.** The runtime role has `SELECT` only on `phone_numbers`
   (and row-level security limits that to its own workspace). Numbers are assigned by an operator
-  with the owner connection. Reassigning a number means disabling it and assigning it again in a
-  reviewed change.
+  with the owner connection. `assign` refuses a number that already exists, active or disabled.
+  Moving a number between workspaces is **not supported yet**; it needs its own designed and
+  audited transfer action (with the old workspace owner's consent) before any number transfer.
 - **The dialled number gates telephone call records.** `POST /v1/worker/calls` with a phone token
   must include `called_number`, and the number must be active for the token's workspace. A missing,
   disabled, unknown or other workspace's number all get the same 403, so nothing reveals who owns a

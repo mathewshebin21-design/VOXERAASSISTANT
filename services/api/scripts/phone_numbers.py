@@ -10,9 +10,10 @@ Uses the owner connection (DATABASE_URL_UNPOOLED / DATABASE_URL), because the AP
 only read its own workspace's numbers: no workspace can assign itself a number. ``--env`` must match
 the environment the database is claimed for, so a command meant for staging cannot change production.
 
-A number belongs to at most one workspace. ``assign`` refuses a number that is already assigned
-anywhere; to move a number, disable it, have the owner of the old workspace agree, and reassign it
-in a reviewed change. Every change writes an audit row in the affected workspace.
+A number belongs to at most one workspace. ``assign`` refuses a number that is already present,
+active or disabled, in any workspace. Moving a number to another workspace is **not supported**:
+it needs a separately designed, audited transfer action (with the old workspace owner's consent),
+not just disabling the old row. Every change writes an audit row in the affected workspace.
 
 Assigning a number does not connect telephony: calls still need a live worker token for a
 launch-ready country (app/voice/launch.py) and an approved SIP setup.
@@ -66,7 +67,7 @@ def run(db: Session, env: str, a: argparse.Namespace) -> dict | list:
         if db.get(Organization, a.org) is None:
             raise Refused("no such workspace")
         if db.scalar(select(PhoneNumber.id).where(PhoneNumber.e164 == a.number)) is not None:
-            raise Refused("that number is already assigned; disable and reassign it in a reviewed change")
+            raise Refused("that number is already assigned (active or disabled); transferring numbers is not supported")
         n = PhoneNumber(id=uuid.uuid4(), organization_id=a.org, e164=a.number, status="active", label=a.label)
         db.add(n)
         audit.record(
