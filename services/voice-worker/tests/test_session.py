@@ -299,3 +299,45 @@ def test_a_telephone_caller_is_never_answered_with_a_test_token():
     assert refusal(phone, "garbage")
     assert refusal(phone, token(mode="live", channel="phone")) is None
     assert refusal(browser, token(mode="test", channel="simulated")) is None
+
+
+async def test_sip_session_requires_api_authorized_record_before_any_speech():
+    from types import SimpleNamespace
+
+    from voxera_worker.guard import SIP_KIND, may_answer
+
+    phone = SimpleNamespace(kind=SIP_KIND)
+    browser = SimpleNamespace(kind=0)
+    assert not may_answer(phone, None)
+    assert not may_answer(phone, "")
+    assert may_answer(phone, "verified-call-id")
+    assert may_answer(browser, None)  # non-phone recordings remain best effort
+
+
+async def test_worker_token_channel_remains_bound_across_refresh():
+    import base64
+    from types import SimpleNamespace
+
+    from voxera_worker.guard import CallBoundTokens, SIP_KIND, refusal
+
+    def token(mode, channel):
+        body = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+        return f"x.{body}.sig"
+
+    class Rotating:
+        async def get(self):
+            return token("live", "phone")
+
+        async def refresh(self, stale=None):
+            return token("test", "simulated")
+
+    phone = SimpleNamespace(kind=SIP_KIND)
+    bound = CallBoundTokens(Rotating(), phone)
+    assert await bound.get() == token("live", "phone")
+    with pytest.raises(RuntimeError, match="live phone token"):
+        await bound.refresh()
+
+    browser = SimpleNamespace(kind=0)
+    assert refusal(browser, token("live", "phone")) is not None
+    assert refusal(browser, token("test", "simulated")) is None
+    assert refusal(phone, "x.W10.sig") is not None  # JSON array cannot grant permission
