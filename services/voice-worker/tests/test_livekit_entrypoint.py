@@ -59,6 +59,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
     sessions: list = []
     monkeypatch.delenv("VOXERA_WORKER_TOKEN_CMD", raising=False)
     monkeypatch.setenv("VOXERA_WORKER_TOKEN", token(mode, channel))
+    monkeypatch.setenv("VOXERA_SIP_ENABLED", "true")  # explicit opt-in for offline admission-path tests
     monkeypatch.setenv("VOXERA_API_URL", "http://isolated-api.test")
     monkeypatch.setenv("VOXERA_LANGUAGES", "en-GB,hi-IN")
 
@@ -174,3 +175,27 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
     assert len(recordings) == len(sessions) == 1
     assert recordings[0].ends == [("failed", None, "media startup failed")]
     assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered
+
+
+async def test_sip_is_disabled_by_default_even_with_live_phone_token_and_no_backend_calls(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    monkeypatch.delenv("VOXERA_SIP_ENABLED")
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "telephone channel disabled"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_sip_rejects_unapproved_flag_value(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    monkeypatch.setenv("VOXERA_SIP_ENABLED", "TRUE")
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "telephone channel disabled"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
