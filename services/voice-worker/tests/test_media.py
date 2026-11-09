@@ -100,9 +100,14 @@ def test_livekit_agent_session_has_stt_tts_vad_but_no_duplicate_llm(monkeypatch,
     assert "llm" not in captured["session"]  # VOXERA brain still provides the LLM node
 
 
-async def test_real_livekit_media_session_constructs_without_starting_providers(enabled):
+async def test_real_livekit_media_session_constructs_without_starting_providers(monkeypatch, enabled):
     livekit_agents = pytest.importorskip("livekit.agents")
     from voxera_worker.livekit_agent import build_media_session
 
+    # The real SDK checks for credentials during construction; these are dummy,
+    # and the test neither starts a room nor makes an inference request.
+    monkeypatch.setenv("LIVEKIT_URL", "wss://staging-livekit.example.test")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "offline-ci-not-a-real-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "offline-ci-not-a-real-secret")
     session = build_media_session(speech_settings(enabled))
     assert isinstance(session, livekit_agents.AgentSession)
