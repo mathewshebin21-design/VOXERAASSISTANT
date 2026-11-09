@@ -14,6 +14,10 @@ from ..security import create_access_token, hash_password, needs_rehash, new_opa
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 login_limiter = make_limiter("login", get_settings().login_attempts_per_minute, 60)
+# Per email whatever the caller's address: an attacker rotating addresses gets no more guesses.
+login_email_limiter = make_limiter(
+    "login-email", get_settings().login_attempts_per_email, get_settings().login_email_window_seconds
+)
 _BAD_LOGIN = HTTPException(status.HTTP_401_UNAUTHORIZED, "Email or password is incorrect")
 
 
@@ -53,16 +57,19 @@ def login(body: LoginIn, db: DB, request: Request) -> TokenOut:
     email = body.email.lower()
     meta = client_meta(request)
     try:
-        decision = login_limiter.check(f"{email}|{meta['ip']}")
+        # Both limits count every attempt, so a caller who keeps trying stays limited on both.
+        decisions = [login_limiter.check(f"{email}|{meta['ip']}"), login_email_limiter.check(email)]
     except LimiterUnavailable:  # fail closed: never let attempts through uncounted
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable. Try again shortly."
         ) from None
-    if not decision.allowed:
+    refused = [d for d in decisions if not d.allowed]
+    if refused:
+        wait = max(d.retry_after for d in refused)
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            "Too many attempts. Try again in a minute.",
-            headers={"Retry-After": str(decision.retry_after)},
+            "Too many attempts. Try again later." if wait > 60 else "Too many attempts. Try again in a minute.",
+            headers={"Retry-After": str(wait)},
         )
     user = db.scalar(select(User).where(func.lower(User.email) == email))
     if not verify_password(body.password, user.password_hash if user else None) or user is None:

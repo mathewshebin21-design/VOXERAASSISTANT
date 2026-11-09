@@ -1,0 +1,137 @@
+name: PR28 production migration gate (0010 to 0011)
+
+# Owner-operated, production-only release preparation.
+# Merge this WORKFLOW-ONLY change to the protected production branch before running it.
+# Never dispatch from PR28 itself. Production environment restricts the run ref.
+# This job checks out a reviewed, immutable PR28 commit to get migration 0011;
+# it does NOT deploy or merge application code.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Dry run or perform reviewed migration"
+        required: true
+        type: choice
+        options: [check, upgrade]
+        default: check
+      confirm:
+        description: "For upgrade, type exactly MIGRATE-PR28-0011"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voxera-production-schema-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate_pr28:
+    if: >-
+      github.ref == 'refs/heads/claude/confident-shannon-7nb05f'
+      && (inputs.action == 'check' || (inputs.action == 'upgrade' && inputs.confirm == 'MIGRATE-PR28-0011'))
+    runs-on: ubuntu-latest
+    environment: Production
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+    steps:
+      - name: Check out immutable PR28 migration source (not production app)
+        uses: actions/checkout@v4
+        with:
+          ref: 6812039d13514e899745226b852d7bd6f65bbd84
+          persist-credentials: false
+      - name: Prove reviewed migration commit and head
+        run: |
+          test "$(git rev-parse HEAD)" = "6812039d13514e899745226b852d7bd6f65bbd84"
+          test "$(grep '^revision: str = "0011"' migrations/versions/0011_call_records.py)" = 'revision: str = "0011"'
+          test "$(grep '^down_revision: str | None = "0010"' migrations/versions/0011_call_records.py)" = 'down_revision: str | None = "0010"'
+      - name: Verify exact production connection (read-only)
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          from urllib.parse import urlsplit, unquote
+          p = urlsplit(os.environ.get("DATABASE_URL_UNPOOLED", ""))
+          allowed_hosts = {
+              "ep-bitter-forest-zass6bxv.c-2.eu-west-2.aws.neon.tech",
+              "ep-bitter-forest-zass6bxv-prj.c-2.eu-west-2.aws.neon.tech",
+          }
+          if p.password:
+              print(f"::add-mask::{p.password}")
+              print(f"::add-mask::{unquote(p.password)}")
+          if not (
+              p.scheme in ("postgres", "postgresql", "postgresql+psycopg")
+              and p.hostname in allowed_hosts
+              and p.port in (None, 5432)
+              and p.username == "neondb_owner"
+              and p.path == "/neondb"
+              and p.password
+              and "sslmode=require" in p.query
+              and not p.fragment
+          ):
+              sys.exit("STOP: not the exact, direct VOXERA production Neon endpoint")
+          print("Production project, direct endpoint, owner role and database identifiers verified")
+          PY
+      - name: Install pinned migration dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check "uv==0.11.32"
+          uv sync --frozen
+      - name: Assert production identity and schema 0010 before any write
+        run: |
+          uv run python - <<'PY'
+          from sqlalchemy import create_engine, text
+          from app.platform import migration_owner_url
+          from scripts.migrate import runtime_role_status
+          engine = create_engine(
+              migration_owner_url(),
+              connect_args={"options": "-c default_transaction_read_only=on"},
+          )
+          try:
+              with engine.connect() as c:
+                  claim = c.execute(text(
+                      "SELECT environment FROM deployment_environment WHERE id=1"
+                  )).scalar()
+                  revision = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
+                  no_table = c.execute(text(
+                      "SELECT to_regclass('public.calls') IS NULL AND to_regclass('public.call_events') IS NULL"
+                  )).scalar()
+                  no_function = c.execute(text(
+                      "SELECT to_regprocedure('public.call_housekeeping(integer)') IS NULL"
+                  )).scalar()
+                  if (claim, revision, no_table, no_function) != ("production", "0010", True, True):
+                      raise SystemExit("STOP: production identity/revision is not the approved 0010 baseline")
+                  if runtime_role_status(c, migration_owner_url()) != "match":
+                      raise SystemExit("STOP: production runtime-role password does not match the migration owner")
+                  print("Production claim, exact 0010 schema and runtime-role credential compatibility verified")
+          finally:
+              engine.dispose()
+          PY
+      - name: Check pending migration and existing runtime-role password (no write)
+        run: uv run python scripts/migrate.py --env production --check
+      - name: Preflight 0010 release invariants and save baseline (read-only)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: uv run python scripts/verify_release.py --env production --expect 0010 --save pr28-prod-baseline.json
+      - name: Owner-approved upgrade (only for action=upgrade)
+        if: inputs.action == 'upgrade' && inputs.confirm == 'MIGRATE-PR28-0011'
+        run: uv run python scripts/migrate.py --env production
+      - name: Verify new schema and retained baseline (read-only)
+        if: inputs.action == 'upgrade' && inputs.confirm == 'MIGRATE-PR28-0011'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: uv run python scripts/verify_release.py --env production --expect 0011 --baseline pr28-prod-baseline.json
+      - name: Final migration head check (no write)
+        if: inputs.action == 'upgrade' && inputs.confirm == 'MIGRATE-PR28-0011'
+        run: uv run python scripts/migrate.py --env production --check
+      - name: Preserve row-count baseline for owner review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr28-production-baseline-${{ github.run_id }}
+          path: services/api/pr28-prod-baseline.json
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,6 @@
+# Owner-approved request (2026-11-09): run phase2-hosted-acceptance.yml once on PR #28's branch.
+# Branch web Preview -> branch API Preview (VOXERA_API_URL scoped to this branch) -> PR #28's
+# isolated Neon branch at 0011. Isolation gate runs before and after. No paid provider is called.
+requested_at: 2026-11-09T03:25Z
+post_conflict_recheck: reconcile-PR27-at-76e8398-and-rerun-PR28-hosted-acceptance
+post_pr35_recheck: after-PR35-733eaeed-and-PR28-merge-reconciliation
