@@ -72,9 +72,7 @@ async def test_one_timeout_asks_to_repeat_without_calling_brain_or_closing():
     assert media.lines == [(REPEAT, True, False)]
     assert not call.closed and not ctx.reasons
     assert guard.timeouts == 1
-    assert recorder.events == [
-        {"kind": "error", "speaker": "system", "data": {"outcome": "transcription_timeout"}}
-    ]
+    assert recorder.events == [{"kind": "error", "speaker": "system", "data": {"outcome": "transcription_timeout"}}]
     assert call.history == []
 
 
