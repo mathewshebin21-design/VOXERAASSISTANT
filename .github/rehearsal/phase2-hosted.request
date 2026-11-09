@@ -1,4 +1,5 @@
-# Owner-approved request (2026-11-09): run phase2-hosted-acceptance.yml once on PR #27's branch.
-# Branch web Preview -> branch API Preview -> PR #27's isolated Neon branch at 0010.
+# Owner-approved request (2026-11-09): run phase2-hosted-acceptance.yml on claude/phase2-rate-limiter
+# for the rate-limiter hardening (per-email limit, trusted client address). Branch web Preview ->
+# branch API Preview -> the isolated Neon validation branch at 0010 (never production or shared staging).
 # Scope: ratelimit. Isolation gate runs before and after. No paid provider is called.
-requested_at: 2026-11-09T04:25Z
+requested_at: 2026-11-09T06:10Z

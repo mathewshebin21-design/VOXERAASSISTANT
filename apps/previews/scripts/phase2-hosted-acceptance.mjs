@@ -5,6 +5,8 @@
 // Proves, through behaviour, on the branch API:
 //   1. the API serves this commit and its database is ready;
 //   2. login attempts are limited across instances: 5 wrong passwords, then 429 with Retry-After;
+//      a forged x-vercel-forwarded-for does not buy new attempts (the platform sets that header);
+//      and the per-email limit (10 in 15 minutes) holds once the per-address window has cleared;
 //   3. a simulated call runs its lifecycle: start (idempotent), events in order, end once, read back;
 //   4. without the recording notice no transcript words are stored;
 //   5. another workspace cannot see or touch the call (404) and the call list is per workspace;
@@ -17,14 +19,14 @@ import { pathToFileURL } from "node:url";
 
 import { previewOrigins } from "./branch-isolation.mjs";
 
-export async function phase2Acceptance(api, sha, { scope = "all", request = fetch } = {}) {
+export async function phase2Acceptance(api, sha, { scope = "all", request = fetch, pause = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   assert.ok(["all", "ratelimit"].includes(scope), "scope must be all or ratelimit");
   const call = (path, init = {}) =>
     request(`${api}${path}`, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000), ...init });
-  const send = (method, path, token, body) =>
+  const send = (method, path, token, body, extra = {}) =>
     call(path, {
       method,
-      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...extra },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -65,6 +67,29 @@ export async function phase2Acceptance(api, sha, { scope = "all", request = fetc
     }
     assert.deepEqual(codes, [401, 401, 401, 401, 401, 429], `Login limit not enforced: ${codes}`);
     assert.ok(Number(retryAfter) >= 1 && Number(retryAfter) <= 120, "429 without a usable Retry-After");
+
+    // 2b. A forged client-address header must not buy new attempts: the platform sets it, not callers.
+    const forged = [];
+    for (let i = 1; i <= 6; i++) {
+      const r = await send("POST", "/v1/auth/login", null, { email: b.email, password: "wrong password" }, {
+        "x-vercel-forwarded-for": `203.0.113.${i}`,
+      });
+      forged.push(r.status);
+    }
+    assert.deepEqual(forged, [401, 401, 401, 401, 401, 429], `Forged address header bypassed the limit: ${forged}`);
+
+    // 2c. Per email, whatever the address: once the per-address window has cleared, the email's
+    // attempts in the last 15 minutes (6 so far, refused ones included) still count to its limit of 10.
+    await pause(125_000);
+    const later = [];
+    let emailRetry = null;
+    for (let i = 0; i < 5; i++) {
+      const r = await send("POST", "/v1/auth/login", null, { email: b.email, password: "wrong password" });
+      later.push(r.status);
+      emailRetry = r.headers.get("retry-after");
+    }
+    assert.deepEqual(later, [401, 401, 401, 401, 429], `Per-email limit not enforced: ${later}`);
+    assert.ok(Number(emailRetry) > 60, `Per-email 429 should ask for a longer wait (Retry-After ${emailRetry})`);
 
     if (scope === "ratelimit") return;  // PR #27 alone has no call records
 
@@ -145,7 +170,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await phase2Acceptance(api, sha, { scope });
   console.log(
     scope === "ratelimit"
-      ? "Verified: login limit shared and fail-safe; probes removed."
-      : "Verified: login limit shared and fail-safe; call lifecycle, ordering, consent, tenant isolation and erasure; probes removed.",
+      ? "Verified: login limit shared and fail-safe; forged address ignored; per-email limit holds; probes removed."
+      : "Verified: login limit shared and fail-safe; forged address ignored; per-email limit holds; call lifecycle, ordering, consent, tenant isolation and erasure; probes removed.",
   );
 }
