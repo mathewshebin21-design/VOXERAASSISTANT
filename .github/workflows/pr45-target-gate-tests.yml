@@ -1,0 +1,24 @@
+name: PR45 migration target gate tests
+on:
+  push:
+    branches: [codex/uk-india-release-candidate-20261116]
+    paths:
+      - .github/scripts/pr45_target_gate.py
+      - .github/scripts/test_pr45_target_gate.py
+      - .github/workflows/pr45-target-gate-tests.yml
+      - .github/workflows/pr45-isolated-migrate.yml
+  pull_request:
+    paths:
+      - .github/scripts/pr45_target_gate.py
+      - .github/scripts/test_pr45_target_gate.py
+      - .github/workflows/pr45-target-gate-tests.yml
+      - .github/workflows/pr45-isolated-migrate.yml
+permissions:
+  contents: read
+jobs:
+  target-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_pr45_*.py'
