@@ -28,6 +28,7 @@ from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, Worke
 
 from .brain import BrainClient
 from .guard import CallBoundTokens, is_phone, may_answer
+from .lifetime import CallLifetime
 from .media import MediaConfigError, MediaSettings, speech_settings
 from .policy import PolicyUnavailable, called_number, fetch_languages
 from .recording import CallRecorder, room_ref
@@ -138,7 +139,13 @@ async def entrypoint(ctx: JobContext) -> None:
         finally:
             ctx.shutdown(reason="media startup failed")
         raise
-    ctx.add_shutdown_callback(lambda: _close(call))
+    lifetime = CallLifetime(ctx, call)
+
+    async def finish_call() -> None:
+        await lifetime.stop()
+        await _close(call)
+
+    ctx.add_shutdown_callback(finish_call)
     TranscriptionRecovery(session, ctx, call)  # event callbacks retain this per-call observer
 
 
