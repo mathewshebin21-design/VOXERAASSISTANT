@@ -47,15 +47,20 @@ class CallRecorder:
         *,
         external_ref: str | None = None,
         caller_number: str | None = None,
+        called_number: str | None = None,
         ai_disclosure_played: bool = False,
         recording_notice_played: bool = False,
     ) -> str | None:
-        """Opens the call record (idempotent on ``external_ref``). Returns its id, or None if it failed."""
+        """Opens the call record (idempotent on ``external_ref``). Returns its id, or None if it failed.
+        ``called_number`` (telephone calls only): the API records the call only if the number is
+        assigned to the token's workspace."""
         body: dict = {"ai_disclosure_played": ai_disclosure_played, "recording_notice_played": recording_notice_played}
         if external_ref:
             body["external_ref"] = external_ref
         if caller_number:
             body["caller_number"] = caller_number
+        if called_number:
+            body["called_number"] = called_number
         r = await self._post(self.base, body, expect=(200, 201))
         if r is not None:
             self.call_id = r.json()["id"]
