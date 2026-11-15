@@ -1,5 +1,53 @@
 # VOXERA Phase Tracker
 
+## Canonical phase dashboard — 2026-11-16 (Asia/Kolkata)
+
+**Owner requirement: complete every phase and verify everything. No inferred completion percentages.**
+Canonical numbering is **0–10**, recovered from the owner's `VOXERA_Phase_Tracker.md`,
+version 17, canonical dashboard. This supersedes the provisional phase labels in historical
+repository documents and PR titles. Historical evidence below is retained, not silently rewritten.
+
+Each requirement needs: acceptance criterion, exact source SHA, environment/database identity,
+test command or workflow URL, observed result, date, residual limitations and approval reference
+where required. Use separate states for **implemented**, **CI verified**, **hosted verified**,
+**production verified**, **blocked**, and **not run**. A phase is complete only when all applicable
+acceptance requirements have evidence. Fake-provider tests never establish real audio/PSTN quality.
+A successful build, merged migration file or upgraded service plan is not launch acceptance.
+
+| Phase | Canonical scope | Current acceptance state and next gate |
+| --- | --- | --- |
+| 0 | Infrastructure and isolation | Production database read-only verified at 0011. Source contains 0012; latest API build refuses mismatch. Fresh recovery point, protected migration, restore evidence and exact deployed-source parity remain open. |
+| 1 | Receptionist and onboarding | Historical production acceptance exists below. Revalidate complete current candidate: auth/session, persistent configuration, onboarding, permissions, booking flow and rollback. Do not treat earlier receipts as current-source acceptance. |
+| 2 | Appointments and staff | Scheduling/rescheduling and staff foundations have historical evidence. Complete requirement coverage for skills, shifts, holidays, locations, concurrent booking and timezone/DST behavior; current hosted acceptance required. |
+| 3 | Agent Studio | PR #2 is still open/unmerged at 15a89715a2a5437c839dcbdd9c1fa320a646be02 and targets an old branch. Reconcile with current production, preserve safety fixes, complete node/version/publish requirements and rerun acceptance. |
+| 4 | Testing Lab | Implementations/evidence partly live in unmerged PR #2. Verify deterministic scenarios, explicit failure reporting, evaluation matrix, version linkage and publish gating on the integrated source. |
+| 5 | Browser voice | Existing browser implementation and simulated checks. Real listening, interruption, language switching, latency and provider-policy enforcement remain unaccepted. |
+| 6 | Telephony | PR #45 integrates saved policy/number mapping, transcription recovery and an independent lifetime guard. Live inbound calls, actual transfer/hangup, disclosures, provider controls and country sign-offs remain blocked; no PSTN launch evidence. |
+| 7 | Operations, analytics and QA | Call records and simulated metrics exist. Verify durable fallback messages, actual outcomes, takeover, retention scheduling, monitoring, load and incident handling. |
+| 8 | Integrations | Validate OAuth, calendars, CRM, signed deliveries, replay/retry/revocation, and ORCHESTRA/REVORA contracts. Demos/interfaces are not live integration acceptance. |
+| 9 | SaaS and billing | Usage foundations exist. Implement and verify entitlements, subscription/payment lifecycle, invoice/tax handling, GBP/INR plans and cost reconciliation. Paid activation remains approval-gated. |
+| 10 | Launch, security and commercial readiness | BLOCKED for both UK and India. Requires current security/dependency, tenant isolation, privacy, accessibility, performance, recovery, real-call, billing and hosted release evidence plus owner sign-off. |
+
+Current release work: [PR #45](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/45).
+Detailed blockers and production release sequence:
+[UK/India commercial readiness](uk-india-commercial-readiness.md).
+
+Verification completed during this continuation on code commit
+`a018385ebcb78fec07a0d816840724c0f0ba6760`:
+worker lint/format, 110 core tests (3 optional skips), 37 real-SDK adapter tests;
+API lint/format, pytest, migration round-trip and Docker steps passed in
+[API run 43748910546](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43748910546).
+Worker/container evidence:
+[run 43748910476](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43748910476).
+Full latest-head CI and hosted acceptance must still be checked after subsequent changes.
+No production migration/merge/deploy, backup deletion, paid activation or external customer action
+was performed in this continuation. Existing approval gates remain intact.
+
+## Historical release ledger
+
+The phase numbers in the retained sections below are historical repository labels, not the
+canonical roadmap above. Their status statements apply to their recorded dates and commits.
+
 Status legend: **Verified** (evidence linked) · **Blocked** (named blocker) · **Not run**.
 Assumptions are listed separately from verified results.
 
