@@ -74,6 +74,59 @@ class Tokens:
         return f"t{self.n}"
 
 
+async def test_notice_acknowledgements_require_valid_saved_call_receipts():
+    posted = []
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content)
+        if req.url.path == "/v1/worker/calls":
+            return httpx.Response(201, json={"id": "call-1"})
+        if req.url.path.endswith("/notice-playback"):
+            posted.append(body)
+            kind = body["notice"]
+            return httpx.Response(
+                200,
+                json={
+                    "id": "call-1",
+                    "channel": "phone",
+                    "ai_disclosure_played": True,
+                    "recording_notice_played": kind == "recording_notice",
+                    "transcript_retained": kind == "recording_notice",
+                },
+            )
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rec = CallRecorder("http://api.test", Tokens(), client)
+        assert await rec.acknowledge_notice("ai_disclosure") is False  # no call opened
+        assert await rec.start(external_ref="room-audio-001") == "call-1"
+        assert await rec.acknowledge_notice("unsupported") is False
+        assert await rec.acknowledge_notice("ai_disclosure") is True
+        assert await rec.acknowledge_notice("recording_notice") is True
+    assert posted == [
+        {"notice": "ai_disclosure", "method": "livekit_speech_playout"},
+        {"notice": "recording_notice", "method": "livekit_speech_playout"},
+    ]
+
+
+async def test_notice_acknowledgement_refuses_mismatched_or_uncommitted_response():
+    async def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v1/worker/calls":
+            return httpx.Response(201, json={"id": "call-1"})
+        if req.url.path.endswith("/notice-playback"):
+            return httpx.Response(
+                200,
+                json={"id": "other-call", "channel": "phone", "ai_disclosure_played": True},
+            )
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rec = CallRecorder("http://api.test", Tokens(), client)
+        assert await rec.start(external_ref="room-audio-002") == "call-1"
+        assert await rec.acknowledge_notice("ai_disclosure") is False
+        assert await rec.acknowledge_notice("recording_notice") is False
+
+
 async def test_a_call_is_recorded_turn_by_turn_in_spoken_order():
     fb = FakeBrain(
         [
