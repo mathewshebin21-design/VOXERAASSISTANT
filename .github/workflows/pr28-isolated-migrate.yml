@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   upgrade:
-    if: github.ref == 'refs/heads/claude/phase2-call-records'
+    # Disabled: historical PR28 migration is merged; its environment secret was accidentally overwritten.
+    # Fail closed even if the legacy trigger fires; do not re-enable without separate review.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pr28-isolated-validation
