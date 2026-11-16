@@ -103,6 +103,9 @@ async def test_two_failures_switch_to_deterministic_message_taking():
     await say(s, "07700 900123")
     assert await say(s, "About my booking") == MESSAGE_DONE
     assert s.message == ["Sam Patel", "07700 900123", "About my booking"]
+    # Until a durable staff case is acknowledged, neither fallback line may promise delivery.
+    assert "team can call you back" not in MESSAGE_START.lower()
+    assert "passed that on" not in MESSAGE_DONE.lower()
     assert len(fb.requests) == 2  # the brain is not called again in message mode
 
 
