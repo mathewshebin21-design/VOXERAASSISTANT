@@ -97,6 +97,7 @@ def test_livekit_agent_session_has_stt_tts_vad_but_no_duplicate_llm(monkeypatch,
     assert session.tts.model == settings.tts_model
     assert session.tts.voice == settings.tts_voice
     assert session.vad.model == "silero"
+    assert captured["session"]["transcription_timeout"] == 4.0
     assert "llm" not in captured["session"]  # VOXERA brain still provides the LLM node
 
 

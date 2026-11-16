@@ -32,6 +32,7 @@ from .media import MediaConfigError, MediaSettings, speech_settings
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
+from .transcription_recovery import TranscriptionRecovery
 
 log = logging.getLogger("voxera.worker")
 
@@ -68,6 +69,7 @@ def build_media_session(settings: MediaSettings) -> AgentSession:
         stt=inference.STT(model=settings.stt_model),
         tts=inference.TTS(model=settings.tts_model, voice=settings.tts_voice),
         vad=inference.VAD(model="silero"),
+        transcription_timeout=4.0,
     )
 
 
@@ -125,6 +127,7 @@ async def entrypoint(ctx: JobContext) -> None:
             ctx.shutdown(reason="media startup failed")
         raise
     ctx.add_shutdown_callback(lambda: _close(call))
+    TranscriptionRecovery(session, ctx, call)  # event callbacks retain this per-call observer
 
 
 async def _close(call: CallSession) -> None:
