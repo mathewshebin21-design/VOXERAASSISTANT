@@ -18,6 +18,7 @@ import pytest
 
 pytest.importorskip("livekit.agents")
 
+from voxera_worker import guard as guard_mod  # noqa: E402
 from voxera_worker import livekit_agent as worker  # noqa: E402
 from voxera_worker.guard import SIP_KIND  # noqa: E402
 from voxera_worker.recording import room_ref  # noqa: E402
@@ -36,7 +37,18 @@ class FakeContext:
     def __init__(self, kind: int, events: list[str]) -> None:
         self.room = SimpleNamespace(name="isolated-rehearsal-room")
         # A SIP participant carries the dialled number as a LiveKit attribute.
-        attrs = {"sip.trunkPhoneNumber": "+441179460000"} if kind == SIP_KIND else {}
+        attrs = (
+            {
+                "sip.trunkPhoneNumber": "+441179460000",
+                "sip.trunkID": "ST_TEST_INGRESS",
+                "sip.ruleID": "SDR_TEST_INGRESS",
+                "sip.callID": "lk-sip-call-test-01",
+                "sip.callIDFull": "carrier-sip-call-test-01",
+                "sip.callStatus": "ringing",
+            }
+            if kind == SIP_KIND
+            else {}
+        )
         self.participant = SimpleNamespace(kind=kind, attributes=attrs)
         self.events = events
         self.shutdown_reason: str | None = None
@@ -66,6 +78,13 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
     monkeypatch.delenv("VOXERA_WORKER_TOKEN_CMD", raising=False)
     monkeypatch.setenv("VOXERA_WORKER_TOKEN", token(mode, channel))
     monkeypatch.setenv("VOXERA_SIP_ENABLED", "true")  # explicit opt-in for offline admission-path tests
+    # Hypothetical route exists ONLY inside this pytest fixture. The runtime
+    # allowlist stays empty, irrespective of VOXERA_SIP_ENABLED.
+    monkeypatch.setattr(
+        guard_mod,
+        "APPROVED_INBOUND_ROUTES",
+        {("ST_TEST_INGRESS", "SDR_TEST_INGRESS"): frozenset({"+441179460000"})},
+    )
     monkeypatch.setenv("VOXERA_MEDIA_ENABLED", "true")  # mocked; never reaches inference
     monkeypatch.setenv("VOXERA_MEDIA_PROVIDER", "livekit-inference")
     monkeypatch.setenv("VOXERA_STT_MODEL", "mock/stt-model")
@@ -161,6 +180,44 @@ async def test_sip_refuses_a_valid_phone_token_from_another_room_before_call_sta
     assert ctx.shutdown_reason == "worker channel mismatch"
     assert events == ["connect", "participant", "shutdown"]
     assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_sip_default_unreviewed_trunk_is_refused_before_policy_media_and_record(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    # Source-controlled registry is empty. Only a test double normally authorizes
+    # this fictional trunk; remove it here to prove fail-closed default.
+    monkeypatch.setattr(guard_mod, "APPROVED_INBOUND_ROUTES", {})
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("sip.trunkID", "ST_UNKNOWN"),
+        ("sip.ruleID", "SDR_UNKNOWN"),
+        ("sip.callID", ""),
+        ("sip.callIDFull", None),
+        ("sip.callStatus", "hangup"),
+        ("sip.callStatus", "dialing"),
+        ("sip.trunkPhoneNumber", "+441179460001"),
+    ],
+)
+async def test_sip_missing_or_unapproved_origin_evidence_never_starts_media(
+    monkeypatch, field, value
+):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    ctx.participant.attributes[field] = value
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
 
 
 async def test_sip_refuses_even_valid_channel_when_api_denies_call_start(monkeypatch):
@@ -352,8 +409,9 @@ async def test_a_sip_call_without_a_usable_dialled_number_is_not_answered(monkey
     ctx, events, recordings, sessions = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None)
     ctx.participant.attributes = {"sip.trunkPhoneNumber": "not-a-number"}
     await worker.entrypoint(ctx)
-    assert ctx.start_kwargs["called_number"] is None
-    assert ctx.shutdown_reason == "telephone authorization failed" and sessions == []
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
 
 
 async def test_the_call_starts_in_the_workspaces_default_language(monkeypatch):
