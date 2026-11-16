@@ -24,7 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -502,3 +502,43 @@ class CallEvent(Base):
     speaker: Mapped[str | None] = mapped_column(String(8))
     text: Mapped[str | None] = mapped_column(String(4000))
     data: Mapped[dict] = mapped_column(default=dict, nullable=False)
+
+
+class VoicePolicyRow(Base):
+    """A workspace's saved voice policy (migration 0012). No row means the defaults in
+    ``app/voice/routing.VoicePolicy``. Converted with ``app/voice/policy.py``."""
+
+    __tablename__ = "voice_policies"
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    default_language: Mapped[str] = mapped_column(String(16), nullable=False)
+    languages: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    fallback_language: Mapped[str | None] = mapped_column(String(16))
+    allowed_regions: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    blocked_providers: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    preferred_providers: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    allow_paid: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    allow_unverified: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PhoneNumber(Base):
+    """A telephone number that reaches a workspace (migration 0012). Read-only for the API role:
+    an operator assigns numbers with ``scripts/phone_numbers.py``."""
+
+    __tablename__ = "phone_numbers"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    e164: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _created()

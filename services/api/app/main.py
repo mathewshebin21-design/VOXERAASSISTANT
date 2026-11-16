@@ -172,6 +172,7 @@ def create_app() -> FastAPI:
         calls.router,
         calls.worker_router,
         languages.router,
+        languages.worker_router,
         live.worker_router,
     ):
         app.include_router(r)

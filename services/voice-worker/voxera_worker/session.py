@@ -242,6 +242,7 @@ class CallSession:
         *,
         external_ref: str | None = None,
         caller_number: str | None = None,
+        called_number: str | None = None,
         ai_disclosure_played: bool = False,
         recording_notice_played: bool = False,
     ) -> str | None:
@@ -252,6 +253,7 @@ class CallSession:
         return await self.recorder.start(
             external_ref=external_ref,
             caller_number=caller_number,
+            called_number=called_number,
             ai_disclosure_played=ai_disclosure_played,
             recording_notice_played=recording_notice_played,
         )

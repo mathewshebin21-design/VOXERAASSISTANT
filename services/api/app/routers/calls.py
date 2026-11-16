@@ -3,7 +3,8 @@
 Members who may test the agent (``agent_write``) start ``simulated`` and ``web`` calls here.
 The voice worker records its calls through ``worker_router`` (/v1/worker/calls) with a scoped
 worker token: the workspace and the channel come from the token, so a test token can only ever
-record a simulated call, and a phone call needs a live token for a launch-ready country.
+record a simulated call, and a phone call needs a live token for a launch-ready country and the
+dialled number must be one assigned to that workspace (migration 0012).
 """
 
 import uuid
@@ -20,6 +21,7 @@ from ..deps import DB, OrgContext, client_meta, require
 from ..models import Call, CallEvent
 from ..permissions import Perm
 from ..schemas import Strict
+from ..voice import policy as policy_mod
 from ..worker_deps import WorkerContext, worker_context
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/calls", tags=["calls"])
@@ -40,10 +42,15 @@ class CallStartIn(Strict):
     recording_notice_played: bool = False
 
 
+E164 = Annotated[str, Field(pattern=r"^\+[1-9][0-9]{6,14}$")]
+
+
 class WorkerCallStartIn(Strict):
-    """No channel: it comes from the worker token."""
+    """No channel: it comes from the worker token. ``called_number`` (the number the caller dialled,
+    E.164) is required for a telephone call and must be active for the token's workspace."""
 
     external_ref: Ref | None = None
+    called_number: E164 | None = None
     caller_number: str | None = Field(None, max_length=32, pattern=r"^\+?[0-9 ()-]{3,31}$")
     ai_disclosure_played: bool = False
     recording_notice_played: bool = False
@@ -236,13 +243,20 @@ def worker_start_call(
 ) -> Call:
     """Starts the worker's call record. Idempotent on ``external_ref`` (e.g. the room or SIP call ID),
     so a worker that restarts mid-call continues the same record."""
+    if worker.channel == "phone":
+        # The same answer whether the number is unknown, disabled or another workspace's: row-level
+        # security hides other workspaces' numbers, so nothing here reveals who owns a number.
+        if body.called_number is None or not policy_mod.owns_active_number(db, worker.org_id, body.called_number):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "That number is not set up for this workspace")
+    elif body.called_number is not None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Only telephone calls have a dialled number")
     call, created = calls_mod.start(
         db,
         worker.org_id,
         None,
         channel=_WORKER_CHANNEL[worker.channel],
         caller_name=None,
-        **body.model_dump(),
+        **body.model_dump(exclude={"called_number"}),
     )
     if call.channel != _WORKER_CHANNEL[worker.channel] or call.created_by is not None:
         # The reference already names a member's test call, or a call on the other channel.
