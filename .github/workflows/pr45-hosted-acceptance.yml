@@ -1,6 +1,9 @@
 name: PR45 isolated hosted acceptance
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/uk-india-release-candidate-20261116]
+    paths: [apps/previews/scripts/pr45-hosted-isolation.mjs]
 permissions:
   contents: read
 jobs:
@@ -9,13 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out pinned PR45 acceptance test
-        uses: actions/checkout@v4
-        with:
-          ref: '15336cc1fe2a2581980aa3f13554ae3b6c673189'
-          persist-credentials: false
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify pinned PR45 Preview isolation and clean up probe
+      - name: Verify pinned PR45 preview isolation and clean up probe
         run: node apps/previews/scripts/pr45-hosted-isolation.mjs

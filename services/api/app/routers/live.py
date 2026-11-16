@@ -31,8 +31,10 @@ from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool,
 from ..models import UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
+from ..voice import policy as voice_policy_mod
 from ..voice.languages import LANGUAGES
 from ..voice.routing import language_instruction
+from ..voice.worker_llm_policy import ProviderAdmissionError, check_worker_model
 from ..worker_deps import WorkerContext, worker_context
 
 log = logging.getLogger("voxera.live")
@@ -187,6 +189,22 @@ def worker_brain(body: BrainIn, worker: Annotated[WorkerContext, Depends(worker_
 
     A worker records its own calls through /v1/worker/calls (one writer per call, in spoken order),
     so it does not send ``call_id`` here."""
+    # This applies to BOTH 'test' and 'live' worker credentials. Model keys and
+    # token budgets alone are not provider authorization. Validate every turn
+    # before _brain reserves tokens or creates an inference stream.
+    settings = get_settings()
+    try:
+        check_worker_model(
+            voice_policy_mod.load(db, worker.org_id),
+            configured_provider=settings.llm_provider,
+            model=settings.model,
+            requested_language=body.language,
+        )
+    except ProviderAdmissionError:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Language-model inference is not approved for this workspace",
+        ) from None
     return _brain(body, worker.org_id, None, db)
 
 

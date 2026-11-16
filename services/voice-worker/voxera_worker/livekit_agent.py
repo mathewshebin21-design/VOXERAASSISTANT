@@ -28,10 +28,14 @@ from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, Worke
 
 from .brain import BrainClient
 from .guard import CallBoundTokens, is_phone, may_answer
+from .lifetime import CallLifetime
 from .media import MediaConfigError, MediaSettings, speech_settings
+from .media_policy import fetch_authorized_languages
+from .policy import PolicyUnavailable, called_number
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
+from .transcription_recovery import TranscriptionRecovery
 
 log = logging.getLogger("voxera.worker")
 
@@ -68,6 +72,7 @@ def build_media_session(settings: MediaSettings) -> AgentSession:
         stt=inference.STT(model=settings.stt_model),
         tts=inference.TTS(model=settings.tts_model, voice=settings.tts_voice),
         vad=inference.VAD(model="silero"),
+        transcription_timeout=4.0,
     )
 
 
@@ -98,14 +103,26 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx.shutdown(reason="speech media unavailable")
         return
     api = os.environ["VOXERA_API_URL"]
+    # The same tenant-scoped policy authorizes languages AND exact STT/TTS models.
+    # Missing provider attestations, paid consent, region or language evidence refuse
+    # the call before a record or a media session is started.
+    try:
+        default, accepted = await fetch_authorized_languages(api, tokens, media)
+    except PolicyUnavailable as e:
+        log.warning("refusing call: voice policy unavailable", extra={"reason": str(e)})
+        ctx.shutdown(reason="voice policy unavailable")
+        return
     brain = BrainClient(api, "", tokens, worker=True)
-    accepted = tuple(os.environ.get("VOXERA_LANGUAGES", "en-GB").split(","))
     call = CallSession(
-        brain, language=LanguageGate(accepted=accepted, current=accepted[0]), recorder=CallRecorder(api, tokens)
+        brain, language=LanguageGate(accepted=accepted, current=default), recorder=CallRecorder(api, tokens)
     )
     # The prototype plays no AI-disclosure or recording notice yet, so it says so: the API then keeps
     # the call's events without the caller's words. The room name makes the record restart-safe.
-    record_id = await call.begin(external_ref=room_ref(ctx.room.name))
+    # For a telephone call the dialled number goes with it; the API refuses a number that is not
+    # assigned to the token's workspace, and then the call is not answered.
+    record_id = await call.begin(
+        external_ref=room_ref(ctx.room.name), called_number=called_number(caller) if is_phone(caller) else None
+    )
     if not may_answer(caller, record_id):
         # For SIP this API round-trip is the mandatory signed-token and country-gate check.
         # Call recording stays best-effort for simulated/non-phone participants only.
@@ -124,7 +141,14 @@ async def entrypoint(ctx: JobContext) -> None:
         finally:
             ctx.shutdown(reason="media startup failed")
         raise
-    ctx.add_shutdown_callback(lambda: _close(call))
+    lifetime = CallLifetime(ctx, call)
+
+    async def finish_call() -> None:
+        await lifetime.stop()
+        await _close(call)
+
+    ctx.add_shutdown_callback(finish_call)
+    TranscriptionRecovery(session, ctx, call)  # event callbacks retain this per-call observer
 
 
 async def _close(call: CallSession) -> None:

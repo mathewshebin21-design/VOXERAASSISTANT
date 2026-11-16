@@ -26,10 +26,12 @@ from ..models import (
     Membership,
     OfficeHours,
     Organization,
+    PhoneNumber,
     Role,
     Service,
     UsageEvent,
     User,
+    VoicePolicyRow,
     VoiceTestSession,
     WorkspaceSettings,
 )
@@ -229,6 +231,8 @@ def export_org(ctx: Annotated[OrgContext, Depends(require(Perm.data_export))], d
         "caller_messages": rows(CallerMessage, CallerMessage.created_at),
         "calls": rows(Call, Call.started_at),
         "call_events": rows(CallEvent, CallEvent.call_id, CallEvent.seq),
+        "voice_policy": rows(VoicePolicyRow, VoicePolicyRow.organization_id),
+        "phone_numbers": rows(PhoneNumber, PhoneNumber.e164),
         "audit_logs": rows(AuditLog, AuditLog.created_at),
     }
     audit.record(db, oid, ctx.user.id, "organization.exported", "organization", oid, None, client_meta(request))

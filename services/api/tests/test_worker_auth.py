@@ -29,6 +29,51 @@ def body(text="Hi, are you open today?", rid="w-test-000001"):
     return {"request_id": rid, "messages": [{"role": "user", "text": text}]}
 
 
+def approve_mock_llm_for_test(monkeypatch, account):
+    """Synthetic model attestation, injected only by pytest (never production code)."""
+    from app.voice import worker_llm_policy
+
+    settings = get_settings()
+    assert settings.llm_provider == "anthropic"
+    attestation = worker_llm_policy.ReviewedLLM(
+        configured_provider="anthropic",
+        model=settings.model,
+        workspace_provider="anthropic",
+        processing_regions=frozenset({"global"}),
+        paid=True,
+        languages=frozenset({"en-GB"}),
+        evidence="tested",
+    )
+    monkeypatch.setattr(
+        worker_llm_policy,
+        "REVIEWED_MODELS",
+        {("anthropic", settings.model): attestation},
+    )
+    result = account.put(
+        account.o("/voice/policy"),
+        json={
+            "default_language": "en-GB",
+            "languages": ["en-GB"],
+            "fallback_language": "en-GB",
+            "allowed_regions": ["global"],
+            "blocked_providers": [],
+            "preferred_providers": [],
+            "allow_paid": True,
+            "allow_unverified": False,
+        },
+    )
+    assert result.status_code == 200
+
+
+def test_worker_test_token_cannot_bypass_unapproved_model(worker, live, make_account):  # noqa: F811
+    a = make_account("unapproved@example.com")
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="test")
+    r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
+    assert r.status_code == 403
+    assert "not approved" in r.json()["detail"]
+    assert live["llm_requests"] == []
+
+
 def test_endpoint_does_not_exist_until_enabled(client):
     assert client.post("/v1/worker/live/brain", json=body()).status_code == 404
 
@@ -63,9 +108,10 @@ def test_tokens_are_scoped_short_lived_and_signed_separately(worker):
         worker_auth.verify(forged)
 
 
-def test_worker_token_drives_the_brain_for_its_workspace_only(worker, live, make_account, owner_engine):  # noqa: F811
+def test_worker_token_drives_the_brain_for_its_workspace_only(worker, live, make_account, owner_engine, monkeypatch):  # noqa: F811
     a, b = make_account("a@example.com"), make_account("b@example.com")
     setup_business(a)
+    approve_mock_llm_for_test(monkeypatch, a)
     live["llm"] = [(200, message([("text", {"parts": ["We're open until six."]})], "end_turn", 40, 6))]
     token = worker_auth.mint(uuid.UUID(a.org_id))
     r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
@@ -78,6 +124,26 @@ def test_worker_token_drives_the_brain_for_its_workspace_only(worker, live, make
     with owner_engine.connect() as c:
         rows = dict(c.execute(text("SELECT organization_id::text, count(*) FROM usage_events GROUP BY 1")).all())
     assert rows.get(a.org_id) == 1 and b.org_id not in rows
+
+
+def test_policy_revocation_blocks_the_next_worker_turn_before_spend(worker, live, make_account, monkeypatch):  # noqa: F811
+    a = make_account("revoked-policy@example.com")
+    approve_mock_llm_for_test(monkeypatch, a)
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="test")
+    auth = {"authorization": f"Bearer {token}"}
+
+    live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 8, 2))]
+    first = a.client.post("/v1/worker/live/brain", json=body(rid="w-revocation-0001"), headers=auth)
+    assert first.status_code == 200 and len(live["llm_requests"]) == 1
+
+    policy = a.get(a.o("/voice/policy")).json()
+    assert policy.pop("saved") is True
+    policy["blocked_providers"] = ["anthropic"]
+    assert a.put(a.o("/voice/policy"), json=policy).status_code == 200
+
+    next_turn = a.client.post("/v1/worker/live/brain", json=body(rid="w-revocation-0002"), headers=auth)
+    assert next_turn.status_code == 403
+    assert len(live["llm_requests"]) == 1  # no second provider request after revocation
 
 
 def test_user_and_worker_tokens_cannot_be_swapped(worker, make_account):
@@ -119,6 +185,7 @@ def test_live_mode_is_refused_until_the_country_passes_its_launch_review(worker,
     assert r.status_code == 403 and live["llm_requests"] == []
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    approve_mock_llm_for_test(monkeypatch, a)
     live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 10, 2))]
     r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
     assert r.status_code == 200

@@ -15,6 +15,7 @@ Checks:
   - the design columns and check constraints exist, with no NULL or invalid values (from 0009);
   - the shared rate-limit store exists and the runtime role can only call its function (from 0010);
   - call records exist, call events are append-only for the runtime role, audio is never stored (from 0011);
+  - voice policies and phone numbers exist; numbers are read-only for the runtime role (from 0012);
   - with --baseline: no table in the baseline has fewer rows (nothing was lost or dropped).
 
 Connections come from the same variables as migrate.py: DATABASE_URL_UNPOOLED (owner) and
@@ -155,6 +156,19 @@ def owner_checks(c, env: str, expect: str) -> tuple[list[tuple[str, bool, str]],
                 ).scalar()
                 out.append((f"call events: runtime role has no {priv}", ok, ""))
 
+    if _rev_at_least(rev, "0012"):
+        for t in ("voice_policies", "phone_numbers"):
+            exists = c.execute(text("SELECT to_regclass(:t) IS NOT NULL"), {"t": f"public.{t}"}).scalar()
+            out.append((f"0012 table {t} exists", bool(exists), ""))
+        n = c.execute(text("SELECT count(*) FROM pg_constraint WHERE conname = 'uq_phone_number_e164'")).scalar()
+        out.append(("unique constraint uq_phone_number_e164", n == 1, ""))
+        if role is not None:
+            for priv in ("INSERT", "UPDATE", "DELETE"):
+                ok = not c.execute(
+                    text("SELECT has_table_privilege(:r, 'public.phone_numbers', :p)"), {"r": APP_ROLE, "p": priv}
+                ).scalar()
+                out.append((f"phone numbers: runtime role has no {priv}", ok, ""))
+
     counts = {
         t: c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608 (names from the catalog)
         for (t,) in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"))
@@ -171,9 +185,14 @@ def runtime_checks(app_url: str, tenant: list[str]) -> list[tuple[str, bool, str
             try:
                 n = c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608
                 out.append((f"no tenant set: {t} returns no rows to the runtime role", n == 0, f"{n} visible"))
-            except Exception as e:  # noqa: BLE001 — a permission error is also isolation
+            except Exception as e:  # noqa: BLE001 — unknown failures must fail verification
                 c.rollback()
-                out.append((f"no tenant set: {t} not readable by the runtime role", True, type(e).__name__))
+                # Only PostgreSQL insufficient_privilege proves access was denied.
+                # Missing tables, query cancellation, connection errors and programming
+                # faults provide no evidence of isolation and must never pass.
+                denied = getattr(getattr(e, "orig", None), "sqlstate", None) == "42501"
+                name = f"no tenant set: {t} access denied" if denied else f"runtime query failed for {t}"
+                out.append((name, denied, type(e).__name__))
     return out
 
 

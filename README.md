@@ -2,7 +2,7 @@
 
 Multi-tenant AI voice receptionist and appointment automation platform — **work in progress**.
 
-> **Current stage: Phase 3 (real-time voice engine) implemented with browser engines; Phase 2 (multi-tenant foundation) complete.** Design **C — Flow** was approved. The repository contains the research, the design previews (running on synthetic data) and a tested multi-tenant API. The Flow front end is connected to the API for accounts, workspaces, team, business data, agents and usage. The Voice lab (`/flow/app/voice`) runs the real-time voice engine with your browser's speech engines and a rule-based brain. Live Claude and ElevenLabs adapters are built behind server-side keys and monthly caps, and stay off until you configure them. There is **no telephony** yet, and no paid provider has been called. Nothing here should be described as production-ready.
+> **Status: development and release validation; not ready for paying customers.** The canonical roadmap is Phases 0–10 in [the phase tracker](docs/VOXERA_Phase_Tracker.md). Historical PRs and design documents use provisional numbering. Browser/simulated tests do not establish live telephone readiness. UK and India launch, production release and paid-provider activation remain approval-gated.
 
 ## Contents
 
@@ -64,4 +64,4 @@ To use real workspaces in the Flow UI, start the API on port 8000 and the web ap
 
 ## Roadmap
 
-Phases 4–14 (telephony, receptionist intelligence, knowledge engine, scheduling, integrations, agent studio, analytics, privacy and security, testing, deployment, commercial readiness) follow, one at a time.
+Follow the canonical [Phases 0–10 tracker](docs/VOXERA_Phase_Tracker.md): infrastructure/isolation; receptionist/onboarding; appointments/staff; Agent Studio; Testing Lab; browser voice; telephony; operations/QA; integrations; SaaS/billing; launch/security. Every phase requires recorded acceptance evidence. See [UK/India commercial readiness](docs/uk-india-commercial-readiness.md) for current release blockers.
