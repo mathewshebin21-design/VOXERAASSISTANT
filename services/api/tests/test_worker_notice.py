@@ -90,6 +90,77 @@ def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_wit
         )
 
 
+def test_untrusted_phone_event_metadata_never_survives_before_recording_notice(
+    worker,  # noqa: F811
+    make_account,
+    monkeypatch,
+    owner_engine,
+):
+    a, token, ref, number = phone_setup(worker, make_account, monkeypatch, owner_engine)
+    cid = _start(a.client, token, external_ref=ref, called_number=number).json()["id"]
+    secret = "synthetic-private-call-content"
+    events = [
+        {
+            "kind": "utterance",
+            "speaker": "caller",
+            "text": secret,
+            "data": {"language": secret, "nested": {"caller_name": secret}},
+        },
+        {
+            "kind": "tool",
+            "speaker": "agent",
+            "data": {"name": "take_message", "args": {"caller_phone": secret, "message": secret}},
+        },
+        {
+            # A worker must never spoof the server's notice event or consent flags.
+            "kind": "system",
+            "speaker": "system",
+            "data": {
+                "event": "notice_playout_reported",
+                "notice": "ai_disclosure",
+                "method": "livekit_speech_playout",
+                "phone": secret,
+            },
+        },
+    ]
+    assert (
+        a.client.post(f"/v1/worker/calls/{cid}/events", json={"events": events}, headers=_h(token)).status_code == 201
+    )
+    result = a.get(a.o(f"/calls/{cid}")).json()
+    assert secret not in str(result["events"])
+    assert [e["data"] for e in result["events"]] == [
+        {"text_withheld": True},
+        {"metadata_withheld": True},
+        {"metadata_withheld": True},
+    ]
+    assert result["ai_disclosure_played"] is False
+    assert result["recording_notice_played"] is False
+
+    assert ack(a, token, cid, "ai_disclosure").status_code == 200
+    after_first = a.get(a.o(f"/calls/{cid}")).json()["events"]
+    assert after_first[-1]["data"] == {
+        "event": "notice_playout_reported",
+        "notice": "ai_disclosure",
+        "method": "livekit_speech_playout",
+    }
+    assert secret not in str(after_first)
+    assert ack(a, token, cid, "recording_notice").status_code == 200
+    assert secret not in str(a.get(a.o(f"/calls/{cid}")).json()["events"])
+    # Later, recorded and permitted events retain their ordinary metadata.
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{cid}/events",
+            json={
+                "events": [{"kind": "utterance", "speaker": "caller", "text": "hello", "data": {"language": "en-GB"}}]
+            },
+            headers=_h(token),
+        ).status_code
+        == 201
+    )
+    tail = a.get(a.o(f"/calls/{cid}")).json()["events"][-1]
+    assert tail["text"] == "hello" and tail["data"] == {"language": "en-GB"}
+
+
 def test_notice_receipt_rejects_another_session_workspace_or_non_phone_channel(
     worker,  # noqa: F811
     make_account,

@@ -366,6 +366,7 @@ def worker_notice_playback(
                     "data": {"event": "notice_playout_reported", "notice": body.notice, "method": body.method},
                 }
             ],
+            trusted_notice_receipt=True,  # only this authenticated endpoint may preserve the checkpoint
         )
     except calls_mod.CallError as e:
         raise _fail(e) from None

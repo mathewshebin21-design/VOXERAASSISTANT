@@ -101,6 +101,22 @@ response/decline handled appropriately.
 No live trunks, country signoffs, paid models or production migrations are
 authorized by this change.
 
+## Pre-notice telephone metadata minimization (draft)
+
+Telephone event content can leak through arbitrary `CallEvent.data` fields even
+when `CallEvent.text` is withheld. The follow-on privacy gate therefore stores
+only coarse omission markers for untrusted caller/worker events before the
+recording-notice checkpoint. The authenticated server notice endpoint alone
+may persist a strictly shaped `notice_playout_reported` audit event before
+retention is enabled. A worker's ordinary events cannot spoof this receipt.
+Once a notice is completed, only new events become eligible for transcript
+retention; previously redacted content is never reconstructed.
+
+This protects database event content only. Speech providers, carrier media
+processors, SIP metadata, logs and billing systems still require independently
+reviewed processing/retention agreements, deletion controls and real tests.
+The existence of an SDK acknowledgement is not consent or remote receipt.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
