@@ -278,9 +278,17 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
 
     assert ctx.shutdown_reason is None
     assert events == [
-        "connect", "participant", "policy", "record", "media_start",
-        "media_say", "notice_ai_disclosure", "media_say", "notice_recording_notice",
-        "input_on", "callback",
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "media_start",
+        "media_say",
+        "notice_ai_disclosure",
+        "media_say",
+        "notice_recording_notice",
+        "input_on",
+        "callback",
     ]
     assert len(recordings) == len(sessions) == len(ctx.callbacks) == 1
     assert sessions[0].audio_input_enabled is True and sessions[0].agent.notices_complete is True
@@ -294,22 +302,30 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
     ("refuse_notice", "failed_speech", "expected_events"),
     [
         (
-            "ai_disclosure", None,
+            "ai_disclosure",
+            None,
             ["media_say", "notice_ai_disclosure", "record_end", "shutdown"],
         ),
         (
-            "recording_notice", None,
+            "recording_notice",
+            None,
             [
-                "media_say", "notice_ai_disclosure", "media_say", "notice_recording_notice",
-                "record_end", "shutdown",
+                "media_say",
+                "notice_ai_disclosure",
+                "media_say",
+                "notice_recording_notice",
+                "record_end",
+                "shutdown",
             ],
         ),
         (
-            None, "AI receptionist",
+            None,
+            "AI receptionist",
             ["media_say", "record_end", "shutdown"],
         ),
         (
-            None, "transcribed and saved",
+            None,
+            "transcribed and saved",
             ["media_say", "notice_ai_disclosure", "media_say", "record_end", "shutdown"],
         ),
     ],
