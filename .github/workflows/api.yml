@@ -36,6 +36,8 @@ jobs:
       - run: uv run ruff check app tests migrations
       - name: TEMP PR52 Ruff exact diff (remove before review)
         run: uv run ruff format --diff tests/test_worker_auth.py || true
+      - name: TEMP PR52 formatter diff (remove after diagnosis)
+        run: uv run ruff format --diff tests/test_worker_auth.py || true
       - run: uv run ruff format --check app tests migrations
       - run: uv run pytest -q
       - name: Migrations round-trip
