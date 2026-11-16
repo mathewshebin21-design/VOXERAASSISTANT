@@ -175,9 +175,9 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
         external_ref="room-phone-001",
         called_number=number,
         caller_number="+44 20 7946 0000",
-        recording_notice_played=True,
     )
     assert r.status_code == 201 and r.json()["channel"] == "phone"
+    assert r.json()["recording_notice_played"] is False and r.json()["transcript_retained"] is False
 
 
 def test_scoped_simulated_token_refuses_other_calls_in_the_same_tenant(worker, make_account):  # noqa: F811

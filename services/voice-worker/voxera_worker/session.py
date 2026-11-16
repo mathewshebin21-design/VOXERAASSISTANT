@@ -279,7 +279,12 @@ class CallSession:
         if self.recorder is None:
             return
         status, outcome = call_outcome(self)
-        if self.close_reason in ("credential mismatch", "media startup failed", "speech transcription unavailable"):
+        if self.close_reason in (
+            "credential mismatch",
+            "media startup failed",
+            "speech transcription unavailable",
+            "notice playback not confirmed",
+        ):
             status, outcome = "failed", None
         await self.recorder.end(status, outcome, self.close_reason or reason)
 

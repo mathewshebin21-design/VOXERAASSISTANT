@@ -78,6 +78,29 @@ An eventual real transfer must verify the destination answered, handle
 busy/no-answer/rejected outcomes, record an auditable carrier receipt, and
 never count a requested or assigned transfer as a completed connection.
 
+## Draft phone notice playout checkpoint (unreleased)
+
+The LiveKit phone adapter currently lacks a production-approved carrier playback
+verification. The draft notice gate adds SDK speech-output completion checks,
+call-bound server receipts, and refusal to activate caller microphone/STT or
+the telephone brain until both the AI disclosure and recording-notice lines
+finish without an interruption or output error. The API refuses client-supplied
+notice flags at phone call creation. Prior transcript events remain redacted;
+only subsequent text may be retained after both receipts.
+
+**Do not equate `SpeechHandle.wait_for_playout()` with remote-caller receipt.**
+It is SDK-side completion only and does not prove PSTN carrier delivery,
+correct regional pronunciation, user comprehension, opt-in/opt-out, or provider
+audio retention policies. The two draft English lines are **not** a legal
+signoff. Before real calls, approve workspace-specific legal notice wording,
+regional/local-language scripts, speech provider processing contracts and
+cost ceilings. Capture independently reviewed full carrier loopback and
+hangup/interruption tests with recording disabled and with the caller's
+response/decline handled appropriately.
+
+No live trunks, country signoffs, paid models or production migrations are
+authorized by this change.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved

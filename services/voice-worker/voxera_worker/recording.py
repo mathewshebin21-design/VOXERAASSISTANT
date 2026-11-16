@@ -66,6 +66,34 @@ class CallRecorder:
             self.call_id = r.json()["id"]
         return self.call_id
 
+    async def acknowledge_notice(self, notice: str) -> bool:
+        """Persist an authenticated, ordered TTS playout report for this call.
+
+        False includes network errors, refusals, invalid receipts and expired
+        credentials. The caller's audio must remain disabled in every case.
+        """
+        if notice not in ("ai_disclosure", "recording_notice") or not self.call_id:
+            return False
+        response = await self._post(
+            f"{self.base}/{self.call_id}/notice-playback",
+            {"notice": notice, "method": "livekit_speech_playout"},
+            expect=(200,),
+            always=True,
+        )
+        if response is None:
+            return False
+        try:
+            body = response.json()
+            field = "ai_disclosure_played" if notice == "ai_disclosure" else "recording_notice_played"
+            return (
+                body.get("id") == self.call_id
+                and body.get("channel") == "phone"
+                and body.get(field) is True
+                and (notice != "recording_notice" or body.get("transcript_retained") is True)
+            )
+        except (ValueError, TypeError, AttributeError):
+            return False
+
     async def save_fallback(self, name: str, phone: str, message: str) -> bool:
         """Acknowledge an actual saved staff-queue case, never an attempted HTTP write.
 

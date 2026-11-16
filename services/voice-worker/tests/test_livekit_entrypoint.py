@@ -70,7 +70,16 @@ class FakeContext:
         self.events.append("callback")
 
 
-def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | None):
+def setup(
+    monkeypatch,
+    *,
+    mode: str,
+    channel: str,
+    kind: int,
+    record_id: str | None,
+    refuse_notice: str | None = None,
+    failed_speech: str | None = None,
+):
     events: list[str] = []
     context = FakeContext(kind, events)
     recordings: list = []
@@ -107,6 +116,7 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
         def __init__(self, api, tokens):
             assert api == "http://isolated-api.test"
             self.tokens = tokens
+            self.call_id = None
             self.ends: list[tuple] = []
             self.writes: list[dict] = []
             recordings.append(self)
@@ -117,19 +127,48 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             assert kwargs["recording_notice_played"] is False
             assert kwargs["external_ref"].startswith("room-")
             context.start_kwargs = kwargs
+            self.call_id = record_id
             return record_id
 
         def add(self, rows):
             self.writes.extend(rows)
 
+        async def acknowledge_notice(self, kind):
+            events.append(f"notice_{kind}")
+            return kind != refuse_notice
+
         async def end(self, *args):
             self.ends.append(args)
             events.append("record_end")
 
+    class FakeSpeech:
+        def __init__(self, text):
+            self.text = text
+            self.interrupted = bool(failed_speech and failed_speech in text)
+
+        async def wait_for_playout(self):
+            if self.interrupted:
+                return None
+
+        def done(self):
+            return True
+
+        def exception(self):
+            return None
+
+        def __await__(self):
+            return self.wait_for_playout().__await__()
+
     class MediaSession:
         def __init__(self):
             self.callbacks = {}
+            self.input = SimpleNamespace(set_audio_enabled=self.set_audio_enabled)
+            self.audio_input_enabled = False
             sessions.append(self)
+
+        def set_audio_enabled(self, enabled):
+            self.audio_input_enabled = enabled
+            events.append("input_on" if enabled else "input_off")
 
         def on(self, name):
             def register(callback):
@@ -138,17 +177,22 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
 
             return register
 
-        async def start(self, *, agent, room):
+        async def start(self, *, agent, room, room_options=None, record=None):
             assert isinstance(agent.call, CallSession)
             assert room is context.room
+            if kind == SIP_KIND:
+                assert room_options is not None
+                assert room_options.audio_input is not False
+                assert room_options.text_input is False and room_options.text_output is False
+                assert record is False
+            else:
+                assert room_options is None and record is None
             self.agent = agent
             events.append("media_start")
 
         def say(self, text, *, allow_interruptions, add_to_chat_ctx):
             events.append("media_say")
-            future = asyncio.get_running_loop().create_future()
-            future.set_result(None)
-            return future
+            return FakeSpeech(text)
 
     monkeypatch.setattr(worker, "CallRecorder", Recorder)
     monkeypatch.setattr(worker, "build_media_session", lambda settings: MediaSession())
@@ -235,12 +279,80 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason is None
-    assert events == ["connect", "participant", "policy", "record", "media_start", "callback"]
+    assert events == [
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "input_off",
+        "media_start",
+        "media_say",
+        "notice_ai_disclosure",
+        "media_say",
+        "notice_recording_notice",
+        "input_on",
+        "callback",
+    ]
     assert len(recordings) == len(sessions) == len(ctx.callbacks) == 1
+    assert sessions[0].audio_input_enabled is True and sessions[0].agent.notices_complete is True
     assert sessions[0].agent.call.conversation_id == room_ref(ctx.room.name)
     assert ctx.start_kwargs["external_ref"] == room_ref(ctx.room.name)
     await ctx.callbacks[0]()
     assert events[-1] == "record_end"
+
+
+@pytest.mark.parametrize(
+    ("refuse_notice", "failed_speech", "expected_events"),
+    [
+        (
+            "ai_disclosure",
+            None,
+            ["media_say", "notice_ai_disclosure", "record_end", "shutdown"],
+        ),
+        (
+            "recording_notice",
+            None,
+            [
+                "media_say",
+                "notice_ai_disclosure",
+                "media_say",
+                "notice_recording_notice",
+                "record_end",
+                "shutdown",
+            ],
+        ),
+        (
+            None,
+            "AI receptionist",
+            ["media_say", "record_end", "shutdown"],
+        ),
+        (
+            None,
+            "transcribed and saved",
+            ["media_say", "notice_ai_disclosure", "media_say", "record_end", "shutdown"],
+        ),
+    ],
+)
+async def test_phone_notice_failure_closes_call_without_enabling_caller_audio(
+    monkeypatch, refuse_notice, failed_speech, expected_events
+):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch,
+        mode="live",
+        channel="phone",
+        kind=SIP_KIND,
+        record_id="authorized-phone-notice",
+        refuse_notice=refuse_notice,
+        failed_speech=failed_speech,
+    )
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "notice playback not confirmed"
+    assert events[:6] == ["connect", "participant", "policy", "record", "input_off", "media_start"]
+    assert events[6:] == expected_events
+    assert sessions[0].audio_input_enabled is False
+    assert sessions[0].agent.notices_complete is False
+    assert recordings[0].ends == [("failed", None, "notice playback not confirmed")]
+    assert ctx.callbacks == []
 
 
 async def test_non_sip_participant_cannot_use_phone_credential(monkeypatch):
@@ -271,9 +383,12 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
 
     class FailingMediaSession:
         def __init__(self):
+            self.input = SimpleNamespace(
+                set_audio_enabled=lambda enabled: events.append("input_on" if enabled else "input_off")
+            )
             sessions.append(self)
 
-        async def start(self, *, agent, room):
+        async def start(self, *, agent, room, **_opts):
             events.append("media_start")
             raise error_type("simulated media startup failure")
 
@@ -282,7 +397,16 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
         await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "media startup failed"
-    assert events == ["connect", "participant", "policy", "record", "media_start", "record_end", "shutdown"]
+    assert events == [
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "input_off",
+        "media_start",
+        "record_end",
+        "shutdown",
+    ]
     assert len(recordings) == len(sessions) == 1
     assert recordings[0].ends == [("failed", None, "media startup failed")]
     assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered

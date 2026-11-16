@@ -210,6 +210,10 @@ def worker_brain(body: BrainIn, worker: Annotated[WorkerContext, Depends(worker_
         )
         if call is None:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No active telephone call for worker credential")
+        if not call.ai_disclosure_played or not call.recording_notice_played:
+            # A record start with caller-supplied flags cannot authorize inference.
+            # Both notices need ordered, completed speech-playout receipts first.
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Telephone notices have not completed playout")
     # This applies to BOTH 'test' and 'live' worker credentials. Model keys and
     # token budgets alone are not provider authorization. Validate every turn
     # before _brain reserves tokens or creates an inference stream.

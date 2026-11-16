@@ -20,11 +20,12 @@ expires (tokens last at most 15 minutes). ``VOXERA_WORKER_TOKEN`` (a single toke
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterable
 
-from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, inference, llm
+from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, inference, llm, room_io
 
 from .brain import BrainClient
 from .guard import CallBoundTokens, is_phone, may_answer, sip_ingress_refusal
@@ -41,6 +42,17 @@ log = logging.getLogger("voxera.worker")
 
 GREETING_INSTRUCTIONS = "You are VOXERA's receptionist. Replies come from the VOXERA brain."
 
+# Draft text only. Legal, language, and real-audio review is required before launch.
+PHONE_NOTICES = (
+    ("ai_disclosure", "Hello. You are speaking with an AI receptionist."),
+    (
+        "recording_notice",
+        "This conversation may be transcribed and saved for the business to review. "
+        "You can end the call if you prefer not to continue.",
+    ),
+)
+NOTICE_TIMEOUT_SECONDS = 30.0
+
 
 def last_user_text(chat_ctx: llm.ChatContext) -> str:
     for item in reversed(chat_ctx.items):
@@ -50,13 +62,17 @@ def last_user_text(chat_ctx: llm.ChatContext) -> str:
 
 
 class VoxeraAgent(Agent):
-    def __init__(self, session: CallSession) -> None:
+    def __init__(self, session: CallSession, *, require_notices: bool = False) -> None:
         super().__init__(instructions=GREETING_INSTRUCTIONS)
         self.call = session
+        self.require_notices = require_notices
+        self.notices_complete = not require_notices
 
     async def llm_node(  # type: ignore[override]
         self, chat_ctx: llm.ChatContext, tools: list[llm.Tool], model_settings: ModelSettings
     ) -> AsyncIterable[str]:
+        if self.require_notices and not self.notices_complete:
+            return  # no model inference before the notice handshake
         said = last_user_text(chat_ctx)
         if not said:
             return
@@ -74,6 +90,27 @@ def build_media_session(settings: MediaSettings) -> AgentSession:
         vad=inference.VAD(model="silero"),
         transcription_timeout=4.0,
     )
+
+
+async def _phone_notice_sequence(session: AgentSession, recorder: CallRecorder | None) -> bool:
+    """Report completed SDK speech playout one notice at a time.
+
+    SDK completion does NOT prove the remote caller heard the announcement.
+    A real carrier loopback/recording acceptance test remains mandatory.
+    """
+    if recorder is None or recorder.call_id is None:
+        return False
+    for kind, notice in PHONE_NOTICES:
+        handle = session.say(notice, allow_interruptions=False, add_to_chat_ctx=False)
+        try:
+            await asyncio.wait_for(handle.wait_for_playout(), timeout=NOTICE_TIMEOUT_SECONDS)
+        except (RuntimeError, TimeoutError, OSError):
+            return False
+        if not handle.done() or handle.interrupted or handle.exception() is not None:
+            return False
+        if not await recorder.acknowledge_notice(kind):
+            return False
+    return True
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -136,10 +173,9 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     if ref is not None:
         call.conversation_id = ref  # phone brain turn must match the signed call reference
-    # The prototype plays no AI-disclosure or recording notice yet, so it says so: the API then keeps
-    # the call's events without the caller's words. The room name makes the record restart-safe.
-    # For a telephone call the dialled number goes with it; the API refuses a number that is not
-    # assigned to the token's workspace, and then the call is not answered.
+    # The phone call starts without notice flags or transcript retention. Two
+    # completed speech playout receipts are required before enabling microphone
+    # input or brain inference. The room reference is restart-safe.
     record_id = await call.begin(external_ref=ref, called_number=called_number(caller) if is_phone(caller) else None)
     if not may_answer(caller, record_id):
         # For SIP this API round-trip is the mandatory signed-token and country-gate check.
@@ -151,7 +187,27 @@ async def entrypoint(ctx: JobContext) -> None:
     # media initialization fails. Otherwise the call can remain open indefinitely.
     try:
         session = build_media_session(media)
-        await session.start(agent=VoxeraAgent(call), room=ctx.room)
+        phone = is_phone(caller)
+        agent = VoxeraAgent(call, require_notices=phone)
+        if phone:
+            # Disable audio BEFORE the room is started, not via RoomOptions:
+            # permanently disabling room input would prevent re-enabling STT.
+            session.input.set_audio_enabled(False)
+            await session.start(
+                agent=agent,
+                room=ctx.room,
+                room_options=room_io.RoomOptions(text_input=False, text_output=False),
+                record=False,  # never save raw LiveKit audio or transcripts
+            )
+            if not await _phone_notice_sequence(session, call.recorder):
+                call.closed, call.close_reason = True, "notice playback not confirmed"
+                await call.finish()
+                ctx.shutdown(reason="notice playback not confirmed")
+                return
+            agent.notices_complete = True
+            session.input.set_audio_enabled(True)
+        else:
+            await session.start(agent=agent, room=ctx.room)
     except BaseException:  # also includes cancellation while a job is starting
         call.closed, call.close_reason = True, "media startup failed"
         try:
