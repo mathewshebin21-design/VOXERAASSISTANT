@@ -232,7 +232,11 @@ def test_phone_prompt_never_claims_a_connected_human():
 
 
 def test_phone_worker_never_offers_or_executes_a_phantom_carrier_transfer(
-    worker, live, make_account, monkeypatch, owner_engine  # noqa: F811
+    worker,
+    live,  # noqa: F811
+    make_account,
+    monkeypatch,
+    owner_engine,
 ):
     from sqlalchemy import text
 
