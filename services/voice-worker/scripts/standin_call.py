@@ -1,9 +1,11 @@
 """Stand-in call: the worker's CallSession against a running VOXERA API (normally with the stand-in
 model provider, scripts/fake_providers.py). Simulated: no audio, no LiveKit server, no paid call.
 
-Creates a synthetic account, mints a scoped worker token for its workspace when --mint is given
-(otherwise uses the member token), plays a short multilingual conversation through the real brain endpoint
-(tenancy, caps, tools and the language field all exercised), checks the session's behaviour, prints a
+Creates a synthetic account and uses the member Voice Lab for fake, cost-free inference.
+When --mint is given, it ALSO proves a scoped worker test token cannot authorize an
+unapproved LLM, while that same token can record a simulated call. This keeps worker
+provider admission fail-closed rather than bypassing it for the CI stand-in.
+It exercises tenant data, budgets, tools, language changes and call records, prints a
 JSON summary and deletes the account. Refuses production.
 
     python scripts/standin_call.py --api http://127.0.0.1:8000
@@ -50,12 +52,25 @@ async def main(api: str, mint: str | None) -> int:
         org = (await http.get("/v1/me/organizations", headers=auth)).json()[0]["organization"]["id"]
         try:
             recorder = None
+            guard_refused = None
+            # The member Voice Lab is the only synthetic inference path until a
+            # worker model has a reviewed, source-controlled attestation.
+            # NEVER weaken the worker gate simply to make CI test-mode calls work.
+            brain = BrainClient(api, org, token, http)
             if mint:
                 tokens = TokenSource(command_fetch(f"{mint} --org {org}"))
-                brain = BrainClient(api, org, tokens, http, worker=True)
+                scoped = await tokens.get()
+                refused = await http.post(
+                    "/v1/worker/live/brain",
+                    headers={"authorization": f"Bearer {scoped}"},
+                    json={
+                        "request_id": f"w-gate-{uuid.uuid4().hex[:12]}",
+                        "messages": [{"role": "user", "text": "Offline worker authorization probe"}],
+                        "language": "en-GB",
+                    },
+                )
+                guard_refused = refused.status_code == 403
                 recorder = CallRecorder(api, tokens, http)
-            else:
-                brain = BrainClient(api, org, token, http)
             session = CallSession(brain, language=LanguageGate(accepted=("en-GB", "hi-IN")), recorder=recorder)
             # A synthetic caller: the stand-in says both notices were played, so the words are kept.
             call_id = await session.begin(
@@ -79,7 +94,11 @@ async def main(api: str, mint: str | None) -> int:
                 "context kept across the switch": sum(m["role"] == "user" for m in session.history) == 3,
                 "server metrics reported": all(t.server_metrics for t in session.turns),
             }
-            checks["used the scoped worker credential" if mint else "used a member token (development)"] = True
+            if mint:
+                checks["unapproved worker test token cannot invoke the model"] = guard_refused is True
+                checks["synthetic brain conversation uses member Voice Lab"] = True
+            else:
+                checks["used a member token (development)"] = True
             if mint:
                 # The owner reads the worker's call record back through the normal member API.
                 rec = (await http.get(f"/v1/orgs/{org}/calls/{call_id}", headers=auth)).json() if call_id else {}
