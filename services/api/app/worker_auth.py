@@ -13,6 +13,7 @@ off by default and needs the owner's approval to enable on any hosted environmen
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -41,6 +42,7 @@ def enabled() -> bool:
 
 MODES = ("test", "live")
 CHANNELS = ("simulated", "phone")  # "phone": audio from the telephone network (SIP); always live
+CALL_REF = re.compile(r"^[A-Za-z0-9_-]{8,64}$")  # no caller phone, name, or other PII
 
 
 def mint(
@@ -49,6 +51,7 @@ def mint(
     now: datetime | None = None,
     mode: str = "test",
     channel: str = "simulated",
+    call_ref: str | None = None,
 ) -> str:
     """``mode`` "live" is for real callers and is refused for a business whose country is not
     launch-ready (app/voice/launch.py); "test" is for simulated and internal calls. A ``channel``
@@ -62,6 +65,7 @@ def mint(
     if mode not in MODES:
         raise WorkerAuthError("Unknown worker mode")
     _check_channel(mode, channel)
+    _check_call_ref(channel, call_ref)
     now = now or datetime.now(UTC)
     claims = {
         "iss": ISSUER,
@@ -75,6 +79,8 @@ def mint(
         "exp": int((now + ttl).timestamp()),
         "jti": uuid.uuid4().hex,
     }
+    if call_ref is not None:
+        claims["call_ref"] = call_ref
     return jwt.encode(claims, secret, algorithm="HS256")
 
 
@@ -85,6 +91,13 @@ def _check_channel(mode: str, channel: object) -> None:
         raise WorkerAuthError("Telephone calls need a live token; test mode is for simulated calls only")
 
 
+def _check_call_ref(channel: str, call_ref: object) -> None:
+    if call_ref is not None and (not isinstance(call_ref, str) or CALL_REF.fullmatch(call_ref) is None):
+        raise WorkerAuthError("Invalid call reference")
+    if channel == "phone" and call_ref is None:
+        raise WorkerAuthError("Telephone credentials must identify one call")
+
+
 def verify(token: str) -> tuple[uuid.UUID, str]:
     """The workspace the token is for and its mode. Raises WorkerAuthError for anything else."""
     org, mode, _ = read(token)
@@ -92,7 +105,13 @@ def verify(token: str) -> tuple[uuid.UUID, str]:
 
 
 def read(token: str) -> tuple[uuid.UUID, str, str]:
-    """The workspace, mode and channel of a valid token. Raises WorkerAuthError for anything else."""
+    """Backwards-compatible worker-token tuple (without the optional call reference)."""
+    org, mode, channel, _ = read_scoped(token)
+    return org, mode, channel
+
+
+def read_scoped(token: str) -> tuple[uuid.UUID, str, str, str | None]:
+    """Verified workspace, mode, channel and immutable call reference, if any."""
     secret = _secret()
     if secret is None:
         raise WorkerAuthError("Worker credentials are not enabled")
@@ -112,9 +131,10 @@ def read(token: str) -> tuple[uuid.UUID, str, str]:
     if claims.get("mode") not in MODES:
         raise WorkerAuthError("Unknown worker mode")
     _check_channel(claims["mode"], claims.get("channel"))
+    _check_call_ref(claims["channel"], claims.get("call_ref"))
     if claims["exp"] - claims["iat"] > MAX_TTL.total_seconds():
         raise WorkerAuthError("Token lifetime too long")
     try:
-        return uuid.UUID(claims["org"]), claims["mode"], claims["channel"]
+        return uuid.UUID(claims["org"]), claims["mode"], claims["channel"], claims.get("call_ref")
     except (ValueError, TypeError):
         raise WorkerAuthError("Invalid workspace in token") from None
