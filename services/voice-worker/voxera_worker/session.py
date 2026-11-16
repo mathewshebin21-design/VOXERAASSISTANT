@@ -349,7 +349,7 @@ def call_outcome(session: CallSession) -> tuple[str, str | None]:
     if session.message_mode:
         # Memory-only fallback is not a handled message. Only a committed staff-queue
         # acknowledgement may yield a successful message_taken outcome.
-        return ("completed", "message_taken") if session.message_saved else ("failed", None
+        return ("completed", "message_taken") if session.message_saved else ("failed", None)
     if not answered and session.failures:
         return "failed", None
     return "completed", "answered" if answered else "no_action"
