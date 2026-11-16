@@ -202,9 +202,7 @@ def test_claiming_is_first_come_first_served_and_cases_have_notes(make_account):
 def test_staff_explicit_acknowledgement_is_separate_from_assignment_and_is_idempotent(make_account, owner_engine):
     owner = make_account("ack-owner@example.com")
     sam, kim = desk_team(owner, "ack-sam", "ack-kim")
-    created = owner.post(
-        owner.o("/cases"), json={"summary": "Caller requested a return call", "assign_to_me": False}
-    )
+    created = owner.post(owner.o("/cases"), json={"summary": "Caller requested a return call", "assign_to_me": False})
     assert created.status_code == 201
     case_id = created.json()["id"]
     assert created.json()["staff_acknowledged_at"] is None
@@ -244,9 +242,10 @@ def test_staff_explicit_acknowledgement_is_separate_from_assignment_and_is_idemp
     assert records[0].details == {"channel": "staff_desk", "evidence": "explicit_staff_action"}
 
     # Reassigning never creates another acknowledgement and does not change who read it.
-    assert owner.post(
-        owner.o(f"/cases/{case_id}/assign"), json={"user_id": kim.user_id}
-    ).json()["staff_acknowledged_by"] == sam.user_id
+    assert (
+        owner.post(owner.o(f"/cases/{case_id}/assign"), json={"user_id": kim.user_id}).json()["staff_acknowledged_by"]
+        == sam.user_id
+    )
 
 
 def test_acknowledging_a_case_requires_staff_role_open_case_and_own_tenant(make_account):
@@ -256,9 +255,7 @@ def test_acknowledging_a_case_requires_staff_role_open_case_and_own_tenant(make_
     join(owner, viewer, "viewer")
     viewer.org_id = owner.org_id
     outsider = make_account("ack-outsider@example.com")
-    created = owner.post(
-        owner.o("/cases"), json={"summary": "Important request", "assign_to_me": False}
-    ).json()
+    created = owner.post(owner.o("/cases"), json={"summary": "Important request", "assign_to_me": False}).json()
     cid = created["id"]
     assert viewer.post(viewer.o(f"/cases/{cid}/acknowledge")).status_code == 403
     assert outsider.post(outsider.o(f"/cases/{cid}/acknowledge")).status_code == 404
