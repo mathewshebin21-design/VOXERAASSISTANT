@@ -42,7 +42,8 @@ def sip_ingress_refusal(participant: object, dialed_number: str | None) -> str |
     rule = attrs.get("sip.ruleID")
     if not isinstance(trunk, str) or not trunk or not isinstance(rule, str) or not rule:
         return "inbound SIP trunk or dispatch rule missing"
-    if attrs.get("sip.callStatus") not in SIP_READY_STATES:
+    call_status = attrs.get("sip.callStatus")
+    if not isinstance(call_status, str) or call_status not in SIP_READY_STATES:
         return "SIP call is not ringing or active"
     for field in ("sip.callID", "sip.callIDFull"):
         value = attrs.get(field)
