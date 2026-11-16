@@ -95,8 +95,6 @@ def check_worker_model(
         raise ProviderAdmissionError("paid provider is not approved")
     if language not in attestation.languages:
         raise ProviderAdmissionError("model lacks approved language coverage")
-    if attestation.evidence not in EVIDENCE or (
-        attestation.evidence == "unverified" and not policy.allow_unverified
-    ):
+    if attestation.evidence not in EVIDENCE or (attestation.evidence == "unverified" and not policy.allow_unverified):
         raise ProviderAdmissionError("model language evidence is not approved")
     return language
