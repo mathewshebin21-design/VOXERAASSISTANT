@@ -161,7 +161,7 @@ await step("publish runs the tests and publishes v1 for simulations", async () =
   await clickEnabled(p.getByRole("button", { name: "Publish", exact: true }), "Publish");
   await p.getByLabel("What changed").fill("First version");
   await p.getByRole("button", { name: "Run tests and publish" }).click();
-  await p.getByText("published v1").waitFor({ timeout: 30000 });
+  await p.getByText("published v1", { exact: true }).waitFor({ timeout: 30000 });
   return true;
 });
 
@@ -188,7 +188,7 @@ await step("a failing test blocks publishing and shows why", async () => {
   await call("DELETE", `/orgs/${orgId}/agents/${agent}/flow/tests/${t.json.id}`);
   await clickEnabled(p.getByRole("button", { name: "Publish", exact: true }), "Publish");
   await p.getByRole("button", { name: "Run tests and publish" }).click();
-  await p.getByText("published v2").waitFor({ timeout: 30000 });
+  await p.getByText("published v2", { exact: true }).waitFor({ timeout: 30000 });
   return true;
 });
 
@@ -196,7 +196,7 @@ await step("versions: roll back to v1 (published as v3)", async () => {
   await p.getByRole("tab", { name: "Versions" }).click();
   p.once("dialog", (d) => d.accept());
   await p.getByTestId("versions-panel").getByRole("button", { name: "Republish" }).last().click();
-  await p.getByText("published v3").waitFor({ timeout: 15000 });
+  await p.getByText("published v3", { exact: true }).waitFor({ timeout: 15000 });
   await p.getByText("rollback of v1").waitFor();
   await shot(p, "7-versions");
   return true;
