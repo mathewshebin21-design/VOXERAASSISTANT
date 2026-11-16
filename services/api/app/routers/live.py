@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import calls as calls_mod
@@ -28,7 +29,7 @@ from ..live import budget as budget_mod
 from ..live import providers, setup_agent, toolcheck
 from ..live.budget import budget
 from ..live.receptionist import CLOCK_LINE, TOOLS, Turn, load_context, run_tool, system_prompt
-from ..models import UsageKind
+from ..models import Call, UsageKind
 from ..permissions import Perm, has_perm
 from ..schemas import Strict
 from ..voice import policy as voice_policy_mod
@@ -189,6 +190,26 @@ def worker_brain(body: BrainIn, worker: Annotated[WorkerContext, Depends(worker_
 
     A worker records its own calls through /v1/worker/calls (one writer per call, in spoken order),
     so it does not send ``call_id`` here."""
+    # The worker is the single call recorder; a forged call_id must never let its
+    # model stream append events to a different call, even within the same tenant.
+    if body.call_id is not None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Worker brain does not accept a call_id")
+    if worker.call_ref is not None and body.conversation_id != worker.call_ref:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Worker credential is scoped to another call")
+    if worker.channel == "phone":
+        # Require an actual, still-open phone call authorized by the signed token.
+        # This check happens before provider admission, inference or budget reservation.
+        call = db.scalar(
+            select(Call).where(
+                Call.organization_id == worker.org_id,
+                Call.external_ref == worker.call_ref,
+                Call.channel == "phone",
+                Call.status == "in_progress",
+                Call.created_by.is_(None),
+            )
+        )
+        if call is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No active telephone call for worker credential")
     # This applies to BOTH 'test' and 'live' worker credentials. Model keys and
     # token budgets alone are not provider authorization. Validate every turn
     # before _brain reserves tokens or creates an inference stream.
