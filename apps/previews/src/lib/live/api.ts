@@ -70,10 +70,20 @@ export type CaseKind = "message" | "transfer" | "callback";
 export type CaseStatus = "new" | "in_progress" | "resolved";
 export type DeskStatus = "offline" | "available" | "busy";
 export interface CaseNote { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string }
+export interface DeskNotification {
+  channel: "staff_email";
+  state: "pending" | "leased" | "retry" | "provider_accepted" | "delivered" | "dead" | "cancelled";
+  attempts: number;
+  last_error_code: string | null;
+  staff_review_due_at: string;
+  needs_staff_review: boolean;
+  review_reason: "notification_failed" | "staff_unacknowledged" | null;
+}
 export interface DeskCase {
   id: string; kind: CaseKind; caller_name: string | null; caller_phone: string | null; summary: string; reason: string | null;
   urgent: boolean; status: CaseStatus; source: string; assigned_to: string | null; assignee_name: string | null; assigned_at: string | null;
   staff_acknowledged_at: string | null; staff_acknowledged_by: string | null; staff_acknowledged_by_name: string | null;
+  notification: DeskNotification | null;
   resolution: string | null; resolved_at: string | null; resolved_by: string | null; created_at: string; updated_at: string; notes?: CaseNote[];
 }
 export interface DeskMember { user_id: string; full_name: string; role: Role; status: DeskStatus; status_since: string | null; open_cases: number }

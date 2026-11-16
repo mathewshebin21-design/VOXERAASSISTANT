@@ -171,6 +171,30 @@ staging or production. Schema 0012 preview isolation and Vercel build-rate
 limits remain independent blockers. Migration/rollback, exact-head GitHub CI
 and peer review are required before promotion.
 
+## Notification status and staff-review visibility (draft, no sending)
+
+Case lists and details now display the queued notification's factual status:
+`pending`, `leased`, `retry`, `provider_accepted`, `delivered`,
+`dead`, or `cancelled`. They show the attempt count and non-personal
+error category, but **not** the lease token, provider reference, staff address,
+caller content or secrets. A `provider_accepted` state proves only provider
+request acceptance; a `delivered` state is a provider-reported delivery
+receipt, **not** proof that a member of staff read it. A logged-in employee's
+explicit `case.staff_acknowledged` action is still separate.
+
+A provisional, read-only human-review indicator is raised for unacknowledged
+and unresolved AI cases after 5 minutes when marked urgent, or 30 minutes
+otherwise; `dead` notifications are flagged for immediate review. The
+indicator is suppressed once staff explicitly acknowledge the case or it is
+resolved. **These are provisional staff-desk triage thresholds, not a
+contractual SLA**, alarm, webhook, worker, external page or guaranteed
+escalation. The UI reads the queue in one tenant-scoped batch with no state
+changes or external requests. Use the staff desk to follow up manually.
+
+Do not represent queued mail as delivered; the provider worker/transport and
+verified receipts are not connected. Draft PRs, schema 0013 and hosted preview
+require separate approval and validation before deployment.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
