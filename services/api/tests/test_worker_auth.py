@@ -126,6 +126,26 @@ def test_worker_token_drives_the_brain_for_its_workspace_only(worker, live, make
     assert rows.get(a.org_id) == 1 and b.org_id not in rows
 
 
+def test_policy_revocation_blocks_the_next_worker_turn_before_spend(worker, live, make_account, monkeypatch):  # noqa: F811
+    a = make_account("revoked-policy@example.com")
+    approve_mock_llm_for_test(monkeypatch, a)
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="test")
+    auth = {"authorization": f"Bearer {token}"}
+
+    live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 8, 2))]
+    first = a.client.post("/v1/worker/live/brain", json=body(rid="w-revocation-0001"), headers=auth)
+    assert first.status_code == 200 and len(live["llm_requests"]) == 1
+
+    policy = a.get(a.o("/voice/policy")).json()
+    assert policy.pop("saved") is True
+    policy["blocked_providers"] = ["anthropic"]
+    assert a.put(a.o("/voice/policy"), json=policy).status_code == 200
+
+    next_turn = a.client.post("/v1/worker/live/brain", json=body(rid="w-revocation-0002"), headers=auth)
+    assert next_turn.status_code == 403
+    assert len(live["llm_requests"]) == 1  # no second provider request after revocation
+
+
 def test_user_and_worker_tokens_cannot_be_swapped(worker, make_account):
     a = make_account("a@example.com")
     user_token = a.tokens["access_token"]
