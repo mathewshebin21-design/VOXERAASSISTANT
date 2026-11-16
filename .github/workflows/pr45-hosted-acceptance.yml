@@ -1,0 +1,21 @@
+name: PR45 isolated hosted acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hosted:
+    if: github.ref == 'refs/heads/codex/uk-india-release-candidate-20261116'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out pinned PR45 acceptance test
+        uses: actions/checkout@v4
+        with:
+          ref: '15336cc1fe2a2581980aa3f13554ae3b6c673189'
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify pinned PR45 Preview isolation and clean up probe
+        run: node apps/previews/scripts/pr45-hosted-isolation.mjs
