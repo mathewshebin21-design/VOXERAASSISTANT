@@ -70,10 +70,13 @@ def test_simulated_worker_fallback_is_durable_idempotent_and_visible_to_staff(wo
     assert ended.status_code == 200
     assert _save(account.client, token, call_id).status_code == 200  # lost-response retry after call end
     with owner_engine.connect() as conn:
-        assert conn.execute(
-            text("SELECT count(*) FROM caller_messages WHERE organization_id = :org"),
-            {"org": account.org_id},
-        ).scalar_one() == 1
+        assert (
+            conn.execute(
+                text("SELECT count(*) FROM caller_messages WHERE organization_id = :org"),
+                {"org": account.org_id},
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_fallback_rejects_missing_notices_bad_contact_and_ended_call(worker, make_account, owner_engine):  # noqa: F811
@@ -83,20 +86,29 @@ def test_fallback_rejects_missing_notices_bad_contact_and_ended_call(worker, mak
     assert _save(account.client, token, call_id).status_code == 403
     assert _save(account.client, token, call_id, caller_phone="bad").status_code == 422
     assert _save(account.client, token, call_id, message=" ").status_code == 422
-    assert account.client.post(
-        f"/v1/worker/calls/{call_id}/end", json={"status": "failed"}, headers=_auth(token)
-    ).status_code == 200
+    assert (
+        account.client.post(
+            f"/v1/worker/calls/{call_id}/end", json={"status": "failed"}, headers=_auth(token)
+        ).status_code
+        == 200
+    )
     assert _save(account.client, token, call_id).status_code == 403  # still cannot pass missing notice
     with owner_engine.connect() as conn:
-        assert conn.execute(
-            text("SELECT count(*) FROM caller_messages WHERE organization_id = :org"),
-            {"org": account.org_id},
-        ).scalar_one() == 0
+        assert (
+            conn.execute(
+                text("SELECT count(*) FROM caller_messages WHERE organization_id = :org"),
+                {"org": account.org_id},
+            ).scalar_one()
+            == 0
+        )
 
     live_call_id = _start(account.client, token, notice=True)
-    assert account.client.post(
-        f"/v1/worker/calls/{live_call_id}/end", json={"status": "failed"}, headers=_auth(token)
-    ).status_code == 200
+    assert (
+        account.client.post(
+            f"/v1/worker/calls/{live_call_id}/end", json={"status": "failed"}, headers=_auth(token)
+        ).status_code
+        == 200
+    )
     assert _save(account.client, token, live_call_id).status_code == 409
 
 
