@@ -190,10 +190,13 @@ async def entrypoint(ctx: JobContext) -> None:
         phone = is_phone(caller)
         agent = VoxeraAgent(call, require_notices=phone)
         if phone:
+            # Disable audio BEFORE the room is started, not via RoomOptions:
+            # permanently disabling room input would prevent re-enabling STT.
+            session.input.set_audio_enabled(False)
             await session.start(
                 agent=agent,
                 room=ctx.room,
-                room_options=room_io.RoomOptions(audio_input=False, text_input=False, text_output=False),
+                room_options=room_io.RoomOptions(text_input=False, text_output=False),
                 record=False,  # never save raw LiveKit audio or transcripts
             )
             if not await _phone_notice_sequence(session, call.recorder):
