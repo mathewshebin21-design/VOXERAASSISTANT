@@ -15,10 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from .. import audit
+from .. import audit, reception
 from .. import calls as calls_mod
 from ..deps import DB, OrgContext, client_meta, require
-from ..models import Call, CallEvent
+from ..models import Call, CallEvent, CallerMessage, CallerMessageKind
 from ..permissions import Perm
 from ..schemas import Strict
 from ..voice import policy as policy_mod
@@ -71,6 +71,20 @@ class CallEndIn(Strict):
     status: Literal["completed", "failed"] = "completed"
     outcome: Outcome | None = None
     reason: str | None = Field(None, max_length=200)
+
+
+class WorkerFallbackMessageIn(Strict):
+    """Explicit simulated-call fallback; never a proof of staff notification."""
+
+    caller_name: str = Field(min_length=1, max_length=120)
+    caller_phone: str = Field(min_length=7, max_length=32)
+    message: str = Field(min_length=1, max_length=500)
+
+
+class WorkerFallbackMessageOut(Strict):
+    saved: bool
+    case_id: uuid.UUID
+    destination: Literal["staff_queue"]
 
 
 class _Out(BaseModel):
@@ -294,6 +308,111 @@ def worker_add_events(
         raise _fail(e) from None
     db.commit()
     return rows
+
+
+@worker_router.post(
+    "/{call_id}/fallback-message",
+    response_model=WorkerFallbackMessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def worker_save_fallback_message(
+    call_id: uuid.UUID,
+    body: WorkerFallbackMessageIn,
+    worker: Annotated[WorkerContext, Depends(worker_context)],
+    db: DB,
+    request: Request,
+    response: Response,
+) -> dict:
+    """Atomically put a simulated fallback into the existing staff queue.
+
+    A stored queue item is not a staff notification or a promise of callback.
+    This test-only route requires both notice flags and cannot handle real calls.
+    The call row serializes concurrent retries; a system event holds only the
+    case ID, not caller content. No new schema or live provider is enabled.
+    """
+    if worker.mode != "test" or worker.channel != "simulated":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Fallback queue requires an authorized simulated test")
+
+    name, message = body.caller_name.strip(), body.message.strip()
+    if not name or not message:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Caller name and message are required")
+    try:
+        phone = reception.normalise_phone(body.caller_phone)
+    except reception.DeskError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Valid callback number is required") from None
+
+    try:
+        call = calls_mod.get(db, worker.org_id, call_id, lock=True)
+    except calls_mod.CallError as e:
+        raise _fail(e) from None
+    if call.created_by is not None or call.channel != "simulated":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
+    if not call.ai_disclosure_played or not call.recording_notice_played:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Simulated call notices are required before saving details")
+
+    # The call row remains locked until commit, so a duplicate request cannot
+    # create a second case even when both requests arrive concurrently.
+    prior_events = db.scalars(
+        select(CallEvent).where(
+            CallEvent.organization_id == worker.org_id,
+            CallEvent.call_id == call.id,
+            CallEvent.kind == "system",
+        )
+    )
+    for event in prior_events:
+        data = event.data if isinstance(event.data, dict) else {}
+        if data.get("event") != "fallback_case_persisted":
+            continue
+        try:
+            case_id = uuid.UUID(str(data["case_id"]))
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Previous fallback receipt is invalid") from None
+        case = db.get(CallerMessage, case_id)
+        if case is None or case.organization_id != worker.org_id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Previous fallback case is unavailable")
+        if (case.caller_name, case.caller_phone, case.summary) != (name, phone, message):
+            raise HTTPException(status.HTTP_409_CONFLICT, "This call already has a different fallback message")
+        response.status_code = status.HTTP_200_OK
+        return {"saved": True, "case_id": case.id, "destination": "staff_queue"}
+
+    if call.status != "in_progress":
+        raise HTTPException(status.HTTP_409_CONFLICT, "The call has ended")
+
+    case = reception.leave_message(
+        db,
+        reception.desk(db, worker.org_id),
+        CallerMessageKind.message,
+        message,
+        name,
+        phone,
+        reason="simulated worker fallback",
+        source="voice_worker",
+    )
+    try:
+        calls_mod.append(
+            db,
+            worker.org_id,
+            call.id,
+            [{
+                "kind": "system",
+                "speaker": "system",
+                "data": {"event": "fallback_case_persisted", "case_id": str(case.id)},
+            }],
+        )
+    except calls_mod.CallError as e:
+        raise _fail(e) from None
+    audit.record(
+        db,
+        worker.org_id,
+        None,
+        "case.created",
+        "caller_message",
+        case.id,
+        {"source": "voice_worker", "call_id": str(call.id)},
+        client_meta(request),
+    )
+    db.commit()
+    return {"saved": True, "case_id": case.id, "destination": "staff_queue"}
 
 
 @worker_router.post("/{call_id}/end", response_model=CallOut)
