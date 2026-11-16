@@ -217,8 +217,6 @@ def test_scoped_worker_brain_rejects_cross_call_and_record_injection_before_spen
     assert len(live["llm_requests"]) == 1
 
 
-
-
 def test_phone_prompt_never_claims_a_connected_human():
     from app.live.receptionist import BusinessContext, system_prompt
 
