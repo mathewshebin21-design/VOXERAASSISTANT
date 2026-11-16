@@ -20,11 +20,15 @@ pytest.importorskip("livekit.agents")
 
 from voxera_worker import livekit_agent as worker  # noqa: E402
 from voxera_worker.guard import SIP_KIND  # noqa: E402
+from voxera_worker.recording import room_ref  # noqa: E402
 from voxera_worker.session import CallSession  # noqa: E402
 
 
 def token(mode: str, channel: str) -> str:
-    payload = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+    claims = {"mode": mode, "channel": channel}
+    if channel == "phone":
+        claims["call_ref"] = room_ref("isolated-rehearsal-room")
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
     return f"test.{payload}.sig"
 
 
@@ -147,6 +151,18 @@ async def test_sip_refuses_non_live_phone_token_before_any_record_or_speech(monk
     assert recordings == [] and sessions == [] and ctx.callbacks == []
 
 
+async def test_sip_refuses_a_valid_phone_token_from_another_room_before_call_start(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    # The signed ref belongs to the original room, but the LiveKit job serves another.
+    ctx.room.name = "different-telephone-room"
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "worker channel mismatch"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
 async def test_sip_refuses_even_valid_channel_when_api_denies_call_start(monkeypatch):
     ctx, events, recordings, sessions = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None)
     await worker.entrypoint(ctx)
@@ -165,6 +181,8 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
     assert ctx.shutdown_reason is None
     assert events == ["connect", "participant", "policy", "record", "media_start", "callback"]
     assert len(recordings) == len(sessions) == len(ctx.callbacks) == 1
+    assert sessions[0].agent.call.conversation_id == room_ref(ctx.room.name)
+    assert ctx.start_kwargs["external_ref"] == room_ref(ctx.room.name)
     await ctx.callbacks[0]()
     assert events[-1] == "record_end"
 
