@@ -144,11 +144,13 @@ async def test_acknowledged_fallback_is_saved_once_before_call_claims_message_ta
     assert await say(s, "About my booking") == MESSAGE_SAVED
     assert await say(s, "Anything else?") == MESSAGE_SAVED
     await s.finish()
-    assert fr.fallbacks == [{
-        "caller_name": "Sam Patel",
-        "caller_phone": "07700900123",
-        "message": "About my booking",
-    }]
+    assert fr.fallbacks == [
+        {
+            "caller_name": "Sam Patel",
+            "caller_phone": "07700900123",
+            "message": "About my booking",
+        }
+    ]
     assert s.message_saved is True
     assert fr.ended[0]["status"] == "completed" and fr.ended[0]["outcome"] == "message_taken"
 
