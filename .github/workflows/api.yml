@@ -34,8 +34,6 @@ jobs:
         run: psql -h localhost -U postgres -f deploy/init-roles.sql
       - run: uv sync --frozen
       - run: uv run ruff check app tests migrations
-      - name: TEMP PR57 formatting diagnostics (remove after fixing)
-        run: uv run ruff format --diff app/routers/desk.py || true
       - run: uv run ruff format --check app tests migrations
       - run: uv run pytest -q
       - name: Migrations round-trip
