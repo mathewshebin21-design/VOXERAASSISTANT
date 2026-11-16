@@ -60,15 +60,21 @@ def upgrade() -> None:
         sa.UniqueConstraint("id", "organization_id", name="uq_staff_notification_id_org"),
         sa.UniqueConstraint("case_id", "channel", name="uq_staff_notification_once_per_case_channel"),
         sa.CheckConstraint("channel = 'staff_email'", name="ck_staff_notification_channel"),
-        sa.CheckConstraint("status IN (" + ", ".join(repr(s) for s in STATUSES) + ")", name="ck_staff_notification_status"),
-        sa.CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
-                           name="ck_staff_notification_attempts"),
+        sa.CheckConstraint(
+            "status IN (" + ", ".join(repr(s) for s in STATUSES) + ")", name="ck_staff_notification_status"
+        ),
+        sa.CheckConstraint(
+            "attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
+            name="ck_staff_notification_attempts",
+        ),
         sa.CheckConstraint(
             "(status = 'leased') = (lease_until IS NOT NULL)",
             name="ck_staff_notification_lease_state",
         ),
-        sa.CheckConstraint("delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
-                           name="ck_staff_notification_delivered_requires_acceptance"),
+        sa.CheckConstraint(
+            "delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
+            name="ck_staff_notification_delivered_requires_acceptance",
+        ),
     )
     op.create_index(
         "ix_staff_notification_due",
@@ -91,15 +97,17 @@ def upgrade() -> None:
             name="fk_staff_notification_attempt_same_org",
             ondelete="CASCADE",
         ),
-        sa.UniqueConstraint(
-            "notification_id", "attempt_number", "result", name="uq_staff_notification_attempt_stage"
-        ),
+        sa.UniqueConstraint("notification_id", "attempt_number", "result", name="uq_staff_notification_attempt_stage"),
         sa.CheckConstraint("attempt_number > 0", name="ck_staff_notification_attempt_number"),
-        sa.CheckConstraint("result IN (" + ", ".join(repr(r) for r in RESULTS) + ")",
-                           name="ck_staff_notification_attempt_result"),
+        sa.CheckConstraint(
+            "result IN (" + ", ".join(repr(r) for r in RESULTS) + ")", name="ck_staff_notification_attempt_result"
+        ),
     )
-    op.create_index("ix_staff_notification_attempt_order", "staff_notification_attempts",
-                    ["notification_id", "attempt_number", "created_at"])
+    op.create_index(
+        "ix_staff_notification_attempt_order",
+        "staff_notification_attempts",
+        ["notification_id", "attempt_number", "created_at"],
+    )
 
     role = _role()
     for table in ("staff_notification_outbox", "staff_notification_attempts"):
