@@ -94,7 +94,7 @@ async def test_a_call_is_recorded_turn_by_turn_in_spoken_order():
     assert all("call_id" not in r for r in fb.requests)
 
 
-async def test_failures_and_message_taking_are_recorded_and_the_call_ends_as_a_message():
+async def test_unconfirmed_fallback_is_recorded_as_failed_not_as_a_delivered_message():
     fb = FakeBrain([(500, [], 0, 0), (200, [{"type": "error", "message": "x"}], 0, 0)])
     fr = FakeRecords()
     s = CallSession(fb.client(), recorder=fr.recorder())
@@ -114,7 +114,7 @@ async def test_failures_and_message_taking_are_recorded_and_the_call_ends_as_a_m
         ("utterance", "Sam Patel"),
         ("utterance", "And the best number to reach you on?"),
     ]
-    assert fr.ended[0]["status"] == "completed" and fr.ended[0]["outcome"] == "message_taken"
+    assert fr.ended[0]["status"] == "failed" and fr.ended[0]["outcome"] is None
 
 
 async def test_writes_stay_in_order_when_the_api_is_slow_and_never_hold_up_the_caller():
@@ -179,7 +179,8 @@ def test_the_outcome_comes_from_what_actually_happened():
     assert call_outcome(_session_with([queued])) == ("completed", "message_taken")
     assert call_outcome(_session_with([booked, transferred])) == ("completed", "transferred")
     assert call_outcome(_session_with([nothing], failures=1)) == ("failed", None)
-    assert call_outcome(_session_with([nothing], message=[])) == ("completed", "no_action")
+    assert call_outcome(_session_with([nothing], message=[])) == ("failed", None)
+    assert call_outcome(_session_with([nothing], message=["Sam"])) == ("failed", None)
     assert call_outcome(_session_with([])) == ("completed", "no_action")
 
 
