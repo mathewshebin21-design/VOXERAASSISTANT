@@ -208,9 +208,7 @@ async def test_sip_default_unreviewed_trunk_is_refused_before_policy_media_and_r
         ("sip.trunkPhoneNumber", "+441179460001"),
     ],
 )
-async def test_sip_missing_or_unapproved_origin_evidence_never_starts_media(
-    monkeypatch, field, value
-):
+async def test_sip_missing_or_unapproved_origin_evidence_never_starts_media(monkeypatch, field, value):
     ctx, events, recordings, sessions = setup(
         monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
     )
