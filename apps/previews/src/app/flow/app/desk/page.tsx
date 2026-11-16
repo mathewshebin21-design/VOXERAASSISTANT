@@ -15,6 +15,15 @@ const KIND: Record<DeskCase["kind"], { label: string; icon: typeof Hand; tone: "
   message: { label: "Message", icon: StickyNote, tone: "cyan" },
 };
 const DOT: Record<DeskStatus, string> = { available: "bg-flw-lime", busy: "bg-flw-amber", offline: "bg-flw-line" };
+const DELIVERY_LABEL: Record<NonNullable<DeskCase["notification"]>["state"], string> = {
+  pending: "Queued; not sent",
+  leased: "Reserved; delivery unconfirmed",
+  retry: "Retry scheduled; delivery unconfirmed",
+  provider_accepted: "Provider accepted; delivery unconfirmed",
+  delivered: "Provider reports delivered; not proof staff read it",
+  dead: "Delivery failed; review required",
+  cancelled: "Notification processing cancelled",
+};
 const TABS = [
   { id: "queue", label: "Queue", q: "status=new" },
   { id: "mine", label: "Mine", q: "status=in_progress&mine=true" },
@@ -104,6 +113,8 @@ function Desk({ orgId }: { orgId: string }) {
                       <Chip tone={k.tone}>{k.label}</Chip>
                       {c.urgent && <Chip tone="pink"><AlertTriangle size={10} /> urgent</Chip>}
                        {c.staff_acknowledged_at ? <Chip tone="lime">Staff acknowledged</Chip> : <Chip tone="amber">Awaiting staff acknowledgement</Chip>}
+                       {c.notification && <Chip tone="amber">{DELIVERY_LABEL[c.notification.state]}</Chip>}
+                       {c.notification?.needs_staff_review && <Chip tone="pink"><AlertTriangle size={10} /> Staff review needed</Chip>}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-sm text-flw-mute">{c.summary}</p>
                     <div className="mt-1 font-mono text-[10px] text-flw-mute">{fmtWhen(c.created_at)}{c.assignee_name && <> · with {c.assignee_name}</>}{c.source === "ai_receptionist" && <> · from the AI receptionist</>}</div>
@@ -164,6 +175,21 @@ function CaseDetail({ base, id, team, myId, onAct, onClose }: { base: string; id
                 <Check size={13} /> Acknowledge receipt
               </FBtn>
             )}
+          </div>
+        )}
+        {d.notification && (
+          <div className="space-y-1 rounded-lg border border-flw-line p-3 text-xs" data-testid="notification-status" aria-label="External notification status">
+            <p className="font-medium">Staff email: {DELIVERY_LABEL[d.notification.state]}</p>
+            <p className="text-flw-mute">Attempts recorded: {d.notification.attempts}. This is queue/provider evidence, not confirmation that anyone received or read a message.</p>
+            {d.notification.needs_staff_review && (
+              <p className="text-flw-pink" data-testid="notification-attention">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                {d.notification.review_reason === "notification_failed"
+                  ? "Notification attempts failed. Staff should review this case directly."
+                  : "No staff acknowledgement by the provisional internal review time. Please review this case directly."}
+              </p>
+            )}
+            <p className="text-flw-mute">Internal review target: {fmtWhen(d.notification.staff_review_due_at)} (urgent: 5 min; other: 30 min). This is not an agreed response SLA or automatic escalation.</p>
           </div>
         )}
         {d.reason && <p className="text-xs text-flw-mute">Why it came to a person: {d.reason}</p>}
