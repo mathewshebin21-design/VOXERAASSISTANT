@@ -2,7 +2,7 @@
 
 Multi-tenant AI voice receptionist and appointment automation platform — **work in progress**.
 
-> **Status: development and release validation; not ready for paying customers.** The canonical roadmap is Phases 0–10 in [the phase tracker](docs/VOXERA_Phase_Tracker.md). Historical PRs and design documents use provisional numbering. Browser/simulated tests do not establish live telephone readiness. UK and India launch, production release and paid-provider activation remain approval-gated.
+> **Status: development and release validation; not ready for paying customers.** The current Phase 0–13 execution register and original Phase 0–10 crosswalk are in [the phase tracker](docs/VOXERA_Phase_Tracker.md). Historical PRs and design documents use provisional numbering. Browser/simulated tests do not establish live telephone readiness. UK and India launch, production release and paid-provider activation remain approval-gated.
 
 ## Contents
 
@@ -64,4 +64,4 @@ To use real workspaces in the Flow UI, start the API on port 8000 and the web ap
 
 ## Roadmap
 
-Follow the canonical [Phases 0–10 tracker](docs/VOXERA_Phase_Tracker.md): infrastructure/isolation; receptionist/onboarding; appointments/staff; Agent Studio; Testing Lab; browser voice; telephony; operations/QA; integrations; SaaS/billing; launch/security. Every phase requires recorded acceptance evidence. See [UK/India commercial readiness](docs/uk-india-commercial-readiness.md) for current release blockers.
+Follow the [reconciled phase tracker](docs/VOXERA_Phase_Tracker.md) for scope, acceptance criteria and release evidence. Every phase requires recorded acceptance evidence. See [UK/India commercial readiness](docs/uk-india-commercial-readiness.md) for current release blockers.

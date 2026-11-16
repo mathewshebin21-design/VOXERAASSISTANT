@@ -30,6 +30,9 @@ def test_owner_checks_pass_at_head_and_never_write(owner_engine, make_account):
         "rate_limit_hits: runtime role has no SELECT",
         "0011 table calls exists",
         "call events: runtime role has no DELETE",
+        "staff_notification_outbox: unique case and channel",
+        "staff_notification_attempts: foreign key binds parent and tenant",
+        "staff_notification_attempts: runtime UPDATE denied",
     } <= names
     assert "workspace_settings" in tenant and counts["organizations"] == 1
 
@@ -96,3 +99,11 @@ def test_only_explicit_permission_denial_proves_access_is_blocked(monkeypatch, e
     assert results[-1][1] is expected
     assert connection.rolled_back
     assert "private detail" not in str(results)
+
+
+def test_notification_attempt_history_rejects_privilege_drift(owner_engine):
+    with owner_engine.connect() as c:
+        c.execute(text("GRANT UPDATE ON staff_notification_attempts TO voxera_app"))
+        results, _, _ = verify_release.owner_checks(c, "production", "0013")
+        c.rollback()
+    assert ("staff_notification_attempts: runtime UPDATE denied", False, "") in results

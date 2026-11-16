@@ -141,3 +141,35 @@ def test_simulator_refuses_production_environment_database_and_non_fake_adapter(
         simulator._test_database_only(test_db)
     with pytest.raises(simulator.SimulationDisabled):
         simulator.simulate_batch(lambda: None, uuid.uuid4(), object())
+
+
+def test_recover_after_fake_acceptance_when_database_transaction_rolls_back(make_account, app_engine, monkeypatch):
+    owner = make_account("sim-crash@example.com")
+    cid = new_ai_case(app_engine, owner.org_id)
+    org = uuid.UUID(owner.org_id)
+    before = get_outbox(app_engine, owner.org_id, cid)
+    fake = simulator.SimulatedTransport()
+    start = datetime.now(UTC) + timedelta(seconds=4)
+    original = staff_notifications.provider_accepted
+
+    def interrupt_before_commit(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("simulated crash before confirmation commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(staff_notifications, "provider_accepted", interrupt_before_commit)
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            simulator.simulate_batch(sessions(app_engine), org, fake, now=start)
+
+    interrupted = get_outbox(app_engine, owner.org_id, cid)
+    assert interrupted.status == "leased"
+    assert interrupted.provider_ref is None and interrupted.provider_accepted_at is None
+    assert fake.submitted_ids == [before.id]
+    assert simulator.simulate_batch(sessions(app_engine), org, fake, now=start + timedelta(seconds=119)) == []
+
+    [retried] = simulator.simulate_batch(sessions(app_engine), org, fake, now=start + timedelta(seconds=121))
+    assert retried.notification_id == before.id and retried.state == "provider_accepted"
+    assert fake.submitted_ids == [before.id, before.id]
+    recovered = get_outbox(app_engine, owner.org_id, cid)
+    assert recovered.attempts == 2
+    assert recovered.provider_ref == f"sim-{before.id.hex}" and recovered.delivered_at is None
