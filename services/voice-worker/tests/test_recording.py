@@ -8,7 +8,16 @@ import httpx
 from test_session import FakeBrain, ok, say
 
 from voxera_worker.recording import CallRecorder
-from voxera_worker.session import FILLER, MESSAGE_DONE, MESSAGE_SAVED, MESSAGE_START, RECOVERY, CallSession, call_outcome, turn_events
+from voxera_worker.session import (
+    FILLER,
+    MESSAGE_DONE,
+    MESSAGE_SAVED,
+    MESSAGE_START,
+    RECOVERY,
+    CallSession,
+    call_outcome,
+    turn_events,
+)
 
 
 class FakeRecords:
