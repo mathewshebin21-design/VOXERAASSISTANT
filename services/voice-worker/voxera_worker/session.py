@@ -42,6 +42,7 @@ MESSAGE_DONE = (
     "Thank you. I can't confirm the team received your message. "
     "Please contact the business directly if you need a response."
 )
+MESSAGE_SAVED = "Your message has been saved for the team to review. I can't guarantee when someone will reply."
 CLOSING = "I'm sorry, we've reached the time limit for this call. The team will be happy to help if you call back."
 ENDED = "I'm sorry, I can't continue this call right now. Please call back and the team will be happy to help."
 
@@ -122,6 +123,7 @@ class CallSession:
         self.failures = 0
         self.message_mode = False
         self.message: list[str] = []  # caller answers collected in message mode
+        self.message_saved = False  # true only after the staff-queue API acknowledges a saved case
         self.handoffs: list[dict] = []
         self.closed = False
         self.close_reason: str | None = None  # why the session closed itself, for the call record
@@ -148,7 +150,7 @@ class CallSession:
             rec.language = self.language.current
             if self.message_mode:
                 rec.outcome = "message_mode"
-                yield await self._say(rec, self._message_step(caller_text))
+                yield await self._say(rec, await self._message_step(caller_text))
                 return
             self.history.append({"role": "user", "text": caller_text})
             async for piece in self._brain_turn(rec):
@@ -233,10 +235,21 @@ class CallSession:
         rec.worker_line += text
         return text
 
-    def _message_step(self, answer: str) -> str:
+    async def _message_step(self, answer: str) -> str:
+        if len(self.message) >= 3:
+            return MESSAGE_SAVED if self.message_saved else MESSAGE_DONE
         self.message.append(answer[:500])
         n = len(self.message)
-        return MESSAGE_STEPS[n - 1] if n <= len(MESSAGE_STEPS) else MESSAGE_DONE
+        if n <= len(MESSAGE_STEPS):
+            return MESSAGE_STEPS[n - 1]
+        # The staff inbox is durable, but is not a proof of staff notification.
+        # Do not describe an attempted write or an in-memory list as delivered.
+        if self.recorder is not None:
+            try:
+                self.message_saved = await self.recorder.save_fallback(*self.message)
+            except Exception:  # recording/delivery may never break a caller turn
+                self.message_saved = False
+        return MESSAGE_SAVED if self.message_saved else MESSAGE_DONE
 
     # ---- the call record ---------------------------------------------------------------------
 
@@ -331,9 +344,9 @@ def call_outcome(session: CallSession) -> tuple[str, str | None]:
             if tool.get("ok") and tool.get("name") in _TOOL_OUTCOME:
                 return "completed", _TOOL_OUTCOME[tool["name"]]
     if session.message_mode:
-        # Volatile worker memory does not prove a durable staff case or delivered callback request.
-        # Until delivery is acknowledged, this failed brain call must not be reported as handled.
-        return "failed", None
+        # Memory-only fallback is not a handled message. Only a committed staff-queue
+        # acknowledgement may yield a successful message_taken outcome.
+        return ("completed", "message_taken") if session.message_saved else ("failed", None)
     if not answered and session.failures:
         return "failed", None
     return "completed", "answered" if answered else "no_action"
