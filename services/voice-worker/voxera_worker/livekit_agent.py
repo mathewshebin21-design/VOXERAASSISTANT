@@ -85,9 +85,18 @@ async def entrypoint(ctx: JobContext) -> None:
         log.warning("refusing telephone call: SIP disabled by operator")
         ctx.shutdown(reason="telephone channel disabled")
         return
+    ref = room_ref(ctx.room.name)
+    if is_phone(caller) and ref is None:
+        log.warning("refusing telephone call: no stable room reference")
+        ctx.shutdown(reason="telephone reference unavailable")
+        return
     cmd = os.environ.get("VOXERA_WORKER_TOKEN_CMD")
-    raw_tokens = TokenSource(command_fetch(cmd)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
-    tokens = CallBoundTokens(raw_tokens, caller)
+    # Every supervisor refresh receives the same room identifier, not a fresh
+    # unbound workspace-wide token. The SIP participant and claim must match.
+    raw_tokens = (
+        TokenSource(command_fetch(cmd, call_ref=ref)) if cmd else StaticToken(os.environ["VOXERA_WORKER_TOKEN"])
+    )
+    tokens = CallBoundTokens(raw_tokens, caller, ref)
     try:
         await tokens.get()  # bind every token (including future refreshes) to the actual call channel
     except RuntimeError as e:
@@ -116,12 +125,14 @@ async def entrypoint(ctx: JobContext) -> None:
     call = CallSession(
         brain, language=LanguageGate(accepted=accepted, current=default), recorder=CallRecorder(api, tokens)
     )
+    if ref is not None:
+        call.conversation_id = ref  # phone brain turn must match the signed call reference
     # The prototype plays no AI-disclosure or recording notice yet, so it says so: the API then keeps
     # the call's events without the caller's words. The room name makes the record restart-safe.
     # For a telephone call the dialled number goes with it; the API refuses a number that is not
     # assigned to the token's workspace, and then the call is not answered.
     record_id = await call.begin(
-        external_ref=room_ref(ctx.room.name), called_number=called_number(caller) if is_phone(caller) else None
+        external_ref=ref, called_number=called_number(caller) if is_phone(caller) else None
     )
     if not may_answer(caller, record_id):
         # For SIP this API round-trip is the mandatory signed-token and country-gate check.
