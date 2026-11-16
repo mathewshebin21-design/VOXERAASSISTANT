@@ -195,6 +195,32 @@ Do not represent queued mail as delivered; the provider worker/transport and
 verified receipts are not connected. Draft PRs, schema 0013 and hosted preview
 require separate approval and validation before deployment.
 
+## Test-only dispatcher contract (draft, no outgoing provider)
+
+The notification simulator exercises the real PostgreSQL lease and attempt
+transitions in separate transactions with a strictly in-memory stand-in.
+It **can only operate** when `VOXERA_ENV=test` *and* the actual connected
+database is exactly `voxera_test`; both conditions are checked before a
+write, independently of any token or country-launch setting. Subclassed or
+external transport adapters are rejected. The stand-in receives only a
+notification UUID and records no caller details, email address, credential,
+network request or provider charge. A stable synthetic `sim-<id>` reference
+makes retries detectable. It never sets `delivered` automatically.
+
+An additional call-bound outbox check verifies that a case is still open and
+not explicitly acknowledged immediately after lease reservation. If already
+handled it cancels that lease; stale or expired lease tokens cannot advance
+the workflow. This is required **even if** the case was eligible when first
+reserved. A future production sender must additionally address the race
+between this check and external submission and must use provider-supported
+idempotency keys, privacy-safe recipient routing and authenticated webhooks.
+
+This simulator is deliberately **not a scheduler, provider, email sender,
+SMS service, public endpoint or live deployment**. It must not be treated as
+evidence that staff were notified. Production provider integration needs
+separate authorization, data-protection and spend approval and a full hosted
+acceptance test, while all VOXERA phone/SIP gates stay closed.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
