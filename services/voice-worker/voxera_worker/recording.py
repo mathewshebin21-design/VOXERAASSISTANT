@@ -66,6 +66,33 @@ class CallRecorder:
             self.call_id = r.json()["id"]
         return self.call_id
 
+    async def save_fallback(self, name: str, phone: str, message: str) -> bool:
+        """Acknowledge an actual saved staff-queue case, never an attempted HTTP write.
+
+        The API only accepts this for a simulated worker call with notice flags.
+        The same call may safely retry after a lost response. Never log caller PII.
+        """
+        if not self.call_id:
+            return False
+        response = await self._post(
+            f"{self.base}/{self.call_id}/fallback-message",
+            {"caller_name": name, "caller_phone": phone, "message": message},
+            expect=(200, 201),
+            always=True,
+        )
+        if response is None:
+            return False
+        try:
+            body = response.json()
+            return (
+                body.get("saved") is True
+                and body.get("destination") == "staff_queue"
+                and isinstance(body.get("case_id"), str)
+                and bool(body["case_id"])
+            )
+        except (ValueError, TypeError, AttributeError):
+            return False
+
     def add(self, events: list[dict]) -> None:
         """Queues events behind earlier writes; returns at once."""
         if not events or self.call_id is None or self.failed:
