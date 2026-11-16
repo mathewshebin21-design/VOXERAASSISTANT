@@ -124,6 +124,10 @@ def test_fallback_cannot_cross_tenants_or_use_member_calls(worker, make_account,
     b_token = worker_auth.mint(uuid.UUID(b.org_id), call_ref="room-tenant-b-001")
     a_call = _start(a.client, a_token, ref=a_ref)
     assert _save(b.client, b_token, a_call).status_code == 404
+    cross_room = worker_auth.mint(uuid.UUID(a.org_id), call_ref="room-other-001")
+    assert _save(a.client, cross_room, a_call).status_code == 404
+    legacy_unbound = worker_auth.mint(uuid.UUID(a.org_id))
+    assert _save(a.client, legacy_unbound, a_call).status_code == 403
     assert _save(a.client, a.tokens["access_token"], a_call).status_code == 401
     member = a.post(a.o("/calls"), json={"channel": "simulated", "recording_notice_played": True}).json()
     assert _save(a.client, a_token, member["id"]).status_code == 404
