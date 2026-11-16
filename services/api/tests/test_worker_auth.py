@@ -194,8 +194,8 @@ def test_live_mode_is_refused_until_the_country_passes_its_launch_review(worker,
 
 
 def test_scoped_worker_brain_rejects_cross_call_and_record_injection_before_spend(
-    worker, live, make_account, monkeypatch
-):  # noqa: F811
+    worker, live, make_account, monkeypatch  # noqa: F811
+):
     a = make_account("bound-brain@example.com")
     approve_mock_llm_for_test(monkeypatch, a)
     ref = "room-bound-brain-001"
@@ -242,8 +242,8 @@ def test_signed_ref_must_be_well_formed_even_for_valid_hmac(worker):
 
 
 def test_live_phone_brain_requires_a_registered_active_call_even_after_mock_signoffs(
-    worker, live, make_account, monkeypatch
-):  # noqa: F811
+    worker, live, make_account, monkeypatch  # noqa: F811
+):
     from app.voice import launch
 
     a = make_account("bound-phone-brain@example.com")
