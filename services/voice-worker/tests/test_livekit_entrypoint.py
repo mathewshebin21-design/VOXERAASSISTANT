@@ -70,13 +70,15 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
     monkeypatch.setenv("VOXERA_API_URL", "http://isolated-api.test")
     policy_reads: list = []
 
-    async def fake_languages(api, tokens):
+    async def fake_authorized_languages(api, tokens, media):
         assert api == "http://isolated-api.test"
         events.append("policy")
         policy_reads.append(tokens)
+        assert media.stt_model == "mock/stt-model" and media.tts_model == "mock/tts-model"
+        # Only this in-memory pytest double skips attestations. No runtime bypass exists.
         return "en-GB", ("en-GB", "hi-IN")
 
-    monkeypatch.setattr(worker, "fetch_languages", fake_languages)
+    monkeypatch.setattr(worker, "fetch_authorized_languages", fake_authorized_languages)
 
     class Recorder:
         def __init__(self, api, tokens):
@@ -267,11 +269,11 @@ async def test_no_saved_policy_means_no_call_and_no_record(monkeypatch):
         monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
     )
 
-    async def unavailable(api, tokens):
+    async def unavailable(api, tokens, media):
         events.append("policy")
         raise PolicyUnavailable("voice policy request refused (503)")
 
-    monkeypatch.setattr(worker, "fetch_languages", unavailable)
+    monkeypatch.setattr(worker, "fetch_authorized_languages", unavailable)
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "voice policy unavailable"
@@ -304,11 +306,11 @@ async def test_the_call_starts_in_the_workspaces_default_language(monkeypatch):
         monkeypatch, mode="test", channel="simulated", kind=0, record_id="call-id"
     )
 
-    async def hindi_first(api, tokens):
+    async def hindi_first(api, tokens, media):
         events.append("policy")
         return "hi-IN", ("hi-IN", "en-GB")
 
-    monkeypatch.setattr(worker, "fetch_languages", hindi_first)
+    monkeypatch.setattr(worker, "fetch_authorized_languages", hindi_first)
     await worker.entrypoint(ctx)
     gate = sessions[0].agent.call.language
     assert gate.current == "hi-IN" and gate.accepted == ("hi-IN", "en-GB")
