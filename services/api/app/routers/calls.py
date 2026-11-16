@@ -15,8 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from .. import calls as calls_mod
-from .. import audit, reception
+from .. import audit, calls, reception
 from ..deps import DB, OrgContext, client_meta, require
 from ..models import Call, CallEvent, CallerMessage, CallerMessageKind
 from ..permissions import Perm
@@ -124,7 +123,7 @@ class CallDetail(CallOut):
     events: list[CallEventOut]
 
 
-def _fail(e: calls_mod.CallError) -> HTTPException:
+def _fail(e: calls.CallError) -> HTTPException:
     return HTTPException(e.status, str(e))
 
 
@@ -137,7 +136,7 @@ def start_call(
     response: Response,
 ) -> Call:
     """Starts a simulated or web test call. Idempotent on ``external_ref``."""
-    call, created = calls_mod.start(db, ctx.org_id, ctx.user.id, **body.model_dump())
+    call, created = calls.start(db, ctx.org_id, ctx.user.id, **body.model_dump())
     if created:
         audit.record(
             db,
@@ -160,8 +159,8 @@ def add_events(
     call_id: uuid.UUID, body: CallEventsIn, ctx: Annotated[OrgContext, Depends(require(Perm.agent_write))], db: DB
 ) -> list[CallEvent]:
     try:
-        rows = calls_mod.append(db, ctx.org_id, call_id, [e.model_dump() for e in body.events])
-    except calls_mod.CallError as e:
+        rows = calls.append(db, ctx.org_id, call_id, [e.model_dump() for e in body.events])
+    except calls.CallError as e:
         raise _fail(e) from None
     db.commit()
     return rows
@@ -176,8 +175,8 @@ def end_call(
     request: Request,
 ) -> Call:
     try:
-        call = calls_mod.end(db, ctx.org_id, call_id, body.status, body.outcome, body.reason)
-    except calls_mod.CallError as e:
+        call = calls.end(db, ctx.org_id, call_id, body.status, body.outcome, body.reason)
+    except calls.CallError as e:
         raise _fail(e) from None
     audit.record(
         db,
@@ -216,8 +215,8 @@ def list_calls(
 @router.get("/{call_id}", response_model=CallDetail)
 def get_call(call_id: uuid.UUID, ctx: Annotated[OrgContext, Depends(require(Perm.read))], db: DB) -> dict:
     try:
-        call = calls_mod.get(db, ctx.org_id, call_id)
-    except calls_mod.CallError as e:
+        call = calls.get(db, ctx.org_id, call_id)
+    except calls.CallError as e:
         raise _fail(e) from None
     events = db.scalars(select(CallEvent).where(CallEvent.call_id == call.id).order_by(CallEvent.seq))
     return {**CallOut.model_validate(call).model_dump(), "events": list(events)}
@@ -232,8 +231,8 @@ def delete_call(
 ) -> None:
     """Erases a call and its transcript (e.g. for a caller's erasure request). Owner only."""
     try:
-        call = calls_mod.delete(db, ctx.org_id, call_id)
-    except calls_mod.CallError as e:
+        call = calls.delete(db, ctx.org_id, call_id)
+    except calls.CallError as e:
         raise _fail(e) from None
     # The audit row records that a call was erased, never what it contained.
     audit.record(
@@ -264,7 +263,7 @@ def worker_start_call(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "That number is not set up for this workspace")
     elif body.called_number is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Only telephone calls have a dialled number")
-    call, created = calls_mod.start(
+    call, created = calls.start(
         db,
         worker.org_id,
         None,
@@ -289,8 +288,8 @@ def worker_start_call(
 def _worker_call(db: DB, worker: WorkerContext, call_id: uuid.UUID) -> Call:
     """The worker's own channel only: a worker never writes to a member's test or web call."""
     try:
-        call = calls_mod.get(db, worker.org_id, call_id)
-    except calls_mod.CallError as e:
+        call = calls.get(db, worker.org_id, call_id)
+    except calls.CallError as e:
         raise _fail(e) from None
     if call.channel != _WORKER_CHANNEL[worker.channel] or call.created_by is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
@@ -303,8 +302,8 @@ def worker_add_events(
 ) -> list[CallEvent]:
     _worker_call(db, worker, call_id)
     try:
-        rows = calls_mod.append(db, worker.org_id, call_id, [e.model_dump() for e in body.events])
-    except calls_mod.CallError as e:
+        rows = calls.append(db, worker.org_id, call_id, [e.model_dump() for e in body.events])
+    except calls.CallError as e:
         raise _fail(e) from None
     db.commit()
     return rows
@@ -342,8 +341,8 @@ def worker_save_fallback_message(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Valid callback number is required") from None
 
     try:
-        call = calls_mod.get(db, worker.org_id, call_id, lock=True)
-    except calls_mod.CallError as e:
+        call = calls.get(db, worker.org_id, call_id, lock=True)
+    except calls.CallError as e:
         raise _fail(e) from None
     if call.created_by is not None or call.channel != "simulated":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
@@ -389,7 +388,7 @@ def worker_save_fallback_message(
         source="voice_worker",
     )
     try:
-        calls_mod.append(
+        calls.append(
             db,
             worker.org_id,
             call.id,
@@ -399,7 +398,7 @@ def worker_save_fallback_message(
                 "data": {"event": "fallback_case_persisted", "case_id": str(case.id)},
             }],
         )
-    except calls_mod.CallError as e:
+    except calls.CallError as e:
         raise _fail(e) from None
     audit.record(
         db,
@@ -425,8 +424,8 @@ def worker_end_call(
 ) -> Call:
     _worker_call(db, worker, call_id)
     try:
-        call = calls_mod.end(db, worker.org_id, call_id, body.status, body.outcome, body.reason)
-    except calls_mod.CallError as e:
+        call = calls.end(db, worker.org_id, call_id, body.status, body.outcome, body.reason)
+    except calls.CallError as e:
         raise _fail(e) from None
     details = {"status": call.status, "outcome": call.outcome, "by": "worker"}
     audit.record(db, worker.org_id, None, "call.ended", "call", call.id, details, client_meta(request))
