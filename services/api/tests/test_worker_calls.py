@@ -141,7 +141,7 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     from app.voice import launch
 
     a = make_account("a@example.com")
-    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone")
+    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref="room-phone-001")
     assert _start(a.client, phone).status_code == 403
     live_sim = worker_auth.mint(uuid.UUID(a.org_id), mode="live")
     assert _start(a.client, live_sim).status_code == 403
@@ -152,7 +152,14 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
     number = assign_number(owner_engine, a.org_id)
-    r = _start(a.client, phone, called_number=number, caller_number="+44 20 7946 0000", recording_notice_played=True)
+    r = _start(
+        a.client,
+        phone,
+        external_ref="room-phone-001",
+        called_number=number,
+        caller_number="+44 20 7946 0000",
+        recording_notice_played=True,
+    )
     assert r.status_code == 201 and r.json()["channel"] == "phone"
 
 
@@ -164,6 +171,13 @@ def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkey
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
     a.patch(a.o("/settings"), json={"locale": "en-GB"})
-    body = {"called_number": assign_number(owner_engine, a.org_id)} if channel == "phone" else {}
-    r = _start(a.client, worker_auth.mint(uuid.UUID(a.org_id), mode=mode, channel=channel), **body)
+    body = (
+        {"called_number": assign_number(owner_engine, a.org_id), "external_ref": "room-phone-002"}
+        if channel == "phone"
+        else {}
+    )
+    token = worker_auth.mint(
+        uuid.UUID(a.org_id), mode=mode, channel=channel, call_ref="room-phone-002" if channel == "phone" else None
+    )
+    r = _start(a.client, token, **body)
     assert r.status_code == 201 and r.json()["channel"] == ("phone" if mode == "live" else "simulated")
