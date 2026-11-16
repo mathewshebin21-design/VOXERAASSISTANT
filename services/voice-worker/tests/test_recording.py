@@ -114,7 +114,7 @@ async def test_unconfirmed_fallback_is_recorded_as_failed_not_as_a_delivered_mes
         ("utterance", "Sam Patel"),
         ("utterance", "And the best number to reach you on?"),
     ]
-    assert fr.ended[0]["status"] == "failed" and fr.ended[0]["outcome"] is None
+    assert fr.ended[0]["status"] == "failed" and fr.ended[0].get("outcome") is None
 
 
 async def test_writes_stay_in_order_when_the_api_is_slow_and_never_hold_up_the_caller():
