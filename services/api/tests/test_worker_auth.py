@@ -258,6 +258,13 @@ def test_phone_worker_never_offers_or_executes_a_phantom_carrier_transfer(
         headers=auth,
     )
     assert start.status_code == 201
+    for notice in ("ai_disclosure", "recording_notice"):
+        r = a.client.post(
+            f"/v1/worker/calls/{start.json()['id']}/notice-playback",
+            json={"notice": notice, "method": "livekit_speech_playout"},
+            headers=auth,
+        )
+        assert r.status_code == 200
 
     # Exercise the SECOND server-side guard even if the schema validator were
     # accidentally loosened. The phone transfer must still never be executed.
@@ -315,6 +322,56 @@ def test_phone_worker_never_offers_or_executes_a_phantom_carrier_transfer(
     assert "Telephone transfers are not connected" in str(first["system"])
     with owner_engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM caller_messages")).scalar_one() == 0
+
+
+def test_phone_model_spend_refuses_missing_or_partial_notice_playout(
+    worker,
+    live,  # noqa: F811
+    make_account,
+    monkeypatch,
+    owner_engine,
+):
+    from app.voice import launch
+
+    from .test_worker_calls import assign_number
+
+    a = make_account("phone-notices-before-brain@example.com")
+    a.patch(a.o("/settings"), json={"locale": "en-GB"})
+    monkeypatch.setitem(
+        launch.SIGN_OFFS,
+        "GB",
+        tuple(launch.SignOff(c, "offline-test", "2026-12-01", f"test://{c}") for c in launch.CHECKS),
+    )
+    approve_mock_llm_for_test(monkeypatch, a)
+    ref = "room-phone-notices-001"
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=ref)
+    h = {"authorization": f"Bearer {token}"}
+    started = a.client.post(
+        "/v1/worker/calls",
+        json={"external_ref": ref, "called_number": assign_number(owner_engine, a.org_id)},
+        headers=h,
+    )
+    assert started.status_code == 201
+    cid = started.json()["id"]
+    request = {**body(rid="w-notices-001"), "conversation_id": ref}
+    assert a.client.post("/v1/worker/live/brain", json=request, headers=h).status_code == 403
+    first = a.client.post(
+        f"/v1/worker/calls/{cid}/notice-playback",
+        json={"notice": "ai_disclosure", "method": "livekit_speech_playout"},
+        headers=h,
+    )
+    assert first.status_code == 200
+    assert a.client.post("/v1/worker/live/brain", json=request, headers=h).status_code == 403
+    assert live["llm_requests"] == []  # refusal precedes the budget reservation/provider
+    assert a.client.post(
+        f"/v1/worker/calls/{cid}/notice-playback",
+        json={"notice": "recording_notice", "method": "livekit_speech_playout"},
+        headers=h,
+    ).status_code == 200
+    live["llm"] = [(200, message([("text", {"parts": ["I can help."]})], "end_turn", 8, 3))]
+    done = a.client.post("/v1/worker/live/brain", json=request, headers=h)
+    assert done.status_code == 200 and events(done)[-1]["type"] == "done"
+    assert len(live["llm_requests"]) == 1
 
 
 def test_signed_ref_must_be_well_formed_even_for_valid_hmac(worker):
