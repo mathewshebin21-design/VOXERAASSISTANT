@@ -30,7 +30,8 @@ from .brain import BrainClient
 from .guard import CallBoundTokens, is_phone, may_answer
 from .lifetime import CallLifetime
 from .media import MediaConfigError, MediaSettings, speech_settings
-from .policy import PolicyUnavailable, called_number, fetch_languages
+from .media_policy import fetch_authorized_languages
+from .policy import PolicyUnavailable, called_number
 from .recording import CallRecorder, room_ref
 from .session import CallSession, LanguageGate
 from .tokens import StaticToken, TokenSource, command_fetch
@@ -102,10 +103,11 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx.shutdown(reason="speech media unavailable")
         return
     api = os.environ["VOXERA_API_URL"]
-    # The languages come from the workspace's saved policy, read with this call's token. No policy,
-    # no call: refuse before any record is opened or anything is said.
+    # The same tenant-scoped policy authorizes languages AND exact STT/TTS models.
+    # Missing provider attestations, paid consent, region or language evidence refuse
+    # the call before a record or a media session is started.
     try:
-        default, accepted = await fetch_languages(api, tokens)
+        default, accepted = await fetch_authorized_languages(api, tokens, media)
     except PolicyUnavailable as e:
         log.warning("refusing call: voice policy unavailable", extra={"reason": str(e)})
         ctx.shutdown(reason="voice policy unavailable")
