@@ -123,7 +123,9 @@ def test_untrusted_phone_event_metadata_never_survives_before_recording_notice(
             },
         },
     ]
-    assert a.client.post(f"/v1/worker/calls/{cid}/events", json={"events": events}, headers=_h(token)).status_code == 201
+    assert (
+        a.client.post(f"/v1/worker/calls/{cid}/events", json={"events": events}, headers=_h(token)).status_code == 201
+    )
     result = a.get(a.o(f"/calls/{cid}")).json()
     assert secret not in str(result["events"])
     assert [e["data"] for e in result["events"]] == [
@@ -149,9 +151,7 @@ def test_untrusted_phone_event_metadata_never_survives_before_recording_notice(
         a.client.post(
             f"/v1/worker/calls/{cid}/events",
             json={
-                "events": [
-                    {"kind": "utterance", "speaker": "caller", "text": "hello", "data": {"language": "en-GB"}}
-                ]
+                "events": [{"kind": "utterance", "speaker": "caller", "text": "hello", "data": {"language": "en-GB"}}]
             },
             headers=_h(token),
         ).status_code
