@@ -439,6 +439,9 @@ class CaseOut(Out):
     assigned_to: uuid.UUID | None
     assignee_name: str | None = None
     assigned_at: datetime | None
+    staff_acknowledged_at: datetime | None = None
+    staff_acknowledged_by: uuid.UUID | None = None
+    staff_acknowledged_by_name: str | None = None
     resolution: str | None
     resolved_at: datetime | None
     resolved_by: uuid.UUID | None

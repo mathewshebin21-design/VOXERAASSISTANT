@@ -199,6 +199,74 @@ def test_claiming_is_first_come_first_served_and_cases_have_notes(make_account):
     assert sam.post(sam.o(f"/cases/{case['id']}/assign"), json={"user_id": None}).json()["status"] == "new"
 
 
+def test_staff_explicit_acknowledgement_is_separate_from_assignment_and_is_idempotent(make_account, owner_engine):
+    owner = make_account("ack-owner@example.com")
+    sam, kim = desk_team(owner, "ack-sam", "ack-kim")
+    created = owner.post(owner.o("/cases"), json={"summary": "Caller requested a return call", "assign_to_me": False})
+    assert created.status_code == 201
+    case_id = created.json()["id"]
+    assert created.json()["staff_acknowledged_at"] is None
+    assert created.json()["staff_acknowledged_by"] is None
+    assert sam.get(sam.o("/cases")).json()[0]["staff_acknowledged_at"] is None
+
+    claimed = sam.post(sam.o(f"/cases/{case_id}/claim"))
+    assert claimed.status_code == 200
+    assert claimed.json()["assigned_to"] == sam.user_id
+    assert claimed.json()["staff_acknowledged_at"] is None  # claim alone is not receipt
+
+    assert kim.post(kim.o(f"/cases/{case_id}/acknowledge")).status_code == 409
+    first = sam.post(sam.o(f"/cases/{case_id}/acknowledge"))
+    assert first.status_code == 200
+    receipt = first.json()
+    assert receipt["staff_acknowledged_by"] == sam.user_id
+    assert receipt["staff_acknowledged_by_name"] == "Ack-Sam"
+    assert receipt["staff_acknowledged_at"] is not None
+    same = sam.post(sam.o(f"/cases/{case_id}/acknowledge"))
+    assert same.status_code == 200
+    assert same.json()["staff_acknowledged_at"] == receipt["staff_acknowledged_at"]
+    assert kim.post(kim.o(f"/cases/{case_id}/acknowledge")).status_code == 409
+
+    listed = owner.get(owner.o("/cases")).json()[0]
+    detailed = owner.get(owner.o(f"/cases/{case_id}")).json()
+    assert listed["staff_acknowledged_by"] == detailed["staff_acknowledged_by"] == sam.user_id
+    with owner_engine.connect() as db:
+        records = db.execute(
+            text(
+                "SELECT actor_user_id, details FROM audit_logs WHERE organization_id = :o "
+                "AND target_id = :id AND action = 'case.staff_acknowledged'"
+            ),
+            {"o": owner.org_id, "id": case_id},
+        ).all()
+    assert len(records) == 1
+    assert str(records[0].actor_user_id) == sam.user_id
+    assert records[0].details == {"channel": "staff_desk", "evidence": "explicit_staff_action"}
+
+    # Reassigning never creates another acknowledgement and does not change who read it.
+    assert (
+        owner.post(owner.o(f"/cases/{case_id}/assign"), json={"user_id": kim.user_id}).json()["staff_acknowledged_by"]
+        == sam.user_id
+    )
+
+
+def test_acknowledging_a_case_requires_staff_role_open_case_and_own_tenant(make_account):
+    owner = make_account("ack-owner-2@example.com")
+    sam, kim = desk_team(owner, "ack-team-1", "ack-team-2")
+    viewer = make_account("ack-viewer@example.com")
+    join(owner, viewer, "viewer")
+    viewer.org_id = owner.org_id
+    outsider = make_account("ack-outsider@example.com")
+    created = owner.post(owner.o("/cases"), json={"summary": "Important request", "assign_to_me": False}).json()
+    cid = created["id"]
+    assert viewer.post(viewer.o(f"/cases/{cid}/acknowledge")).status_code == 403
+    assert outsider.post(outsider.o(f"/cases/{cid}/acknowledge")).status_code == 404
+    assert owner.post(owner.o(f"/cases/{cid}/assign"), json={"user_id": sam.user_id}).status_code == 200
+    assert kim.post(kim.o(f"/cases/{cid}/acknowledge")).status_code == 409
+    assert owner.get(owner.o(f"/cases/{cid}")).json()["staff_acknowledged_at"] is None
+    assert owner.post(owner.o(f"/cases/{cid}/resolve"), json={"resolution": "Handled"}).status_code == 200
+    assert sam.post(sam.o(f"/cases/{cid}/acknowledge")).status_code == 409
+    assert owner.get(owner.o(f"/cases/{cid}")).json()["staff_acknowledged_at"] is None
+
+
 def test_resolving_a_transferred_call_frees_the_employee(make_account, live, tool_input):  # noqa: F811
     owner = make_account("ada@example.com")
     owner.put(owner.o("/office-hours"), json=ALL_WEEK)

@@ -73,6 +73,7 @@ export interface CaseNote { id: string; author_id: string | null; author_name: s
 export interface DeskCase {
   id: string; kind: CaseKind; caller_name: string | null; caller_phone: string | null; summary: string; reason: string | null;
   urgent: boolean; status: CaseStatus; source: string; assigned_to: string | null; assignee_name: string | null; assigned_at: string | null;
+  staff_acknowledged_at: string | null; staff_acknowledged_by: string | null; staff_acknowledged_by_name: string | null;
   resolution: string | null; resolved_at: string | null; resolved_by: string | null; created_at: string; updated_at: string; notes?: CaseNote[];
 }
 export interface DeskMember { user_id: string; full_name: string; role: Role; status: DeskStatus; status_since: string | null; open_cases: number }

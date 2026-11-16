@@ -117,6 +117,25 @@ processors, SIP metadata, logs and billing systems still require independently
 reviewed processing/retention agreements, deletion controls and real tests.
 The existence of an SDK acknowledgement is not consent or remote receipt.
 
+## Explicit staff-desk acknowledgement (draft, not an external delivery receipt)
+
+A queued caller message is not proof that a person was notified or read it.
+Likewise, assigning or claiming a case does not constitute a delivery or
+acknowledgement receipt. This draft adds an authenticated **Acknowledge receipt**
+action for an open case, which writes an immutable, actor-attributed audit event
+only after an employee explicitly clicks. The shared desk displays an
+unacknowledged state until then, and shows who acknowledged it and when.
+The event is idempotent and tenant-bound; an already-assigned case may only
+be acknowledged by the assignee. No new database schema/migration is needed.
+
+This evidence means **a logged-in employee acknowledged the case in the web
+desk**. It is NOT an email delivery receipt, push delivery, proof that a caller
+was contacted, or acceptance of a carrier transfer. External notification
+dispatch, provider delivery receipts, acknowledgement SLA/escalation, and
+caller-contact outcomes require separate integrations and tests. Never claim
+"staff notified" solely because a case exists, was assigned, or was acknowledged
+by a different channel.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
