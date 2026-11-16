@@ -336,8 +336,11 @@ def set_presence(db: Session, org_id: uuid.UUID, user_id: uuid.UUID, status: Des
     return a
 
 
-def pick_available_agent(db: Session, org_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
+def pick_available_agent(
+    db: Session, org_id: uuid.UUID, roles: tuple[Role, ...] | None = None
+) -> tuple[uuid.UUID, str] | None:
     """The available employee with the fewest open cases, then the one who waited longest."""
+    eligible_roles = DESK_ROLES if roles is None else tuple(role for role in DESK_ROLES if role in roles)
     open_cases = (
         select(CallerMessage.assigned_to, func.count().label("n"))
         .where(CallerMessage.organization_id == org_id, CallerMessage.status == CallerMessageStatus.in_progress)
@@ -352,7 +355,7 @@ def pick_available_agent(db: Session, org_id: uuid.UUID) -> tuple[uuid.UUID, str
         .where(
             DeskAgent.organization_id == org_id,
             DeskAgent.status == DeskStatus.available,
-            Membership.role.in_(DESK_ROLES),
+            Membership.role.in_(eligible_roles),
         )
         .order_by(func.coalesce(open_cases.c.n, 0), DeskAgent.last_assigned_at.asc().nulls_first())
         .limit(1)
@@ -384,6 +387,7 @@ def hand_off(
     phone: str | None,
     urgent: bool,
     now: datetime | None = None,
+    roles: tuple[Role, ...] | None = None,
 ) -> Handoff:
     """Routes a caller who needs a person.
 
@@ -395,7 +399,7 @@ def hand_off(
     if not is_open(db, d, now):
         case = leave_message(db, d, CallerMessageKind.callback, summary, name, phone, reason, urgent)
         return Handoff(case, "callback")
-    pick = pick_available_agent(db, d.org_id)
+    pick = pick_available_agent(db, d.org_id, roles)
     case = leave_message(db, d, CallerMessageKind.transfer, summary, name, phone, reason, urgent)
     if pick is None:
         return Handoff(case, "queued")
