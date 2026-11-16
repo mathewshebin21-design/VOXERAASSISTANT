@@ -359,11 +359,13 @@ def worker_notice_playback(
             db,
             worker.org_id,
             call.id,
-            [{
-                "kind": "system",
-                "speaker": "system",
-                "data": {"event": "notice_playout_reported", "notice": body.notice, "method": body.method},
-            }],
+            [
+                {
+                    "kind": "system",
+                    "speaker": "system",
+                    "data": {"event": "notice_playout_reported", "notice": body.notice, "method": body.method},
+                }
+            ],
         )
     except calls_mod.CallError as e:
         raise _fail(e) from None
