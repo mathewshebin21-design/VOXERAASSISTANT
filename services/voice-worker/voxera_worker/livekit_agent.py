@@ -27,7 +27,7 @@ from collections.abc import AsyncIterable
 from livekit.agents import Agent, AgentSession, JobContext, ModelSettings, WorkerOptions, cli, inference, llm
 
 from .brain import BrainClient
-from .guard import CallBoundTokens, is_phone, may_answer
+from .guard import CallBoundTokens, is_phone, may_answer, sip_ingress_refusal
 from .lifetime import CallLifetime
 from .media import MediaConfigError, MediaSettings, speech_settings
 from .media_policy import fetch_authorized_languages
@@ -103,6 +103,15 @@ async def entrypoint(ctx: JobContext) -> None:
         log.warning("refusing call", extra={"reason": str(e)})
         ctx.shutdown(reason="worker channel mismatch")
         return
+    if is_phone(caller):
+        # A token with the right room and channel is not itself proof of an
+        # approved inbound trunk. Refuse unknown dispatch, call ID or number
+        # before any speech provider/policy request or call-record side effect.
+        reason = sip_ingress_refusal(caller, called_number(caller))
+        if reason is not None:
+            log.warning("refusing unapproved SIP origin", extra={"reason": reason})
+            ctx.shutdown(reason="unapproved SIP origin")
+            return
     # Validate before opening a call record: an unconfigured worker must not
     # admit a caller, create records, or silently trigger provider inference.
     try:
