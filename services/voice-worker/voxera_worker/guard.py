@@ -11,8 +11,47 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from types import MappingProxyType
 
 SIP_KIND = 3  # livekit.rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+
+# Source-reviewed LiveKit inbound trunk + dispatch rule -> allowed dialled numbers.
+# There are deliberately NO approved routes. This is independent of the SIP flag,
+# country launch signoffs, worker token, assigned-number check, and media policy.
+# An operator must obtain separate infrastructure and commercial approval before
+# any real tuple can be added; environment variables cannot expand this registry.
+APPROVED_INBOUND_ROUTES = MappingProxyType({})
+SIP_READY_STATES = frozenset({"ringing", "active"})
+
+
+def sip_ingress_refusal(participant: object, dialed_number: str | None) -> str | None:
+    """Reject unreviewed/outbound SIP routes before any provider, record, or media starts.
+
+    LiveKit supplies these participant attributes; they are NOT by themselves
+    cryptographic carrier attestations. The approved LiveKit server, inbound trunk
+    authentication, dispatch configuration and carrier logs need separate review.
+    Only the API's signature verification and assigned-number check prove the
+    tenant authorization. Do not log call IDs or caller telephone numbers.
+    """
+    if not is_phone(participant):
+        return "SIP origin verification requires a SIP participant"
+    attrs = getattr(participant, "attributes", None)
+    if not isinstance(attrs, dict):
+        return "SIP attributes are unavailable"
+    trunk = attrs.get("sip.trunkID")
+    rule = attrs.get("sip.ruleID")
+    if not isinstance(trunk, str) or not trunk or not isinstance(rule, str) or not rule:
+        return "inbound SIP trunk or dispatch rule missing"
+    if attrs.get("sip.callStatus") not in SIP_READY_STATES:
+        return "SIP call is not ringing or active"
+    for field in ("sip.callID", "sip.callIDFull"):
+        value = attrs.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return "SIP call identity is unavailable"
+    allowed_numbers = APPROVED_INBOUND_ROUTES.get((trunk, rule), frozenset())
+    if not dialed_number or dialed_number not in allowed_numbers:
+        return "inbound SIP route and dialled number are not approved"
+    return None
 
 
 def claims(token: str) -> dict:
