@@ -101,19 +101,25 @@ def test_untrusted_phone_event_metadata_never_survives_before_recording_notice(
     secret = "synthetic-private-call-content"
     events = [
         {
-            "kind": "utterance", "speaker": "caller", "text": secret,
+            "kind": "utterance",
+            "speaker": "caller",
+            "text": secret,
             "data": {"language": secret, "nested": {"caller_name": secret}},
         },
         {
-            "kind": "tool", "speaker": "agent",
+            "kind": "tool",
+            "speaker": "agent",
             "data": {"name": "take_message", "args": {"caller_phone": secret, "message": secret}},
         },
         {
             # A worker must never spoof the server's notice event or consent flags.
-            "kind": "system", "speaker": "system",
+            "kind": "system",
+            "speaker": "system",
             "data": {
-                "event": "notice_playout_reported", "notice": "ai_disclosure",
-                "method": "livekit_speech_playout", "phone": secret,
+                "event": "notice_playout_reported",
+                "notice": "ai_disclosure",
+                "method": "livekit_speech_playout",
+                "phone": secret,
             },
         },
     ]
@@ -139,12 +145,18 @@ def test_untrusted_phone_event_metadata_never_survives_before_recording_notice(
     assert ack(a, token, cid, "recording_notice").status_code == 200
     assert secret not in str(a.get(a.o(f"/calls/{cid}")).json()["events"])
     # Later, recorded and permitted events retain their ordinary metadata.
-    assert a.client.post(
-        f"/v1/worker/calls/{cid}/events",
-        json={"events": [{"kind": "utterance", "speaker": "caller", "text": "hello",
-                           "data": {"language": "en-GB"}}]},
-        headers=_h(token),
-    ).status_code == 201
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{cid}/events",
+            json={
+                "events": [
+                    {"kind": "utterance", "speaker": "caller", "text": "hello", "data": {"language": "en-GB"}}
+                ]
+            },
+            headers=_h(token),
+        ).status_code
+        == 201
+    )
     tail = a.get(a.o(f"/calls/{cid}")).json()["events"][-1]
     assert tail["text"] == "hello" and tail["data"] == {"language": "en-GB"}
 
