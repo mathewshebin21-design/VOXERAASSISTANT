@@ -15,8 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from .. import audit, reception
-from .. import calls as calls_mod
+from .. import audit, calls as calls_mod, reception
 from ..deps import DB, OrgContext, client_meta, require
 from ..models import Call, CallEvent, CallerMessage, CallerMessageKind
 from ..permissions import Perm
