@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from .. import audit, reception
 from ..deps import DB, OrgContext, client_meta, require
 from ..models import (
+    AuditLog,
     Appointment,
     AppointmentStatus,
     CallerMessage,
@@ -179,16 +180,42 @@ def _names(db, ids) -> dict[uuid.UUID, str]:
     return {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_(ids)))}
 
 
-def _out(c: CallerMessage, names: dict) -> CaseOut:
+def _staff_acknowledgements(db, org_id: uuid.UUID, case_ids: list[uuid.UUID]) -> dict[str, AuditLog]:
+    """Source of truth is immutable, actor-attributed audit history, never case assignment."""
+    if not case_ids:
+        return {}
+    rows = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.organization_id == org_id,
+            AuditLog.action == "case.staff_acknowledged",
+            AuditLog.target_type == "caller_message",
+            AuditLog.target_id.in_([str(case_id) for case_id in case_ids]),
+        )
+        .order_by(AuditLog.created_at, AuditLog.id)
+    )
+    first: dict[str, AuditLog] = {}
+    for row in rows:
+        if row.target_id is not None:
+            first.setdefault(row.target_id, row)
+    return first
+
+
+def _out(c: CallerMessage, names: dict, ack: AuditLog | None = None) -> CaseOut:
     o = CaseOut.model_validate(c)
     o.assignee_name = names.get(c.assigned_to)
+    if ack is not None:
+        o.staff_acknowledged_at = ack.created_at
+        o.staff_acknowledged_by = ack.actor_user_id
+        o.staff_acknowledged_by_name = names.get(ack.actor_user_id)
     return o
 
 
 def _detail(db, c: CallerMessage) -> CaseDetail:
     notes = list(db.scalars(select(CaseNote).where(CaseNote.case_id == c.id).order_by(CaseNote.created_at)))
-    names = _names(db, [c.assigned_to, *(n.author_id for n in notes)])
-    d = CaseDetail(**_out(c, names).model_dump())
+    ack = _staff_acknowledgements(db, c.organization_id, [c.id]).get(str(c.id))
+    names = _names(db, [c.assigned_to, *(n.author_id for n in notes), ack.actor_user_id if ack else None])
+    d = CaseDetail(**_out(c, names, ack).model_dump())
     d.notes = [
         CaseNoteOut(**CaseNoteOut.model_validate(n).model_dump() | {"author_name": names.get(n.author_id)})
         for n in notes
@@ -254,8 +281,9 @@ def list_cases(
     if mine:
         q = q.where(CallerMessage.assigned_to == ctx.user.id)
     rows = list(db.scalars(q.order_by(CallerMessage.urgent.desc(), CallerMessage.created_at.desc()).limit(limit)))
-    names = _names(db, [c.assigned_to for c in rows])
-    return [_out(c, names) for c in rows]
+    acks = _staff_acknowledgements(db, ctx.org_id, [c.id for c in rows])
+    names = _names(db, [*(c.assigned_to for c in rows), *(a.actor_user_id for a in acks.values())])
+    return [_out(c, names, acks.get(str(c.id))) for c in rows]
 
 
 @router.post("/cases", response_model=CaseDetail, status_code=status.HTTP_201_CREATED)
@@ -284,6 +312,44 @@ def log_case(body: CaseIn, ctx: Manager, db: DB, request: Request) -> CaseDetail
 @router.get("/cases/{case_id}", response_model=CaseDetail)
 def get_case(case_id: uuid.UUID, ctx: Reader, db: DB) -> CaseDetail:
     return _detail(db, _case(db, ctx, case_id))
+
+
+@router.post("/cases/{case_id}/acknowledge", response_model=CaseDetail)
+def acknowledge_case(case_id: uuid.UUID, ctx: Manager, db: DB, request: Request) -> CaseDetail:
+    """Explicit staff action: read/accepted in the desk, NOT an email/push delivery receipt.
+
+    The case lock serializes acknowledgements across employees; repeated clicks
+    from the same person are idempotent. Nobody is auto-acknowledged by claim,
+    assignment, polling, page load, or an AI message being queued.
+    """
+    case = db.scalar(
+        select(CallerMessage)
+        .where(CallerMessage.organization_id == ctx.org_id, CallerMessage.id == case_id)
+        .with_for_update()
+    )
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    ack = _staff_acknowledgements(db, ctx.org_id, [case.id]).get(str(case.id))
+    if ack is not None:
+        if ack.actor_user_id != ctx.user.id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Another employee already acknowledged this case")
+        return _detail(db, case)
+    if case.status == CallerMessageStatus.resolved:
+        raise HTTPException(status.HTTP_409_CONFLICT, "A resolved case cannot be newly acknowledged")
+    if case.assigned_to is not None and case.assigned_to != ctx.user.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This case belongs to another employee")
+    audit.record(
+        db,
+        ctx.org_id,
+        ctx.user.id,
+        "case.staff_acknowledged",
+        "caller_message",
+        case.id,
+        {"channel": "staff_desk", "evidence": "explicit_staff_action"},
+        client_meta(request),
+    )
+    db.commit()
+    return _detail(db, case)
 
 
 @router.post("/cases/{case_id}/claim", response_model=CaseDetail)
