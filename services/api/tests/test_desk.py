@@ -219,7 +219,7 @@ def test_staff_explicit_acknowledgement_is_separate_from_assignment_and_is_idemp
     assert first.status_code == 200
     receipt = first.json()
     assert receipt["staff_acknowledged_by"] == sam.user_id
-    assert receipt["staff_acknowledged_by_name"] == "Ack-sam"
+    assert receipt["staff_acknowledged_by_name"] == "Ack-Sam"
     assert receipt["staff_acknowledged_at"] is not None
     same = sam.post(sam.o(f"/cases/{case_id}/acknowledge"))
     assert same.status_code == 200
