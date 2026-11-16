@@ -177,6 +177,10 @@ if (process.env.LIVE_FAKES === "1") {
     const busy = await p.getByRole("radio", { name: "busy" }).getAttribute("aria-checked");
     await p.getByRole("tab", { name: "Mine" }).click();
     await p.getByTestId("case-list").getByText("Caller said: Can I speak to someone please?").click();
+    await p.getByTestId("staff-acknowledgement").getByText(/nobody has explicitly acknowledged/i).waitFor();
+    await p.getByRole("button", { name: "Acknowledge receipt" }).click();
+    await status(p, "Staff receipt acknowledged");
+    await p.getByTestId("staff-acknowledgement").getByText(/Staff acknowledged receipt/i).waitFor();
     await p.getByLabel("Add a note").fill("Called back, booked a consultation");
     await p.getByRole("button", { name: "Add", exact: true }).click();
     await p.getByTestId("case-detail").getByText("Called back, booked a consultation").waitFor({ timeout: 8000 });
