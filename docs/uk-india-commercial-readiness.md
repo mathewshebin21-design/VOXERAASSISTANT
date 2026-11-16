@@ -136,6 +136,41 @@ caller-contact outcomes require separate integrations and tests. Never claim
 "staff notified" solely because a case exists, was assigned, or was acknowledged
 by a different channel.
 
+## Staff-notification outbox and delivery evidence (draft migration 0013)
+
+An AI-created staff case now writes a **PII-free notification intent** in the
+same PostgreSQL transaction. The outbox stores a case identifier and a
+workspace identifier only (not caller text, phone number or staff email).
+The companion append-only attempt log is tenant-isolated and records lease
+reservations and results, including bounded exponential backoff and a dead
+state. PostgreSQL RLS, composite tenant foreign keys and one-outbox-per-case
+uniqueness are tested against a real temporary database. Acknowledged or
+resolved cases are cancelled before dispatch.
+
+The state machine keeps **four different facts** distinct:
+
+1. `pending` / `retry`: notification is queued, **not sent**.
+2. `provider_accepted`: a future provider has accepted a request, **not proof
+   of delivery**.
+3. `delivered`: a future trusted, authenticated provider delivery receipt
+   was received, **not proof staff read it**.
+4. `case.staff_acknowledged`: a logged-in employee explicitly acknowledged
+   the case in the web desk, **not proof of a callback**.
+
+**No external email, SMS, push, or telephony transport exists in this draft.**
+The database functions are invoked only by isolated, stand-in provider tests;
+there is no live scheduler, send endpoint, credential, secret or webhook adapter.
+Any future transport must have independently approved recipient selection,
+opt-out and country-specific lawful basis, strict message minimisation,
+provider receipt signature validation, rate/cost limits, delivery retries and
+idempotency, provider error redaction, escalation and hosted acceptance.
+Never let a `VOXERA_ENV=test` setting bypass production launch rules.
+
+Migration 0013 is an isolated candidate only, not authorized on shared
+staging or production. Schema 0012 preview isolation and Vercel build-rate
+limits remain independent blockers. Migration/rollback, exact-head GitHub CI
+and peer review are required before promotion.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from . import staff_notifications
 from .models import (
     Appointment,
     AppointmentStatus,
@@ -309,6 +310,9 @@ def leave_message(
     )
     db.add(m)
     db.flush()
+    # One transaction: saved AI cases always have a durable notification
+    # intent, or neither row is committed. No external message is sent here.
+    staff_notifications.enqueue_case(db, m)
     return m
 
 
