@@ -131,9 +131,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # the call's events without the caller's words. The room name makes the record restart-safe.
     # For a telephone call the dialled number goes with it; the API refuses a number that is not
     # assigned to the token's workspace, and then the call is not answered.
-    record_id = await call.begin(
-        external_ref=ref, called_number=called_number(caller) if is_phone(caller) else None
-    )
+    record_id = await call.begin(external_ref=ref, called_number=called_number(caller) if is_phone(caller) else None)
     if not may_answer(caller, record_id):
         # For SIP this API round-trip is the mandatory signed-token and country-gate check.
         # Call recording stays best-effort for simulated/non-phone participants only.
