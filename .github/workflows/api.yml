@@ -33,6 +33,8 @@ jobs:
       - name: Create database roles
         run: psql -h localhost -U postgres -f deploy/init-roles.sql
       - run: uv sync --frozen
+      - name: TEMP PR49 import diagnostics (remove before review)
+        run: uv run ruff check --diff app/routers/calls.py || true
       - run: uv run ruff check app tests migrations
       - run: uv run ruff format --check app tests migrations
       - run: uv run pytest -q
