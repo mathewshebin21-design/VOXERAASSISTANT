@@ -78,6 +78,20 @@ def test_restarting_worker_continues_the_same_call(worker, make_account):  # noq
     assert first.status_code == 201 and again.status_code == 200 and again.json()["id"] == first.json()["id"]
 
 
+def test_ended_worker_room_cannot_be_reopened_by_replaying_its_signed_reference(worker, make_account):  # noqa: F811
+    a = make_account("ended-room@example.com")
+    ref = "room-ended-replay01"
+    token = worker_auth.mint(uuid.UUID(a.org_id), call_ref=ref)
+    first = _start(a.client, token, external_ref=ref)
+    assert first.status_code == 201
+    assert a.client.post(
+        f"/v1/worker/calls/{first.json()['id']}/end",
+        json={"status": "completed"},
+        headers=_h(token),
+    ).status_code == 200
+    assert _start(a.client, token, external_ref=ref).status_code == 409
+
+
 def test_without_the_recording_notice_the_words_are_not_kept(worker, make_account):  # noqa: F811
     a = make_account("a@example.com")
     token = worker_auth.mint(uuid.UUID(a.org_id))
