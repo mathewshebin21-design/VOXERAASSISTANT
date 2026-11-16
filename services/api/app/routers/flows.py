@@ -1,7 +1,7 @@
-"""Agent Studio API: an agent's conversation flow — draft, validation, publish, versions, rollback.
+"""Agent Studio drafts, validation, published snapshots and simulation sessions.
 
-Edits only change the draft (autosaved with a revision number so two editors can't overwrite
-each other). Publishing validates the draft and stores an immutable numbered version; Studio simulations can run the published version. Telephone ingress has no Studio runtime binding.
+Draft edits use a revision number. Publishing validates a locked draft and stores an immutable
+snapshot for Studio simulations. Telephone ingress is configured separately.
 """
 
 import copy
