@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import reception, staff_notifications
@@ -185,9 +186,8 @@ def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(mak
         db.rollback()
     # The owner role validates the FK: a fake cross-tenant reference fails at
     # the database layer even with RLS bypassed by a migration owner.
-    with owner_engine.connect() as conn:
-        with pytest.raises(Exception):
-            conn.execute(
+    with owner_engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(
                 text(
                     "INSERT INTO staff_notification_outbox "
                     "(id, organization_id, case_id, channel, status, attempts, max_attempts) "
