@@ -18,7 +18,7 @@ from sqlalchemy import select
 from .. import audit
 from .. import calls as calls_mod
 from ..deps import DB, OrgContext, client_meta, require
-from ..models import Call, CallEvent, CallerMessage, CallerMessageKind
+from ..models import Call, CallerMessage, CallerMessageKind, CallEvent
 from ..permissions import Perm
 from ..reception import DeskError, desk, leave_message, normalise_phone
 from ..schemas import Strict
