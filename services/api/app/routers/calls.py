@@ -68,6 +68,13 @@ class CallEventsIn(Strict):
     events: list[CallEventIn] = Field(min_length=1, max_length=50)
 
 
+class WorkerNoticePlayedIn(Strict):
+    """Worker report after a full, uninterrupted LiveKit TTS playout; not carrier receipt proof."""
+
+    notice: Literal["ai_disclosure", "recording_notice"]
+    method: Literal["livekit_speech_playout"]
+
+
 class CallEndIn(Strict):
     status: Literal["completed", "failed"] = "completed"
     outcome: Outcome | None = None
@@ -263,6 +270,11 @@ def worker_start_call(
     if worker.channel == "phone" and worker.call_ref is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "A telephone call needs its own signed reference")
     if worker.channel == "phone":
+        # A client-supplied start flag is not evidence of speech playout. Always
+        # start phone calls with no transcript retention and require a later
+        # call-bound, ordered notice acknowledgement.
+        if body.ai_disclosure_played or body.recording_notice_played:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Telephone notices require completed playout receipts")
         # The same answer whether the number is unknown, disabled or another workspace's: row-level
         # security hides other workspaces' numbers, so nothing here reveals who owns a number.
         if body.called_number is None or not policy_mod.owns_active_number(db, worker.org_id, body.called_number):
@@ -303,6 +315,69 @@ def _worker_call(db: DB, worker: WorkerContext, call_id: uuid.UUID) -> Call:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
     if worker.call_ref is not None and call.external_ref != worker.call_ref:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
+    return call
+
+
+@worker_router.post("/{call_id}/notice-playback", response_model=CallOut)
+def worker_notice_playback(
+    call_id: uuid.UUID,
+    body: WorkerNoticePlayedIn,
+    worker: Annotated[WorkerContext, Depends(worker_context)],
+    db: DB,
+    request: Request,
+) -> Call:
+    """Record a completed speech-output checkpoint. Never infer remote carrier delivery.
+
+    Only a signed, call-bound phone worker can attest a playout. The call row
+    serializes notice order and retries. No user text or audio is stored here.
+    The recording flag controls retention of *subsequent* utterance events only.
+    """
+    if worker.mode != "live" or worker.channel != "phone" or worker.call_ref is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a call-bound telephone worker may attest playout")
+    try:
+        call = calls_mod.get(db, worker.org_id, call_id, lock=True)
+    except calls_mod.CallError as e:
+        raise _fail(e) from None
+    if call.created_by is not None or call.channel != "phone" or call.external_ref != worker.call_ref:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
+    if call.status != "in_progress":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cannot attest notices after the call ended")
+    if body.notice == "recording_notice" and not call.ai_disclosure_played:
+        raise HTTPException(status.HTTP_409_CONFLICT, "AI disclosure must finish before recording notice")
+
+    already = call.ai_disclosure_played if body.notice == "ai_disclosure" else call.recording_notice_played
+    if already:
+        return call  # retry receipt; do not duplicate an audit entry or system event
+    if body.notice == "ai_disclosure":
+        call.ai_disclosure_played = True
+    else:
+        call.recording_notice_played = True
+        call.transcript_retained = True  # prior withheld text stays withheld permanently
+
+    try:
+        calls_mod.append(
+            db,
+            worker.org_id,
+            call.id,
+            [{
+                "kind": "system",
+                "speaker": "system",
+                "data": {"event": "notice_playout_reported", "notice": body.notice, "method": body.method},
+            }],
+        )
+    except calls_mod.CallError as e:
+        raise _fail(e) from None
+    audit.record(
+        db,
+        worker.org_id,
+        None,
+        "call.notice_playout_reported",
+        "call",
+        call.id,
+        {"notice": body.notice, "by": "worker"},
+        client_meta(request),
+    )
+    db.commit()
     return call
 
 
