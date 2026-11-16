@@ -42,10 +42,7 @@ MESSAGE_DONE = (
     "Thank you. I can't confirm the team received your message. "
     "Please contact the business directly if you need a response."
 )
-MESSAGE_SAVED = (
-    "Your message has been saved for the team to review. "
-    "I can't guarantee when someone will reply."
-)
+MESSAGE_SAVED = "Your message has been saved for the team to review. I can't guarantee when someone will reply."
 CLOSING = "I'm sorry, we've reached the time limit for this call. The team will be happy to help if you call back."
 ENDED = "I'm sorry, I can't continue this call right now. Please call back and the team will be happy to help."
 
