@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -418,6 +419,79 @@ class CallerMessage(Base):
     __table_args__ = (
         Index("ix_caller_messages_org_time", "organization_id", "created_at"),
         Index("ix_caller_messages_org_assignee", "organization_id", "assigned_to", "status"),
+    )
+
+
+class StaffNotificationOutbox(Base):
+    """Tenant-scoped durable case pointer: NOT an email or delivery receipt."""
+
+    __tablename__ = "staff_notification_outbox"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    channel: Mapped[str] = mapped_column(String(20), default="staff_email", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_ref: Mapped[str | None] = mapped_column(String(120))
+    provider_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(48))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "organization_id"],
+            ["caller_messages.id", "caller_messages.organization_id"],
+            name="fk_staff_notification_case_same_org",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("id", "organization_id", name="uq_staff_notification_id_org"),
+        UniqueConstraint("case_id", "channel", name="uq_staff_notification_once_per_case_channel"),
+        CheckConstraint("channel = 'staff_email'", name="ck_staff_notification_channel"),
+        CheckConstraint(
+            "status IN ('pending','leased','retry','provider_accepted','delivered','dead','cancelled')",
+            name="ck_staff_notification_status",
+        ),
+        CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
+                        name="ck_staff_notification_attempts"),
+        CheckConstraint("(status = 'leased') = (lease_until IS NOT NULL)",
+                        name="ck_staff_notification_lease_state"),
+        CheckConstraint("delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
+                        name="ck_staff_notification_delivered_requires_acceptance"),
+        Index("ix_staff_notification_due", "organization_id", "status", "next_attempt_at"),
+    )
+
+
+class StaffNotificationAttempt(Base):
+    """Append-only attempt stages; no caller content, recipient address or provider keys."""
+
+    __tablename__ = "staff_notification_attempts"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    notification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    result: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(48))
+    provider_ref: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["notification_id", "organization_id"],
+            ["staff_notification_outbox.id", "staff_notification_outbox.organization_id"],
+            name="fk_staff_notification_attempt_same_org",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("notification_id", "attempt_number", "result", name="uq_staff_notification_attempt_stage"),
+        CheckConstraint("attempt_number > 0", name="ck_staff_notification_attempt_number"),
+        CheckConstraint("result IN ('reserved','accepted','retry','dead')",
+                        name="ck_staff_notification_attempt_result"),
+        Index("ix_staff_notification_attempt_order", "notification_id", "attempt_number", "created_at"),
     )
 
 
