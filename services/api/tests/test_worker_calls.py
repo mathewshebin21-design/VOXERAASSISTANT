@@ -84,11 +84,14 @@ def test_ended_worker_room_cannot_be_reopened_by_replaying_its_signed_reference(
     token = worker_auth.mint(uuid.UUID(a.org_id), call_ref=ref)
     first = _start(a.client, token, external_ref=ref)
     assert first.status_code == 201
-    assert a.client.post(
-        f"/v1/worker/calls/{first.json()['id']}/end",
-        json={"status": "completed"},
-        headers=_h(token),
-    ).status_code == 200
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{first.json()['id']}/end",
+            json={"status": "completed"},
+            headers=_h(token),
+        ).status_code
+        == 200
+    )
     assert _start(a.client, token, external_ref=ref).status_code == 409
 
 
@@ -187,15 +190,13 @@ def test_scoped_simulated_token_refuses_other_calls_in_the_same_tenant(worker, m
     second = _start(a.client, two, external_ref=two_ref)
     assert first.status_code == second.status_code == 201
     second_id = second.json()["id"]
-    assert a.client.post(
-        f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(one)
-    ).status_code == 404
-    assert a.client.post(
-        f"/v1/worker/calls/{second_id}/end", json={}, headers=_h(one)
-    ).status_code == 404
-    assert a.client.post(
-        f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(two)
-    ).status_code == 201
+    assert (
+        a.client.post(f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(one)).status_code == 404
+    )
+    assert a.client.post(f"/v1/worker/calls/{second_id}/end", json={}, headers=_h(one)).status_code == 404
+    assert (
+        a.client.post(f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(two)).status_code == 201
+    )
 
 
 def test_phone_worker_token_is_bound_to_only_one_signed_call(worker, make_account, monkeypatch, owner_engine):  # noqa: F811
@@ -215,13 +216,13 @@ def test_phone_worker_token_is_bound_to_only_one_signed_call(worker, make_accoun
     second = _start(a.client, token_b, external_ref=b_ref, called_number=number)
     assert first.status_code == second.status_code == 201
     b_id = second.json()["id"]
-    assert a.client.post(
-        f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_a)
-    ).status_code == 404
+    assert (
+        a.client.post(f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_a)).status_code == 404
+    )
     assert a.client.post(f"/v1/worker/calls/{b_id}/end", json={}, headers=_h(token_a)).status_code == 404
-    assert a.client.post(
-        f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_b)
-    ).status_code == 201
+    assert (
+        a.client.post(f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_b)).status_code == 201
+    )
 
 
 @pytest.mark.parametrize("mode,channel", [("test", "simulated"), ("live", "phone")])
