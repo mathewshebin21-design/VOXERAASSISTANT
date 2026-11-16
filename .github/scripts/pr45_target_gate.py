@@ -35,7 +35,8 @@ def validate(env):
         except (TypeError, ValueError):
             valid = False
         if not valid:
-            raise ValueError("invalid isolated database connection")
+            # Identify the failing secret without printing its value or parsed credentials.
+            raise ValueError("invalid isolated database connection: " + key)
 
 
 if __name__ == "__main__":
