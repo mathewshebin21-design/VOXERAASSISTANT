@@ -397,7 +397,16 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
         await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "media startup failed"
-    assert events == ["connect", "participant", "policy", "record", "input_off", "media_start", "record_end", "shutdown"]
+    assert events == [
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "input_off",
+        "media_start",
+        "record_end",
+        "shutdown",
+    ]
     assert len(recordings) == len(sessions) == 1
     assert recordings[0].ends == [("failed", None, "media startup failed")]
     assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered
