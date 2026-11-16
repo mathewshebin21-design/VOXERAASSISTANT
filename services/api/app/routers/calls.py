@@ -280,6 +280,8 @@ def worker_start_call(
     if call.channel != _WORKER_CHANNEL[worker.channel] or call.created_by is not None:
         # The reference already names a member's test call, or a call on the other channel.
         raise HTTPException(status.HTTP_409_CONFLICT, "That reference belongs to a different kind of call")
+    if not created and call.status != "in_progress":
+        raise HTTPException(status.HTTP_409_CONFLICT, "An ended call cannot be restarted")
     if created:
         meta = client_meta(request)
         audit.record(
