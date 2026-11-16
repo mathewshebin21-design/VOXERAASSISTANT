@@ -8,15 +8,16 @@ import httpx
 from test_session import FakeBrain, ok, say
 
 from voxera_worker.recording import CallRecorder
-from voxera_worker.session import FILLER, MESSAGE_START, RECOVERY, CallSession, call_outcome, turn_events
+from voxera_worker.session import FILLER, MESSAGE_DONE, MESSAGE_SAVED, MESSAGE_START, RECOVERY, CallSession, call_outcome, turn_events
 
 
 class FakeRecords:
     """Stand-in for /v1/worker/calls: stores what the worker writes."""
 
-    def __init__(self, fail_events=False, slow_first=0.0, expire_once=False):
-        self.calls, self.events, self.ended, self.tokens = [], [], [], []
+    def __init__(self, fail_events=False, slow_first=0.0, expire_once=False, fail_fallback=False):
+        self.calls, self.events, self.ended, self.tokens, self.fallbacks = [], [], [], [], []
         self.fail_events, self.slow_first, self.expire_once = fail_events, slow_first, expire_once
+        self.fail_fallback = fail_fallback
         self.writes = 0
 
     def recorder(self, tokens=None):
@@ -38,6 +39,11 @@ class FakeRecords:
                     return httpx.Response(500, json={})
                 self.events += body["events"]
                 return httpx.Response(201, json=[])
+            if path.endswith("/fallback-message"):
+                self.fallbacks.append(body)
+                if self.fail_fallback:
+                    return httpx.Response(503)
+                return httpx.Response(201, json={"saved": True, "case_id": "case-1", "destination": "staff_queue"})
             if path.endswith("/end"):
                 self.ended.append(body)
                 return httpx.Response(200, json={})
@@ -117,6 +123,44 @@ async def test_unconfirmed_fallback_is_recorded_as_failed_not_as_a_delivered_mes
     assert fr.ended[0]["status"] == "failed" and fr.ended[0].get("outcome") is None
 
 
+async def test_acknowledged_fallback_is_saved_once_before_call_claims_message_taken():
+    fb = FakeBrain([(500, [], 0, 0), (500, [], 0, 0)])
+    fr = FakeRecords()
+    s = CallSession(fb.client(), recorder=fr.recorder())
+    await s.begin(ai_disclosure_played=True, recording_notice_played=True)
+    await say(s, "Hello")
+    await say(s, "Are you there?")
+    await say(s, "Sam Patel")
+    await say(s, "07700900123")
+    assert await say(s, "About my booking") == MESSAGE_SAVED
+    assert await say(s, "Anything else?") == MESSAGE_SAVED
+    await s.finish()
+    assert fr.fallbacks == [{
+        "caller_name": "Sam Patel",
+        "caller_phone": "07700900123",
+        "message": "About my booking",
+    }]
+    assert s.message_saved is True
+    assert fr.ended[0]["status"] == "completed" and fr.ended[0]["outcome"] == "message_taken"
+
+
+async def test_refused_fallback_never_promises_staff_received_a_message():
+    fb = FakeBrain([(500, [], 0, 0), (500, [], 0, 0)])
+    fr = FakeRecords(fail_fallback=True)
+    s = CallSession(fb.client(), recorder=fr.recorder())
+    await s.begin()
+    await say(s, "Hi")
+    await say(s, "Hello?")
+    await say(s, "Sam")
+    await say(s, "07700900123")
+    said = await say(s, "My booking")
+    await s.finish()
+    assert said == MESSAGE_DONE and "passed that on" not in said.lower()
+    assert not s.message_saved
+    assert len(fr.fallbacks) == 1
+    assert fr.ended[0]["status"] == "failed" and fr.ended[0].get("outcome") is None
+
+
 async def test_writes_stay_in_order_when_the_api_is_slow_and_never_hold_up_the_caller():
     fb = FakeBrain([(200, ok("One."), 0, 0), (200, ok("Two."), 0, 0)])
     fr = FakeRecords(slow_first=0.3)
@@ -181,6 +225,9 @@ def test_the_outcome_comes_from_what_actually_happened():
     assert call_outcome(_session_with([nothing], failures=1)) == ("failed", None)
     assert call_outcome(_session_with([nothing], message=[])) == ("failed", None)
     assert call_outcome(_session_with([nothing], message=["Sam"])) == ("failed", None)
+    saved = _session_with([nothing], message=["Sam", "+447700900123", "Booking"])
+    saved.message_saved = True
+    assert call_outcome(saved) == ("completed", "message_taken")
     assert call_outcome(_session_with([])) == ("completed", "no_action")
 
 
