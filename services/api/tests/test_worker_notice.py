@@ -38,7 +38,10 @@ def ack(account, token, call_id, notice):
 
 
 def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_withheld(
-    worker, make_account, monkeypatch, owner_engine  # noqa: F811
+    worker,
+    make_account,
+    monkeypatch,
+    owner_engine,  # noqa: F811
 ):
     a, token, ref, number = phone_setup(worker, make_account, monkeypatch, owner_engine)
     # Caller-supplied flags, even with a correctly signed token, cannot skip playback.
@@ -78,14 +81,20 @@ def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_wit
     assert a.client.post(f"/v1/worker/calls/{cid}/end", json={}, headers=_h(token)).status_code == 200
     assert ack(a, token, cid, "ai_disclosure").status_code == 409
     with owner_engine.connect() as db:
-        assert db.execute(
-            text("SELECT count(*) FROM call_events WHERE call_id = :id AND kind = 'system'"),
-            {"id": cid},
-        ).scalar_one() == 2
+        assert (
+            db.execute(
+                text("SELECT count(*) FROM call_events WHERE call_id = :id AND kind = 'system'"),
+                {"id": cid},
+            ).scalar_one()
+            == 2
+        )
 
 
 def test_notice_receipt_rejects_another_session_workspace_or_non_phone_channel(
-    worker, make_account, monkeypatch, owner_engine  # noqa: F811
+    worker,
+    make_account,
+    monkeypatch,
+    owner_engine,  # noqa: F811
 ):
     a, phone, ref, number = phone_setup(worker, make_account, monkeypatch, owner_engine)
     a_call = _start(a.client, phone, external_ref=ref, called_number=number).json()["id"]
@@ -96,15 +105,21 @@ def test_notice_receipt_rejects_another_session_workspace_or_non_phone_channel(
     assert ack(a, other_room, a_call, "ai_disclosure").status_code == 404
     assert ack(b, b_token, a_call, "ai_disclosure").status_code == 404
     assert ack(a, simulated, a_call, "ai_disclosure").status_code == 403
-    assert a.client.post(
-        f"/v1/worker/calls/{a_call}/notice-playback",
-        json={"notice": "ai_disclosure", "method": "from_client_only"},
-        headers=_h(phone),
-    ).status_code == 422
-    assert a.client.post(
-        f"/v1/worker/calls/{a_call}/notice-playback",
-        json={"notice": "ai_disclosure", "method": "livekit_speech_playout", "completed": False},
-        headers=_h(phone),
-    ).status_code == 422
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{a_call}/notice-playback",
+            json={"notice": "ai_disclosure", "method": "from_client_only"},
+            headers=_h(phone),
+        ).status_code
+        == 422
+    )
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{a_call}/notice-playback",
+            json={"notice": "ai_disclosure", "method": "livekit_speech_playout", "completed": False},
+            headers=_h(phone),
+        ).status_code
+        == 422
+    )
     assert ack(a, phone, str(uuid.uuid4()), "ai_disclosure").status_code == 404
     assert a.get(a.o(f"/calls/{a_call}")).json()["ai_disclosure_played"] is False
