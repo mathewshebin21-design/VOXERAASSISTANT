@@ -266,9 +266,7 @@ async def test_missing_tts_model_refuses_before_call_record_or_media(monkeypatch
     ("mode", "channel", "kind"),
     [("test", "simulated", 0), ("live", "phone", SIP_KIND)],
 )
-async def test_unreviewed_media_is_refused_for_test_and_phone_channels_before_record(
-    monkeypatch, mode, channel, kind
-):
+async def test_unreviewed_media_is_refused_for_test_and_phone_channels_before_record(monkeypatch, mode, channel, kind):
     """A test worker token must never turn an unreviewed model into an approved one."""
     import httpx
 
