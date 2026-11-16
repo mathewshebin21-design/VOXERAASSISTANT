@@ -13,9 +13,9 @@ The customer-facing voice lab uses separate, existing budget controls.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 from .routing import VoicePolicy
 
