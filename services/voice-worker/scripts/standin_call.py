@@ -39,6 +39,11 @@ async def main(api: str, mint: str | None) -> int:
     if host in PRODUCTION or "confident-shannon" in host:
         print("standin_call: refusing to run against production", file=sys.stderr)
         return 2
+    # This harness may produce billable requests outside CI; explicitly restrict
+    # it to locally hosted fake providers. Hosted acceptance has separate gates.
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        print("standin_call: refusing external API; use a local fake-provider server", file=sys.stderr)
+        return 2
     password = secrets.token_urlsafe(24)
     email = f"worker-{uuid.uuid4().hex[:10]}@standin.example"
     async with httpx.AsyncClient(base_url=api, timeout=30) as http:
