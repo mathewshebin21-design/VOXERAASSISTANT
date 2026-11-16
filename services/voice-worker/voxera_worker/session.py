@@ -34,11 +34,14 @@ from .recording import CallRecorder
 FILLER = "One moment, I'm just checking that."
 RECOVERY = "Sorry, I'm having a little trouble with that. Could you say it again?"
 MESSAGE_START = (
-    "I'm sorry, I'm having trouble on my side. I'll take a message so the team can call you back. "
-    "Could I take your name, please?"
+    "I'm sorry, I'm having trouble on my side. I can note your details, "
+    "but I can't confirm they'll reach the team. Could I take your name, please?"
 )
 MESSAGE_STEPS = ("And the best number to reach you on?", "And briefly, what is it about?")
-MESSAGE_DONE = "Thank you. I've passed that on and the team will call you back as soon as they can."
+MESSAGE_DONE = (
+    "Thank you. I can't confirm the team received your message. "
+    "Please contact the business directly if you need a response."
+)
 CLOSING = "I'm sorry, we've reached the time limit for this call. The team will be happy to help if you call back."
 ENDED = "I'm sorry, I can't continue this call right now. Please call back and the team will be happy to help."
 
@@ -328,7 +331,9 @@ def call_outcome(session: CallSession) -> tuple[str, str | None]:
             if tool.get("ok") and tool.get("name") in _TOOL_OUTCOME:
                 return "completed", _TOOL_OUTCOME[tool["name"]]
     if session.message_mode:
-        return "completed", "message_taken" if session.message else "no_action"
+        # Volatile worker memory does not prove a durable staff case or delivered callback request.
+        # Until delivery is acknowledged, this failed brain call must not be reported as handled.
+        return "failed", None
     if not answered and session.failures:
         return "failed", None
     return "completed", "answered" if answered else "no_action"
