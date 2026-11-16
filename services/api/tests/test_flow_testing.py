@@ -1,5 +1,8 @@
 """Agent Testing Lab: the standard scenarios, custom tests, and the publish gate."""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 from .test_flow_engine import WEEK, shop  # noqa: F401  (shop is a fixture)
@@ -28,6 +31,23 @@ def test_the_twelve_standard_scenarios_pass_on_the_default_flow(shop, locale):  
     assert "voice" in booking["kind"] and "not tested" in booking["kind"]
     assert any(t["name"] == "book_appointment" and t["ok"] for t in booking["tool_calls"])
     assert report["filled"]["service"] == "Beard trim"  # first active service, alphabetically
+
+
+def test_concurrent_first_reads_seed_one_default_suite(shop):  # noqa: F811
+    start = Barrier(4, timeout=10)
+
+    def list_tests():
+        start.wait()
+        response = shop.get(shop.flow("/tests"))
+        assert response.status_code == 200, response.text
+        return [test["id"] for test in response.json()]
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        requests = [pool.submit(list_tests) for _ in range(4)]
+        suites = [request.result() for request in requests]
+
+    assert len(set(suites[0])) == 12
+    assert all(suite == suites[0] for suite in suites)
 
 
 def test_test_runs_never_write(shop, owner_engine):  # noqa: F811

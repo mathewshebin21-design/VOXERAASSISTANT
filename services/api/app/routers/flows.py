@@ -439,7 +439,8 @@ def _test_out(t: FlowTest) -> dict:
 @router.get("/tests")
 def list_tests(agent_id: uuid.UUID, ctx: Reader, db: DB) -> list[dict]:
     agent = _agent(db, ctx.org_id, agent_id)
-    tests = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent))
+    # Concurrent first reads must seed the twelve default scenarios only once.
+    tests = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent, lock=True))
     db.commit()
     return [_test_out(t) for t in tests]
 
@@ -447,7 +448,7 @@ def list_tests(agent_id: uuid.UUID, ctx: Reader, db: DB) -> list[dict]:
 @router.post("/tests", status_code=status.HTTP_201_CREATED)
 def add_test(agent_id: uuid.UUID, body: TestIn, ctx: Writer, db: DB) -> dict:
     agent = _agent(db, ctx.org_id, agent_id)
-    existing = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent))
+    existing = _tests(db, ctx, agent, _flow(db, ctx.org_id, agent, lock=True))
     t = FlowTest(
         organization_id=ctx.org_id,
         agent_id=agent.id,
@@ -522,7 +523,7 @@ def run_tests(agent_id: uuid.UUID, body: RunIn, ctx: Reader, db: DB) -> dict:
     """Run the saved scenarios against the draft (default) or the published version. Text
     simulation only: nothing is saved, and voice is not part of the test."""
     agent = _agent(db, ctx.org_id, agent_id)
-    f = _flow(db, ctx.org_id, agent)
+    f = _flow(db, ctx.org_id, agent, lock=True)
     tests = _tests(db, ctx, agent, f)
     db.commit()
     if body.test_ids is not None:
