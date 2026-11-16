@@ -327,7 +327,7 @@ def worker_save_fallback_message(
     """Atomically put a simulated fallback into the existing staff queue.
 
     A stored queue item is not a staff notification or a promise of callback.
-    This test-only route requires both notice flags and cannot handle real calls_mod.
+    This test-only route requires both notice flags and cannot handle real calls.
     The call row serializes concurrent retries; a system event holds only the
     case ID, not caller content. No new schema or live provider is enabled.
     """
@@ -394,11 +394,13 @@ def worker_save_fallback_message(
             db,
             worker.org_id,
             call.id,
-            [{
-                "kind": "system",
-                "speaker": "system",
-                "data": {"event": "fallback_case_persisted", "case_id": str(case.id)},
-            }],
+            [
+                {
+                    "kind": "system",
+                    "speaker": "system",
+                    "data": {"event": "fallback_case_persisted", "case_id": str(case.id)},
+                }
+            ],
         )
     except calls_mod.CallError as e:
         raise _fail(e) from None
