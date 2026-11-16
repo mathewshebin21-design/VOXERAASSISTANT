@@ -1,5 +1,6 @@
 """Scoped voice-worker credentials and the worker brain endpoint (ADR-0005 §3)."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -214,6 +215,92 @@ def test_scoped_worker_brain_rejects_cross_call_and_record_injection_before_spen
     r = a.client.post("/v1/worker/live/brain", json=correct, headers=h)
     assert r.status_code == 200 and events(r)[-1]["type"] == "done"
     assert len(live["llm_requests"]) == 1
+
+
+
+
+def test_phone_prompt_never_claims_a_connected_human():
+    from app.live.receptionist import BusinessContext, system_prompt
+
+    ctx = BusinessContext(name="Review Clinic", greeting="Hello", disclosure=None)
+    phone_prompt = system_prompt(ctx, can_transfer=False)
+    member_prompt = system_prompt(ctx)
+    assert "Telephone transfers are not connected" in phone_prompt
+    assert "transfer_to_staff" not in phone_prompt
+    assert "guaranteed a callback" in phone_prompt
+    assert "transfer_to_staff" in member_prompt
+
+
+def test_phone_worker_never_offers_or_executes_a_phantom_carrier_transfer(
+    worker, live, make_account, monkeypatch, owner_engine  # noqa: F811
+):
+    from sqlalchemy import text
+
+    from app.voice import launch
+
+    from .test_worker_calls import assign_number
+
+    a = make_account("phone-handoff-blocked@example.com")
+    a.patch(a.o("/settings"), json={"locale": "en-GB"})
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    approve_mock_llm_for_test(monkeypatch, a)
+
+    ref = "room-phone-handoff001"
+    phone = assign_number(owner_engine, a.org_id)
+    jwt_token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=ref)
+    auth = {"authorization": f"Bearer {jwt_token}"}
+    start = a.client.post(
+        "/v1/worker/calls",
+        json={"external_ref": ref, "called_number": phone},
+        headers=auth,
+    )
+    assert start.status_code == 201
+
+    # The fake provider maliciously returns a tool that was NOT offered.
+    # Its execution must be refused without writing or marking a handoff.
+    live["llm"] = [
+        (
+            200,
+            message(
+                [
+                    (
+                        "tool",
+                        {
+                            "id": "toolu_phantom",
+                            "name": "transfer_to_staff",
+                            "json": '{"reason":"staff","summary":"urgent","caller_name":"Sam",'
+                            '"caller_phone":"07700900123","urgent":false}',
+                        },
+                    )
+                ],
+                "tool_use",
+                30,
+                6,
+            ),
+        ),
+        (200, message([("text", {"parts": ["I can save a message for the team."]})], "end_turn", 30, 8)),
+    ]
+    r = a.client.post(
+        "/v1/worker/live/brain",
+        json={
+            "request_id": "w-no-transfer-001",
+            "conversation_id": ref,
+            "messages": [{"role": "user", "text": "Can you put me through to staff?"}],
+        },
+        headers=auth,
+    )
+    assert r.status_code == 200
+    es = events(r)
+    assert any(e.get("type") == "tool" and e.get("ok") is False for e in es)
+    assert not any(e.get("type") == "handoff" for e in es)
+    assert es[-1]["type"] == "done"
+    first = json.loads(live["llm_requests"][0].content)
+    assert "transfer_to_staff" not in {t["name"] for t in first["tools"]}
+    assert "take_message" in {t["name"] for t in first["tools"]}
+    assert "Telephone transfers are not connected" in str(first["system"])
+    with owner_engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM caller_messages")).scalar_one() == 0
 
 
 def test_signed_ref_must_be_well_formed_even_for_valid_hmac(worker):
