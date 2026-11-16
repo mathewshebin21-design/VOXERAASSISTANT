@@ -258,6 +258,10 @@ def worker_start_call(
 ) -> Call:
     """Starts the worker's call record. Idempotent on ``external_ref`` (e.g. the room or SIP call ID),
     so a worker that restarts mid-call continues the same record."""
+    if worker.call_ref is not None and body.external_ref != worker.call_ref:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Call reference does not match worker credential")
+    if worker.channel == "phone" and worker.call_ref is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "A telephone call needs its own signed reference")
     if worker.channel == "phone":
         # The same answer whether the number is unknown, disabled or another workspace's: row-level
         # security hides other workspaces' numbers, so nothing here reveals who owns a number.
@@ -294,6 +298,8 @@ def _worker_call(db: DB, worker: WorkerContext, call_id: uuid.UUID) -> Call:
     except calls_mod.CallError as e:
         raise _fail(e) from None
     if call.channel != _WORKER_CHANNEL[worker.channel] or call.created_by is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
+    if worker.call_ref is not None and call.external_ref != worker.call_ref:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
     return call
 
@@ -333,6 +339,8 @@ def worker_save_fallback_message(
     """
     if worker.mode != "test" or worker.channel != "simulated":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Fallback queue requires an authorized simulated test")
+    if worker.call_ref is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Fallback messages require a call-bound credential")
 
     name, message = body.caller_name.strip(), body.message.strip()
     if not name or not message:
@@ -346,7 +354,7 @@ def worker_save_fallback_message(
         call = calls_mod.get(db, worker.org_id, call_id, lock=True)
     except calls_mod.CallError as e:
         raise _fail(e) from None
-    if call.created_by is not None or call.channel != "simulated":
+    if call.created_by is not None or call.channel != "simulated" or call.external_ref != worker.call_ref:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call not found")
     if not call.ai_disclosure_played or not call.recording_notice_played:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Simulated call notices are required before saving details")
