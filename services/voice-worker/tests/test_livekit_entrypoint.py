@@ -182,7 +182,7 @@ def setup(
             assert room is context.room
             if kind == SIP_KIND:
                 assert room_options is not None
-                assert room_options.audio_input is False
+                assert room_options.audio_input is not False
                 assert room_options.text_input is False and room_options.text_output is False
                 assert record is False
             else:
@@ -284,6 +284,7 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
         "participant",
         "policy",
         "record",
+        "input_off",
         "media_start",
         "media_say",
         "notice_ai_disclosure",
@@ -346,8 +347,8 @@ async def test_phone_notice_failure_closes_call_without_enabling_caller_audio(
     )
     await worker.entrypoint(ctx)
     assert ctx.shutdown_reason == "notice playback not confirmed"
-    assert events[:5] == ["connect", "participant", "policy", "record", "media_start"]
-    assert events[5:] == expected_events
+    assert events[:6] == ["connect", "participant", "policy", "record", "input_off", "media_start"]
+    assert events[6:] == expected_events
     assert sessions[0].audio_input_enabled is False
     assert sessions[0].agent.notices_complete is False
     assert recordings[0].ends == [("failed", None, "notice playback not confirmed")]
@@ -382,6 +383,9 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
 
     class FailingMediaSession:
         def __init__(self):
+            self.input = SimpleNamespace(
+                set_audio_enabled=lambda enabled: events.append("input_on" if enabled else "input_off")
+            )
             sessions.append(self)
 
         async def start(self, *, agent, room, **_opts):
@@ -393,7 +397,7 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
         await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "media startup failed"
-    assert events == ["connect", "participant", "policy", "record", "media_start", "record_end", "shutdown"]
+    assert events == ["connect", "participant", "policy", "record", "input_off", "media_start", "record_end", "shutdown"]
     assert len(recordings) == len(sessions) == 1
     assert recordings[0].ends == [("failed", None, "media startup failed")]
     assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered
