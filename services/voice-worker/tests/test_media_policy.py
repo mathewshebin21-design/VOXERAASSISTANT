@@ -140,9 +140,7 @@ async def test_expired_worker_token_refreshes_once_without_media_activation():
         return httpx.Response(200, json=POLICY)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await fetch_authorized_languages(
-            "http://isolated-api.test", tokens, MEDIA, client, FAKE_ATTESTATIONS
-        )
+        result = await fetch_authorized_languages("http://isolated-api.test", tokens, MEDIA, client, FAKE_ATTESTATIONS)
     assert result[0] == "en-GB"
     assert tokens.renewals == 1
 
@@ -154,9 +152,6 @@ async def test_missing_attestation_refuses_even_if_api_claims_policy_allows_paid
 
 
 async def test_unreachable_policy_refuses_and_never_leaks_tokens():
-    async def unused():
-        pass
-
     def unavailable(req):
         raise httpx.ConnectError("network unavailable")
 
