@@ -34,8 +34,6 @@ jobs:
         run: psql -h localhost -U postgres -f deploy/init-roles.sql
       - run: uv sync --frozen
       - run: uv run ruff check app tests migrations
-      - name: TEMP PR56 formatter diff (remove before review)
-        run: uv run ruff format --diff app/models.py app/staff_notifications.py migrations/versions/0013_staff_notification_outbox.py tests/test_staff_notifications.py || true
       - run: uv run ruff format --check app tests migrations
       - run: uv run pytest -q
       - name: Migrations round-trip
