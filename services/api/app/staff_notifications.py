@@ -181,6 +181,34 @@ def _owned_lease(
     return row
 
 
+def cancel_leased_if_handled(
+    db: Session,
+    org_id: uuid.UUID,
+    notification_id: uuid.UUID,
+    lease_token: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Recheck case resolution and human acknowledgment before each dispatch.
+
+    This is a second, tenant-scoped checkpoint after taking a lease. A prior
+    reservation is NOT permission to notify staff after the case is handled.
+    A real adapter still needs an approved external recipient/send policy.
+    """
+    row = _owned_lease(db, org_id, notification_id, lease_token)
+    if row.status != "leased" or row.lease_until is None:
+        raise NotificationError("Notification is not leased")
+    if row.lease_until <= (now or datetime.now(UTC)):
+        raise NotificationError("Notification lease has expired")
+    case = db.get(CallerMessage, row.case_id)
+    if case is not None and case.status != CallerMessageStatus.resolved and not _staff_has_acknowledged(db, row):
+        return False
+    row.status, row.lease_token, row.lease_until = "cancelled", None, None
+    row.updated_at = now or datetime.now(UTC)
+    db.flush()
+    return True
+
+
 def provider_accepted(
     db: Session,
     org_id: uuid.UUID,
