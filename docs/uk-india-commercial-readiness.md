@@ -44,6 +44,30 @@ Use PR #45's latest commit checks, not historical green checks.
 | Operator/customer screens | Complete policy, assigned-number and call-history workflows with role checks, loading/error states and browser acceptance tests. |
 | Reliability | Load/concurrency tests, disconnect/cancellation, duplicate calls, rate limiting, retry bounds, monitoring, incident alerts and a demonstrated restore are still release evidence requirements. |
 
+## Follow-on SIP ingress hardening (draft PR #51; not released)
+
+Draft PRs #48–#51 are stacked non-production changes and do **not** supersede the
+unmet commercial gates above. PR #50 adds short-lived, signed call references;
+PR #51 additionally refuses an inbound SIP job unless its LiveKit trunk ID,
+inbound dispatch-rule ID, dialled number, call IDs and ringing/active state
+match a source-reviewed route. The allowed-route registry remains **empty**,
+even if the operator mistakenly enables `VOXERA_SIP_ENABLED`.
+The offline test registry includes only fictional identifiers.
+
+Before any real route can be approved, obtain verifiable evidence of the configured
+inbound carrier authentication/IP restrictions, LiveKit project and dispatch rule,
+trunk-to-business number ownership, region and carrier eligibility, and independent
+call-log correlation. Recording `sip.trunkID` or `sip.ruleID` from a participant
+is **not** independent cryptographic proof of inbound carrier identity.
+Carrier/SIP admission must be evaluated separately from the API's signed worker
+token and workspace/country launch rules. SIP attributes must not be logged
+with unredacted call IDs or phone numbers.
+
+Reference: LiveKit's official [SIP participant attributes](https://docs.livekit.io/reference/telephony/sip-participant/)
+and [telephony test checklist](https://docs.livekit.io/telephony/testing/).
+Neither the source allowlist nor hypothetical CI participant attributes
+constitute live-telephony acceptance.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
