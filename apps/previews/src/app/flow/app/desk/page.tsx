@@ -103,6 +103,7 @@ function Desk({ orgId }: { orgId: string }) {
                       {c.caller_phone && <span className="font-mono text-xs text-flw-mute">{c.caller_phone}</span>}
                       <Chip tone={k.tone}>{k.label}</Chip>
                       {c.urgent && <Chip tone="pink"><AlertTriangle size={10} /> urgent</Chip>}
+                       {c.staff_acknowledged_at ? <Chip tone="lime">Staff acknowledged</Chip> : <Chip tone="amber">Awaiting staff acknowledgement</Chip>}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-sm text-flw-mute">{c.summary}</p>
                     <div className="mt-1 font-mono text-[10px] text-flw-mute">{fmtWhen(c.created_at)}{c.assignee_name && <> · with {c.assignee_name}</>}{c.source === "ai_receptionist" && <> · from the AI receptionist</>}</div>
@@ -115,7 +116,7 @@ function Desk({ orgId }: { orgId: string }) {
         </Glass>
 
         <div className="min-w-0 space-y-4">
-          {selected && <CaseDetail key={selected} base={base} id={selected} team={team.data ?? []} onAct={act} onClose={() => setSelected(null)} />}
+          {selected && <CaseDetail key={selected} base={base} id={selected} team={team.data ?? []} myId={me?.id} onAct={act} onClose={() => setSelected(null)} />}
           <Glass>
             <GHead title={<span className="flex items-center gap-2"><Headset size={14} /> Team on the desk</span>} />
             <ul className="space-y-1.5 p-4" data-testid="desk-team">
@@ -137,7 +138,7 @@ function Desk({ orgId }: { orgId: string }) {
   );
 }
 
-function CaseDetail({ base, id, team, onAct, onClose }: { base: string; id: string; team: DeskMember[]; onAct: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; onClose: () => void }) {
+function CaseDetail({ base, id, team, myId, onAct, onClose }: { base: string; id: string; team: DeskMember[]; myId?: string; onAct: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; onClose: () => void }) {
   const c = usePolled<DeskCase>(`${base}/cases/${id}`);
   const [note, setNote] = useState("");
   const [resolution, setResolution] = useState("");
@@ -150,6 +151,21 @@ function CaseDetail({ base, id, team, onAct, onClose }: { base: string; id: stri
       <div className="space-y-3 p-4 text-sm" data-testid="case-detail">
         <div className="flex flex-wrap gap-1.5"><Chip tone={d.status === "resolved" ? "lime" : d.status === "new" ? "amber" : "violet"}>{d.status.replace("_", " ")}</Chip>{d.urgent && <Chip tone="pink">urgent</Chip>}{d.caller_phone && <a className="font-mono text-xs text-flw-cyan" href={`tel:${d.caller_phone}`}>{d.caller_phone}</a>}</div>
         <p>{d.summary}</p>
+        {d.staff_acknowledged_at ? (
+          <p className="text-xs text-flw-lime" data-testid="staff-acknowledgement">
+            Staff acknowledged receipt: {d.staff_acknowledged_by_name ?? "team member"} · {fmtWhen(d.staff_acknowledged_at)}.
+            This is not an email, push-notification delivery, or callback confirmation.
+          </p>
+        ) : (
+          <div className="space-y-2 rounded-lg border border-flw-line p-3" data-testid="staff-acknowledgement">
+            <p className="text-xs text-flw-mute">Saved to the staff desk; nobody has explicitly acknowledged it yet. Assignment does not count as acknowledgement.</p>
+            {d.status !== "resolved" && (d.assigned_to === null || d.assigned_to === myId) && (
+              <FBtn onClick={() => void run(() => api(`${base}/cases/${id}/acknowledge`, { method: "POST" }), "Staff receipt acknowledged")}>
+                <Check size={13} /> Acknowledge receipt
+              </FBtn>
+            )}
+          </div>
+        )}
         {d.reason && <p className="text-xs text-flw-mute">Why it came to a person: {d.reason}</p>}
         <label className="flex items-center gap-2 text-xs text-flw-mute"><UserRound size={13} /> Assigned to
           <select aria-label="Assign case" className={finputAuto} value={d.assigned_to ?? ""} onChange={(e) => void run(() => api(`${base}/cases/${id}/assign`, { method: "POST", body: { user_id: e.target.value || null } }), "Reassigned")}>
