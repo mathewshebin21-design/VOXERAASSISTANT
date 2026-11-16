@@ -50,22 +50,34 @@ def test_saved_ai_message_queues_pii_free_intent_atomically_and_once(make_accoun
         db.commit()
         assert len(db.scalars(select(StaffNotificationOutbox)).all()) == 1
     with owner_engine.connect() as conn:
-        columns = conn.execute(
-            text("SELECT column_name FROM information_schema.columns WHERE table_name = 'staff_notification_outbox'")
-        ).scalars().all()
+        columns = (
+            conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'staff_notification_outbox'"
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert not any(word in col for col in columns for word in ("caller", "phone", "email_address", "summary"))
-        assert conn.execute(
-            text("SELECT count(*) FROM staff_notification_outbox WHERE case_id = :id"), {"id": case_id}
-        ).scalar_one() == 1
+        assert (
+            conn.execute(
+                text("SELECT count(*) FROM staff_notification_outbox WHERE case_id = :id"), {"id": case_id}
+            ).scalar_one()
+            == 1
+        )
 
     # Human-authored staff cases are not automatically externally notified.
     manual = a.post(a.o("/cases"), json={"summary": "Staff entered this case", "assign_to_me": False})
     assert manual.status_code == 201
     with Session(app_engine) as db:
         set_tenant(db, org_id=uuid.UUID(a.org_id))
-        assert db.scalar(select(StaffNotificationOutbox).where(
-            StaffNotificationOutbox.case_id == uuid.UUID(manual.json()["id"])
-        )) is None
+        assert (
+            db.scalar(
+                select(StaffNotificationOutbox).where(StaffNotificationOutbox.case_id == uuid.UUID(manual.json()["id"]))
+            )
+            is None
+        )
 
 
 def test_rollbacks_remove_case_and_notification_together(make_account, app_engine):
@@ -73,8 +85,11 @@ def test_rollbacks_remove_case_and_notification_together(make_account, app_engin
     with Session(app_engine) as db:
         set_tenant(db, org_id=uuid.UUID(a.org_id))
         row = reception.leave_message(
-            db, reception.desk(db, uuid.UUID(a.org_id)), CallerMessageKind.message,
-            "synthetic", source="voice_worker",
+            db,
+            reception.desk(db, uuid.UUID(a.org_id)),
+            CallerMessageKind.message,
+            "synthetic",
+            source="voice_worker",
         )
         cid = row.id
         assert db.scalar(select(StaffNotificationOutbox).where(StaffNotificationOutbox.case_id == cid))
@@ -145,15 +160,17 @@ def test_expired_lease_cannot_ack_and_bounded_retry_reaches_dead_letter(make_acc
         assert third.attempts == 3
         with pytest.raises(staff_notifications.NotificationError):
             staff_notifications.retry_or_dead(db, org, ident, third.lease_token, "caller=07700900123", now=third_clock)
-        last = staff_notifications.retry_or_dead(
-            db, org, ident, third.lease_token, "permanent_reject", now=third_clock
-        )
+        last = staff_notifications.retry_or_dead(db, org, ident, third.lease_token, "permanent_reject", now=third_clock)
         assert last.status == "dead"
         db.commit()
         assert staff_notifications.lease_due(db, org, now=third_clock + timedelta(days=1)) == []
-        assert sorted(set(
-            db.scalars(select(StaffNotificationAttempt.result).where(StaffNotificationAttempt.notification_id == ident))
-        )) == ["dead", "reserved", "retry"]
+        assert sorted(
+            set(
+                db.scalars(
+                    select(StaffNotificationAttempt.result).where(StaffNotificationAttempt.notification_id == ident)
+                )
+            )
+        ) == ["dead", "reserved", "retry"]
 
 
 def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(make_account, app_engine, owner_engine):
@@ -162,9 +179,7 @@ def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(mak
     ca, cb = new_ai_case(app_engine, a.org_id), new_ai_case(app_engine, b.org_id)
     with Session(app_engine, expire_on_commit=False) as db:
         set_tenant(db, org_id=uuid.UUID(a.org_id))
-        assert db.scalar(select(StaffNotificationOutbox).where(
-            StaffNotificationOutbox.case_id == cb
-        )) is None
+        assert db.scalar(select(StaffNotificationOutbox).where(StaffNotificationOutbox.case_id == cb)) is None
         assert staff_notifications.lease_due(db, uuid.UUID(b.org_id)) == []
         db.rollback()
 
@@ -188,10 +203,10 @@ def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(mak
     # the database layer even with RLS bypassed by a migration owner.
     with owner_engine.connect() as conn, pytest.raises(IntegrityError):
         conn.execute(
-                text(
-                    "INSERT INTO staff_notification_outbox "
-                    "(id, organization_id, case_id, channel, status, attempts, max_attempts) "
-                    "VALUES (:id,:org,:cid,'staff_email','pending',0,5)"
-                ),
-                {"id": uuid.uuid4(), "org": a.org_id, "cid": cb},
-            )
+            text(
+                "INSERT INTO staff_notification_outbox "
+                "(id, organization_id, case_id, channel, status, attempts, max_attempts) "
+                "VALUES (:id,:org,:cid,'staff_email','pending',0,5)"
+            ),
+            {"id": uuid.uuid4(), "org": a.org_id, "cid": cb},
+        )
