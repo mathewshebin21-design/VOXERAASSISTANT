@@ -1,6 +1,9 @@
 name: PR45 isolated hosted acceptance
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/uk-india-release-candidate-20261116]
+    paths: [apps/previews/scripts/pr45-hosted-isolation.mjs]
 permissions:
   contents: read
 jobs:
