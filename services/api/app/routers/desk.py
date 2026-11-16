@@ -236,9 +236,7 @@ def _out(
         o.staff_acknowledged_by = ack.actor_user_id
         o.staff_acknowledged_by_name = names.get(ack.actor_user_id)
     if notification is not None:
-        deadline = c.created_at + timedelta(
-            minutes=URGENT_REVIEW_MINUTES if c.urgent else STANDARD_REVIEW_MINUTES
-        )
+        deadline = c.created_at + timedelta(minutes=URGENT_REVIEW_MINUTES if c.urgent else STANDARD_REVIEW_MINUTES)
         active = ack is None and c.status != CallerMessageStatus.resolved
         review_reason = None
         if active and notification.status == "dead":
