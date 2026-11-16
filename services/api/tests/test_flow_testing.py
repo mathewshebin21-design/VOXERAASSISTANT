@@ -11,7 +11,9 @@ def run(acct, **body) -> dict:
     return r.json()
 
 
-def test_the_twelve_standard_scenarios_pass_on_the_default_flow(shop):  # noqa: F811
+@pytest.mark.parametrize("locale", ["en-GB", "en-IN"])
+def test_the_twelve_standard_scenarios_pass_on_the_default_flow(shop, locale):  # noqa: F811
+    assert shop.patch(shop.o("/settings"), json={"locale": locale}).status_code == 200
     tests = shop.get(shop.flow("/tests")).json()
     assert len(tests) == 12
     report = run(shop)

@@ -111,12 +111,15 @@ def test_ambiguous_service_is_asked_about(shop):
     assert "I could do" in Call.said(nxt) or "can't see a free time" in Call.said(nxt)
 
 
-def test_questions_are_answered_from_workspace_data_with_evidence(shop):
+@pytest.mark.parametrize(("locale", "amount"), [("en-GB", "£10.00"), ("en-IN", "INR 10.00")])
+def test_questions_are_answered_from_workspace_data_with_evidence(shop, locale, amount):
+    assert shop.patch(shop.o("/settings"), json={"locale": locale}).status_code == 200
     c = Call(shop)
     evs = c.say("how much is a beard trim?")
-    assert "Beard trim is from £10.00" in Call.said(evs)
+    answer = f"Beard trim is from {amount}."
+    assert answer in Call.said(evs)
     sources = {e["source"]: e["value"] for e in evs if e["type"] == "evidence"}
-    assert sources["services.price_from"] == "Beard trim is from £10.00."  # the answer is the evidence
+    assert sources["services.price_from"] == answer
     assert sources["opening_hours"] == "open now"
     assert "anything else" in Call.said(evs).lower()
     bye = c.say("no thanks, that's all")

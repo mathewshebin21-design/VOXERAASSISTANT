@@ -77,7 +77,7 @@ def default_suite() -> list[Scenario]:
             lines=["How much is a {service}?"],
             assertions=[
                 a(type="says", value="{service}"),
-                a(type="says", value="from £"),
+                a(type="says", value="{service} is from"),
                 a(type="tool_not_called", value="book_appointment"),
             ],
         ),

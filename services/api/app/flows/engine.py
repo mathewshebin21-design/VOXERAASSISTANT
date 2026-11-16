@@ -175,6 +175,14 @@ STOP = {
 }
 
 
+def service_price(service: dict) -> str | None:
+    amount = service["price_from"]
+    currency = service["currency"]
+    if amount is None or not currency:
+        return None
+    return f"£{amount}" if currency == "GBP" else f"{currency} {amount}"
+
+
 def match_services(text: str, services: list[Service]) -> list[Service]:
     said = set(words(text)) - STOP
     scored = []
@@ -547,7 +555,7 @@ class Engine:
         named = [x for x in services if any(w in words(q) for w in words(x["name"]) if len(w) > 3)]
         if "prices" in topics and re.search(r"how much|price|cost|£", q) and (named or services):
             pick = named or services
-            parts = [f"{x['name']} is from £{x['price_from_gbp']}" for x in pick[:5] if x["price_from_gbp"]]
+            parts = [f"{item['name']} is from {price}" for item in pick[:5] if (price := service_price(item))]
             if parts:
                 answer, source = "; ".join(parts) + ".", "services.price_from"
         elif "hours" in topics and re.search(r"open|close|hours|what time", q):
@@ -567,8 +575,10 @@ class Engine:
             if pick:
                 answer = "We offer " + ", ".join(x["name"] for x in pick[:10]) + "."
                 if named and named[0]["duration_minutes"]:
-                    answer = f"{named[0]['name']} takes about {named[0]['duration_minutes']} minutes" + (
-                        f" and starts from £{named[0]['price_from_gbp']}." if named[0]["price_from_gbp"] else "."
+                    service = named[0]
+                    price = service_price(service)
+                    answer = f"{service['name']} takes about {service['duration_minutes']} minutes" + (
+                        f" and starts from {price}." if price is not None else "."
                     )
                 source = "services"
         elif (
