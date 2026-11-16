@@ -24,6 +24,7 @@ class WorkerContext:
     org_id: uuid.UUID
     mode: str  # test | live
     channel: str  # simulated | phone
+    call_ref: str | None = None  # signed room/call reference, required for telephone credentials
 
 
 def worker_context(request: Request, db: DB) -> WorkerContext:
@@ -33,7 +34,7 @@ def worker_context(request: Request, db: DB) -> WorkerContext:
     if not header.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Worker token required")
     try:
-        org_id, mode, channel = worker_auth.read(header[7:].strip())
+        org_id, mode, channel, call_ref = worker_auth.read_scoped(header[7:].strip())
     except worker_auth.WorkerAuthError as e:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from None
     set_tenant(db, org_id=org_id)
@@ -44,4 +45,4 @@ def worker_context(request: Request, db: DB) -> WorkerContext:
         country = country_of(ws.locale if ws else None) or ""
         if not launch.ready(country):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Live calls are not enabled for this country yet")
-    return WorkerContext(org_id, mode, channel)
+    return WorkerContext(org_id, mode, channel, call_ref)
