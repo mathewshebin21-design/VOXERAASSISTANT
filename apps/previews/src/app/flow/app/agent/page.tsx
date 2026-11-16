@@ -19,8 +19,8 @@ export default function Agent() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Voice & persona");
   const [sample, setSample] = useState(SAMPLES[0]);
   const [note, setNote] = useState("");
-  const live = s.published.at(-1)!;
-  const dirty = JSON.stringify(live.config) !== JSON.stringify(s.draft);
+  const saved = s.published.at(-1)!;
+  const dirty = JSON.stringify(saved.config) !== JSON.stringify(s.draft);
   // "Hear the difference": re-runs the simulator so persona changes are visible immediately.
   const reply = useMemo(() => respond(sample, initialState(), { persona: p, knowledge: s.knowledge, appointments: APPOINTMENTS }).events.filter((e) => e.kind === "agent").map((e) => (e as { text: string }).text).join(" "), [sample, p, s.knowledge]);
   const speak = (text: string, lang = "en-GB") => {
@@ -39,12 +39,13 @@ export default function Agent() {
       </Heading>
       <LiveAgents />
       <Glass className="mb-4 flex flex-wrap items-center gap-3 p-4">
-        <Chip tone="lime">live v{live.version}</Chip>
-        <span className="text-sm text-flw-mute">published {live.publishedAt} · {live.note}</span>
-        {dirty ? <Chip tone="amber">unpublished changes</Chip> : <Chip>draft = live</Chip>}
+        <p className="w-full text-sm text-flw-mute">These settings are saved in this browser for the simulator. Use <Link className="underline" href="/flow/app/studio">Agent Studio</Link> to configure workspace flows.</p>
+        <Chip tone="lime">Local v{saved.version}</Chip>
+        <span className="text-sm text-flw-mute">saved {saved.publishedAt} · {saved.note}</span>
+        {dirty ? <Chip tone="amber">Unsaved changes</Chip> : <Chip>Draft matches saved version</Chip>}
         <div className="flex w-full gap-2 sm:ml-auto sm:w-auto">
           <input aria-label="Change note" className={finputAuto + " w-full sm:w-64"} placeholder="Change note (required)" value={note} onChange={(e) => setNote(e.target.value)} />
-          <FBtn variant="glow" disabled={!dirty || !note.trim()} onClick={() => { s.publish(note); setNote(""); }}><Upload size={14} /> Publish</FBtn>
+          <FBtn variant="glow" disabled={!dirty || !note.trim()} onClick={() => { s.publish(note); setNote(""); }}><Upload size={14} /> Save local version</FBtn>
         </div>
       </Glass>
       <div className="no-scrollbar mb-4 flex gap-1 overflow-x-auto" role="tablist">
@@ -158,11 +159,11 @@ export default function Agent() {
 
       {tab === "Versions" && (
         <Glass>
-          <GHead title="Published versions" />
+          <GHead title="Local versions" />
           <ol>{[...s.published].reverse().map((v, i) => (
             <li key={v.version} className="flex flex-wrap items-center gap-3 border-t border-flw-line/60 px-4 py-3 first:border-0">
               <GitCommit size={14} className={i === 0 ? "text-flw-lime" : "text-flw-mute"} /><span className="font-mono text-sm text-flw-violet">v{v.version}</span><span className="text-sm">{v.note}</span><span className="font-mono text-[11px] text-flw-mute">{v.publishedAt}</span>
-              {i === 0 ? <Chip tone="lime">live</Chip> : <FBtn className="ml-auto" onClick={() => s.rollback(v.version)}><RotateCcw size={13} /> Roll back</FBtn>}
+              {i === 0 ? <Chip tone="lime">current</Chip> : <FBtn className="ml-auto" onClick={() => s.rollback(v.version)}><RotateCcw size={13} /> Roll back</FBtn>}
             </li>
           ))}</ol>
         </Glass>
