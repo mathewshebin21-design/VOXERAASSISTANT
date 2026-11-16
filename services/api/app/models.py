@@ -458,12 +458,15 @@ class StaffNotificationOutbox(Base):
             "status IN ('pending','leased','retry','provider_accepted','delivered','dead','cancelled')",
             name="ck_staff_notification_status",
         ),
-        CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
-                        name="ck_staff_notification_attempts"),
-        CheckConstraint("(status = 'leased') = (lease_until IS NOT NULL)",
-                        name="ck_staff_notification_lease_state"),
-        CheckConstraint("delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
-                        name="ck_staff_notification_delivered_requires_acceptance"),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
+            name="ck_staff_notification_attempts",
+        ),
+        CheckConstraint("(status = 'leased') = (lease_until IS NOT NULL)", name="ck_staff_notification_lease_state"),
+        CheckConstraint(
+            "delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
+            name="ck_staff_notification_delivered_requires_acceptance",
+        ),
         Index("ix_staff_notification_due", "organization_id", "status", "next_attempt_at"),
     )
 
@@ -489,8 +492,9 @@ class StaffNotificationAttempt(Base):
         ),
         UniqueConstraint("notification_id", "attempt_number", "result", name="uq_staff_notification_attempt_stage"),
         CheckConstraint("attempt_number > 0", name="ck_staff_notification_attempt_number"),
-        CheckConstraint("result IN ('reserved','accepted','retry','dead')",
-                        name="ck_staff_notification_attempt_result"),
+        CheckConstraint(
+            "result IN ('reserved','accepted','retry','dead')", name="ck_staff_notification_attempt_result"
+        ),
         Index("ix_staff_notification_attempt_order", "notification_id", "attempt_number", "created_at"),
     )
 
