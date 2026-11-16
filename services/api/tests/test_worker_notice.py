@@ -38,7 +38,7 @@ def ack(account, token, call_id, notice):
 
 
 def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_withheld(
-    worker,
+    worker,  # noqa: F811
     make_account,
     monkeypatch,
     owner_engine,  # noqa: F811
@@ -91,7 +91,7 @@ def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_wit
 
 
 def test_notice_receipt_rejects_another_session_workspace_or_non_phone_channel(
-    worker,
+    worker,  # noqa: F811
     make_account,
     monkeypatch,
     owner_engine,  # noqa: F811
