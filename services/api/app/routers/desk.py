@@ -21,6 +21,7 @@ from ..models import (
     DeskStatus,
     Membership,
     Service,
+    StaffNotificationOutbox,
     User,
 )
 from ..permissions import Perm
@@ -32,6 +33,7 @@ from ..schemas import (
     CaseDetail,
     CaseIn,
     CaseNoteOut,
+    CaseNotificationOut,
     CaseOut,
     DeskMemberOut,
     NoteIn,
@@ -201,21 +203,66 @@ def _staff_acknowledgements(db, org_id: uuid.UUID, case_ids: list[uuid.UUID]) ->
     return first
 
 
-def _out(c: CallerMessage, names: dict, ack: AuditLog | None = None) -> CaseOut:
+# Provisional internal human-review thresholds, NOT a contracted SLA and not
+# an automated external escalation. A web read calculates the flag without
+# making an external provider call or mutating an outbox record.
+URGENT_REVIEW_MINUTES = 5
+STANDARD_REVIEW_MINUTES = 30
+
+
+def _notification_rows(db, org_id: uuid.UUID, case_ids: list[uuid.UUID]) -> dict[uuid.UUID, StaffNotificationOutbox]:
+    if not case_ids:
+        return {}
+    rows = db.scalars(
+        select(StaffNotificationOutbox).where(
+            StaffNotificationOutbox.organization_id == org_id,
+            StaffNotificationOutbox.case_id.in_(case_ids),
+        )
+    )
+    return {row.case_id: row for row in rows}
+
+
+def _out(
+    c: CallerMessage,
+    names: dict,
+    ack: AuditLog | None = None,
+    notification: StaffNotificationOutbox | None = None,
+    now: datetime | None = None,
+) -> CaseOut:
     o = CaseOut.model_validate(c)
     o.assignee_name = names.get(c.assigned_to)
     if ack is not None:
         o.staff_acknowledged_at = ack.created_at
         o.staff_acknowledged_by = ack.actor_user_id
         o.staff_acknowledged_by_name = names.get(ack.actor_user_id)
+    if notification is not None:
+        deadline = c.created_at + timedelta(
+            minutes=URGENT_REVIEW_MINUTES if c.urgent else STANDARD_REVIEW_MINUTES
+        )
+        active = ack is None and c.status != CallerMessageStatus.resolved
+        review_reason = None
+        if active and notification.status == "dead":
+            review_reason = "notification_failed"
+        elif active and (now or datetime.now(UTC)) >= deadline:
+            review_reason = "staff_unacknowledged"
+        o.notification = CaseNotificationOut(
+            channel="staff_email",
+            state=notification.status,
+            attempts=notification.attempts,
+            last_error_code=notification.last_error_code,
+            staff_review_due_at=deadline,
+            needs_staff_review=review_reason is not None,
+            review_reason=review_reason,
+        )
     return o
 
 
 def _detail(db, c: CallerMessage) -> CaseDetail:
     notes = list(db.scalars(select(CaseNote).where(CaseNote.case_id == c.id).order_by(CaseNote.created_at)))
     ack = _staff_acknowledgements(db, c.organization_id, [c.id]).get(str(c.id))
+    notifications = _notification_rows(db, c.organization_id, [c.id])
     names = _names(db, [c.assigned_to, *(n.author_id for n in notes), ack.actor_user_id if ack else None])
-    d = CaseDetail(**_out(c, names, ack).model_dump())
+    d = CaseDetail(**_out(c, names, ack, notifications.get(c.id)).model_dump())
     d.notes = [
         CaseNoteOut(**CaseNoteOut.model_validate(n).model_dump() | {"author_name": names.get(n.author_id)})
         for n in notes
@@ -282,8 +329,10 @@ def list_cases(
         q = q.where(CallerMessage.assigned_to == ctx.user.id)
     rows = list(db.scalars(q.order_by(CallerMessage.urgent.desc(), CallerMessage.created_at.desc()).limit(limit)))
     acks = _staff_acknowledgements(db, ctx.org_id, [c.id for c in rows])
+    notifications = _notification_rows(db, ctx.org_id, [c.id for c in rows])
     names = _names(db, [*(c.assigned_to for c in rows), *(a.actor_user_id for a in acks.values())])
-    return [_out(c, names, acks.get(str(c.id))) for c in rows]
+    now = datetime.now(UTC)
+    return [_out(c, names, acks.get(str(c.id)), notifications.get(c.id), now) for c in rows]
 
 
 @router.post("/cases", response_model=CaseDetail, status_code=status.HTTP_201_CREATED)
