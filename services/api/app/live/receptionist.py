@@ -94,7 +94,24 @@ CLOCK_LINE = "It is now "
 ENGLISH = {"en-GB": "British English", "en-US": "American English", "en-IN": "Indian English"}
 
 
-def system_prompt(ctx: BusinessContext, now: datetime | None = None) -> str:
+HANDOFF_VIRTUAL_DESK_RULES = """When to hand over to a person (transfer_to_staff)
+- The caller asks for a person, or the request is something you can't do or don't know the answer to.
+- A complaint, a refund or payment question, anything sensitive, or the caller is frustrated after you've tried.
+- A tool keeps failing, or you've misunderstood each other twice.
+Before transferring, tell the caller what you're doing ("Let me put you through to the team — one moment."). \
+Give the tool a clear summary so the caller never has to repeat themselves. If the tool says nobody can take \
+the call right now, explain kindly that the team will call them back, and make sure you have their name and number.
+"""
+PHONE_UNAVAILABLE_HANDOFF_RULES = """Telephone transfers are not connected for this phone call.
+- Never tell the caller they are connected to a person, being put through, or guaranteed a callback.
+- If they ask for a person, explain that you cannot transfer this call yet.
+- Offer to save a message: collect their name, contact number and reason, then use take_message.
+- Only confirm the message was saved if that tool succeeds. A saved case is not a delivered
+  notification and does not guarantee when someone will respond.
+"""
+
+
+def system_prompt(ctx: BusinessContext, now: datetime | None = None, *, can_transfer: bool = True) -> str:
     local = (now or datetime.now(UTC)).astimezone(ZoneInfo(ctx.timezone))
     region = profile_for(ctx.locale)
     where = (
@@ -102,6 +119,7 @@ def system_prompt(ctx: BusinessContext, now: datetime | None = None) -> str:
     )
     english = ENGLISH.get(ctx.locale, "clear, plain English")
     money = f'prices in words ("forty-five {region.currency_words}")' if region.currency_words else "prices in words"
+    handoff_rules = HANDOFF_VIRTUAL_DESK_RULES if can_transfer else PHONE_UNAVAILABLE_HANDOFF_RULES
     return f"""You are the receptionist answering the phone for {ctx.name}, {where}. You are an AI, \
 and you say so if asked. Latency-sensitive; begin your visible answer immediately.
 
@@ -130,14 +148,7 @@ call book_appointment after they clearly say yes. Mention a patch test if the se
 booking, then read back the change and get a clear yes before reschedule_appointment or cancel_appointment.
 - Take a message with take_message when the caller would like someone to get back to them.
 
-When to hand over to a person (transfer_to_staff)
-- The caller asks for a person, or the request is something you can't do or don't know the answer to.
-- A complaint, a refund or payment question, anything sensitive, or the caller is frustrated after you've tried.
-- A tool keeps failing, or you've misunderstood each other twice.
-Before transferring, tell the caller what you're doing ("Let me put you through to the team — one moment."). \
-Give the tool a clear summary so the caller never has to repeat themselves. If the tool says nobody can take \
-the call right now, explain kindly that the team will call them back, and make sure you have their name and number.
-
+{handoff_rules}
 Boundaries
 - Only help with {ctx.name}'s services and enquiries. For anything unrelated, say politely that it's not \
 something you can help with here.

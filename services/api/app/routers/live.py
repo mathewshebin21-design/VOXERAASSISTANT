@@ -226,10 +226,17 @@ def worker_brain(body: BrainIn, worker: Annotated[WorkerContext, Depends(worker_
             status.HTTP_403_FORBIDDEN,
             "Language-model inference is not approved for this workspace",
         ) from None
-    return _brain(body, worker.org_id, None, db)
+    return _brain(body, worker.org_id, None, db, can_transfer=worker.channel != "phone")
 
 
-def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Session) -> StreamingResponse:
+def _brain(
+    body: BrainIn,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    db: Session,
+    *,
+    can_transfer: bool = True,
+) -> StreamingResponse:
     if not _llm_ready():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No language-model provider key is configured")
     if body.messages[-1].role != "user":
@@ -250,6 +257,11 @@ def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Sess
     read_only = {"get_business_info", "get_opening_hours", "list_services"}
 
     def run(tdb, name, args):
+        # Staff assignment is not a connected SIP/carrier transfer. Even a
+        # malformed/hallucinated tool call must never mark it as completed.
+        if not can_transfer and name == "transfer_to_staff":
+            out = json.dumps({"error": "Telephone transfer is not connected. Offer to save a message."})
+            return False, out, "telephone transfer unavailable"
         ok, out = run_tool(tdb, bctx, turn, name, args)
         return ok, out, ("workspace data returned" if ok and name in read_only else out[:300])
 
@@ -258,18 +270,19 @@ def _brain(body: BrainIn, org_id: uuid.UUID, user_id: uuid.UUID | None, db: Sess
             h = turn.handoff
             yield _sse({"type": "handoff", "outcome": h.outcome, "staff": h.staff_name, "case": str(h.case.id)[:8]})
 
-    system = system_prompt(bctx)
+    system = system_prompt(bctx, can_transfer=can_transfer)
+    tools = TOOLS if can_transfer else [t for t in TOOLS if t["name"] != "transfer_to_staff"]
     if body.language is not None:
         if body.language not in LANGUAGES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown language")
         if (line := language_instruction(body.language)) is not None:
             system += "\n" + line  # after the clock line, so in the per-turn (uncached) block
     # Hold this turn's worst case against the monthly caps before calling the provider (atomic).
-    allowance = turn_allowance(system, TOOLS, msgs)
+    allowance = turn_allowance(system, tools, msgs)
     budget_mod.reserve(db, org_id, UsageKind.llm_tokens, allowance, f"llm-{body.request_id}")
     gen = _llm_stream(
         system=system,
-        tools=TOOLS,
+        tools=tools,
         msgs=msgs,
         run=run,
         after=after,
