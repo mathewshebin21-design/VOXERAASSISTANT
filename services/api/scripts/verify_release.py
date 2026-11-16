@@ -15,6 +15,8 @@ Checks:
   - the design columns and check constraints exist, with no NULL or invalid values (from 0009);
   - the shared rate-limit store exists and the runtime role can only call its function (from 0010);
   - call records exist, call events are append-only for the runtime role, audio is never stored (from 0011);
+  - voice policies and phone numbers exist; numbers are read-only for the runtime role (from 0012);
+  - outbox tables bind parent and tenant and restrict attempt history to append-only (from 0013);
   - with --baseline: no table in the baseline has fewer rows (nothing was lost or dropped).
 
 Connections come from the same variables as migrate.py: DATABASE_URL_UNPOOLED (owner) and
@@ -30,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import create_engine, pool, text  # noqa: E402
+from sqlalchemy import create_engine, inspect, pool, text  # noqa: E402
 
 from app import deploy_env  # noqa: E402
 from app.platform import APP_ROLE, hosted_overrides, migration_owner_url  # noqa: E402
@@ -155,6 +157,53 @@ def owner_checks(c, env: str, expect: str) -> tuple[list[tuple[str, bool, str]],
                 ).scalar()
                 out.append((f"call events: runtime role has no {priv}", ok, ""))
 
+    if _rev_at_least(rev, "0012"):
+        for t in ("voice_policies", "phone_numbers"):
+            exists = c.execute(text("SELECT to_regclass(:t) IS NOT NULL"), {"t": f"public.{t}"}).scalar()
+            out.append((f"0012 table {t} exists", bool(exists), ""))
+        n = c.execute(text("SELECT count(*) FROM pg_constraint WHERE conname = 'uq_phone_number_e164'")).scalar()
+        out.append(("unique constraint uq_phone_number_e164", n == 1, ""))
+        if role is not None:
+            for priv in ("INSERT", "UPDATE", "DELETE"):
+                ok = not c.execute(
+                    text("SELECT has_table_privilege(:r, 'public.phone_numbers', :p)"), {"r": APP_ROLE, "p": priv}
+                ).scalar()
+                out.append((f"phone numbers: runtime role has no {priv}", ok, ""))
+
+    if _rev_at_least(rev, "0013"):
+        schema = inspect(c)
+        for table, parent, parent_id, foreign_id, allowed in (
+            ("staff_notification_outbox", "caller_messages", "id", "case_id", {"SELECT", "INSERT", "UPDATE"}),
+            ("staff_notification_attempts", "staff_notification_outbox", "id", "notification_id", {"SELECT", "INSERT"}),
+        ):
+            exists = schema.has_table(table, schema="public")
+            out.append((f"0013 table {table} exists", exists, ""))
+            if not exists:
+                continue
+            scoped = any(
+                fk["constrained_columns"] == [foreign_id, "organization_id"]
+                and fk["referred_table"] == parent
+                and fk["referred_columns"] == [parent_id, "organization_id"]
+                and fk["referred_schema"] in (None, "public")
+                for fk in schema.get_foreign_keys(table, schema="public")
+            )
+            out.append((f"{table}: foreign key binds parent and tenant", scoped, ""))
+            if role is not None:
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"):
+                    granted = c.execute(
+                        text("SELECT has_table_privilege(:r, :t, :p)"),
+                        {"r": APP_ROLE, "t": f"public.{table}", "p": privilege},
+                    ).scalar()
+                    required = privilege in allowed
+                    out.append((f"{table}: runtime {privilege} {'required' if required else 'denied'}", granted == required, ""))
+        if schema.has_table("staff_notification_outbox", schema="public"):
+            unique = schema.get_unique_constraints("staff_notification_outbox", schema="public")
+            out.append((
+                "staff_notification_outbox: unique case and channel",
+                any(set(u["column_names"]) == {"case_id", "channel"} for u in unique),
+                "",
+            ))
+
     counts = {
         t: c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608 (names from the catalog)
         for (t,) in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"))
@@ -171,9 +220,14 @@ def runtime_checks(app_url: str, tenant: list[str]) -> list[tuple[str, bool, str
             try:
                 n = c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar()  # noqa: S608
                 out.append((f"no tenant set: {t} returns no rows to the runtime role", n == 0, f"{n} visible"))
-            except Exception as e:  # noqa: BLE001 — a permission error is also isolation
+            except Exception as e:  # noqa: BLE001 — unknown failures must fail verification
                 c.rollback()
-                out.append((f"no tenant set: {t} not readable by the runtime role", True, type(e).__name__))
+                # Only PostgreSQL insufficient_privilege proves access was denied.
+                # Missing tables, query cancellation, connection errors and programming
+                # faults provide no evidence of isolation and must never pass.
+                denied = getattr(getattr(e, "orig", None), "sqlstate", None) == "42501"
+                name = f"no tenant set: {t} access denied" if denied else f"runtime query failed for {t}"
+                out.append((name, denied, type(e).__name__))
     return out
 
 

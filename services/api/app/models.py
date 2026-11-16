@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -24,7 +25,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -421,6 +422,83 @@ class CallerMessage(Base):
     )
 
 
+class StaffNotificationOutbox(Base):
+    """Tenant-scoped durable case pointer: NOT an email or delivery receipt."""
+
+    __tablename__ = "staff_notification_outbox"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    channel: Mapped[str] = mapped_column(String(20), default="staff_email", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_ref: Mapped[str | None] = mapped_column(String(120))
+    provider_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(48))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "organization_id"],
+            ["caller_messages.id", "caller_messages.organization_id"],
+            name="fk_staff_notification_case_same_org",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("id", "organization_id", name="uq_staff_notification_id_org"),
+        UniqueConstraint("case_id", "channel", name="uq_staff_notification_once_per_case_channel"),
+        CheckConstraint("channel = 'staff_email'", name="ck_staff_notification_channel"),
+        CheckConstraint(
+            "status IN ('pending','leased','retry','provider_accepted','delivered','dead','cancelled')",
+            name="ck_staff_notification_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND attempts <= max_attempts",
+            name="ck_staff_notification_attempts",
+        ),
+        CheckConstraint("(status = 'leased') = (lease_until IS NOT NULL)", name="ck_staff_notification_lease_state"),
+        CheckConstraint(
+            "delivered_at IS NULL OR provider_accepted_at IS NOT NULL",
+            name="ck_staff_notification_delivered_requires_acceptance",
+        ),
+        Index("ix_staff_notification_due", "organization_id", "status", "next_attempt_at"),
+    )
+
+
+class StaffNotificationAttempt(Base):
+    """Append-only attempt stages; no caller content, recipient address or provider keys."""
+
+    __tablename__ = "staff_notification_attempts"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = _org_fk()
+    notification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    result: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(48))
+    provider_ref: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["notification_id", "organization_id"],
+            ["staff_notification_outbox.id", "staff_notification_outbox.organization_id"],
+            name="fk_staff_notification_attempt_same_org",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("notification_id", "attempt_number", "result", name="uq_staff_notification_attempt_stage"),
+        CheckConstraint("attempt_number > 0", name="ck_staff_notification_attempt_number"),
+        CheckConstraint(
+            "result IN ('reserved','accepted','retry','dead')", name="ck_staff_notification_attempt_result"
+        ),
+        Index("ix_staff_notification_attempt_order", "notification_id", "attempt_number", "created_at"),
+    )
+
+
 class CaseNote(Base):
     """What an employee did or learned on a case. Append-only for the API role."""
 
@@ -502,3 +580,43 @@ class CallEvent(Base):
     speaker: Mapped[str | None] = mapped_column(String(8))
     text: Mapped[str | None] = mapped_column(String(4000))
     data: Mapped[dict] = mapped_column(default=dict, nullable=False)
+
+
+class VoicePolicyRow(Base):
+    """A workspace's saved voice policy (migration 0012). No row means the defaults in
+    ``app/voice/routing.VoicePolicy``. Converted with ``app/voice/policy.py``."""
+
+    __tablename__ = "voice_policies"
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    default_language: Mapped[str] = mapped_column(String(16), nullable=False)
+    languages: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    fallback_language: Mapped[str | None] = mapped_column(String(16))
+    allowed_regions: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    blocked_providers: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    preferred_providers: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    allow_paid: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    allow_unverified: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PhoneNumber(Base):
+    """A telephone number that reaches a workspace (migration 0012). Read-only for the API role:
+    an operator assigns numbers with ``scripts/phone_numbers.py``."""
+
+    __tablename__ = "phone_numbers"
+    id: Mapped[uuid.UUID] = _pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    e164: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _created()

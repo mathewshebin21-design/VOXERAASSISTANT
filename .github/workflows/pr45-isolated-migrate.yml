@@ -1,0 +1,67 @@
+name: PR45 isolated migration (0011 to 0012)
+# Intentionally dormant: only a separate reviewed request-file push starts it.
+on:
+  push:
+    branches: [codex/uk-india-release-candidate-20261116]
+    paths: [.github/rehearsal/pr45-isolated-migrate.request]
+permissions:
+  contents: read
+concurrency:
+  group: pr45-isolated-migration
+  cancel-in-progress: false
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/codex/uk-india-release-candidate-20261116'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: pr45-isolated-validation
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.PR45_ISOLATED_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.PR45_ISOLATED_DATABASE_URL_UNPOOLED }}
+      VALIDATION_PROJECT_ID: "blue-night-16595257"
+      VALIDATION_BRANCH_ID: "br-shy-math-zaczmtq5"
+      APPROVED_SOURCE_SHA: "102bf2cd13bdc8915503a7f0a59708f161f128e5"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test and enforce isolated target gate
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_pr45_*.py'
+          python3 .github/scripts/pr45_target_gate.py
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          request = Path(".github/rehearsal/pr45-isolated-migrate.request").read_text().strip()
+          if request != os.environ["APPROVED_SOURCE_SHA"]:
+              raise SystemExit("STOP: request must name the exact reviewed application SHA")
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: "102bf2cd13bdc8915503a7f0a59708f161f128e5"
+          path: release-source
+      - name: Install locked migration dependencies
+        working-directory: release-source/services/api
+        run: |
+          python3 -m pip install --disable-pip-version-check "uv==0.11.32"
+          uv sync --frozen
+      - name: Read-only baseline, require staging at 0011
+        working-directory: release-source/services/api
+        run: |
+          uv run python scripts/migrate.py --env staging --check
+          uv run python scripts/verify_release.py --env staging --expect 0011 --save pr45-baseline.json
+      - name: Apply approved migration to isolated branch only
+        working-directory: release-source/services/api
+        run: uv run python scripts/migrate.py --env staging
+      - name: Verify schema, privileges, isolation and retained rows
+        working-directory: release-source/services/api
+        run: |
+          uv run python scripts/verify_release.py --env staging --expect 0012 --baseline pr45-baseline.json --save pr45-after.json
+          uv run python scripts/migrate.py --env staging --check
+      - name: Retain aggregate migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr45-migration-evidence-${{ github.sha }}
+          path: |
+            release-source/services/api/pr45-baseline.json
+            release-source/services/api/pr45-after.json
+          if-no-files-found: ignore

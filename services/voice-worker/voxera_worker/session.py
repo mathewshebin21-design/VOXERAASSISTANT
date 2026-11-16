@@ -34,11 +34,15 @@ from .recording import CallRecorder
 FILLER = "One moment, I'm just checking that."
 RECOVERY = "Sorry, I'm having a little trouble with that. Could you say it again?"
 MESSAGE_START = (
-    "I'm sorry, I'm having trouble on my side. I'll take a message so the team can call you back. "
-    "Could I take your name, please?"
+    "I'm sorry, I'm having trouble on my side. I can note your details, "
+    "but I can't confirm they'll reach the team. Could I take your name, please?"
 )
 MESSAGE_STEPS = ("And the best number to reach you on?", "And briefly, what is it about?")
-MESSAGE_DONE = "Thank you. I've passed that on and the team will call you back as soon as they can."
+MESSAGE_DONE = (
+    "Thank you. I can't confirm the team received your message. "
+    "Please contact the business directly if you need a response."
+)
+MESSAGE_SAVED = "Your message has been saved for the team to review. I can't guarantee when someone will reply."
 CLOSING = "I'm sorry, we've reached the time limit for this call. The team will be happy to help if you call back."
 ENDED = "I'm sorry, I can't continue this call right now. Please call back and the team will be happy to help."
 
@@ -119,6 +123,7 @@ class CallSession:
         self.failures = 0
         self.message_mode = False
         self.message: list[str] = []  # caller answers collected in message mode
+        self.message_saved = False  # true only after the staff-queue API acknowledges a saved case
         self.handoffs: list[dict] = []
         self.closed = False
         self.close_reason: str | None = None  # why the session closed itself, for the call record
@@ -145,7 +150,7 @@ class CallSession:
             rec.language = self.language.current
             if self.message_mode:
                 rec.outcome = "message_mode"
-                yield await self._say(rec, self._message_step(caller_text))
+                yield await self._say(rec, await self._message_step(caller_text))
                 return
             self.history.append({"role": "user", "text": caller_text})
             async for piece in self._brain_turn(rec):
@@ -230,10 +235,21 @@ class CallSession:
         rec.worker_line += text
         return text
 
-    def _message_step(self, answer: str) -> str:
+    async def _message_step(self, answer: str) -> str:
+        if len(self.message) >= 3:
+            return MESSAGE_SAVED if self.message_saved else MESSAGE_DONE
         self.message.append(answer[:500])
         n = len(self.message)
-        return MESSAGE_STEPS[n - 1] if n <= len(MESSAGE_STEPS) else MESSAGE_DONE
+        if n <= len(MESSAGE_STEPS):
+            return MESSAGE_STEPS[n - 1]
+        # The staff inbox is durable, but is not a proof of staff notification.
+        # Do not describe an attempted write or an in-memory list as delivered.
+        if self.recorder is not None:
+            try:
+                self.message_saved = await self.recorder.save_fallback(*self.message)
+            except Exception:  # recording/delivery may never break a caller turn
+                self.message_saved = False
+        return MESSAGE_SAVED if self.message_saved else MESSAGE_DONE
 
     # ---- the call record ---------------------------------------------------------------------
 
@@ -242,6 +258,7 @@ class CallSession:
         *,
         external_ref: str | None = None,
         caller_number: str | None = None,
+        called_number: str | None = None,
         ai_disclosure_played: bool = False,
         recording_notice_played: bool = False,
     ) -> str | None:
@@ -252,6 +269,7 @@ class CallSession:
         return await self.recorder.start(
             external_ref=external_ref,
             caller_number=caller_number,
+            called_number=called_number,
             ai_disclosure_played=ai_disclosure_played,
             recording_notice_played=recording_notice_played,
         )
@@ -261,7 +279,12 @@ class CallSession:
         if self.recorder is None:
             return
         status, outcome = call_outcome(self)
-        if self.close_reason in ("credential mismatch", "media startup failed"):
+        if self.close_reason in (
+            "credential mismatch",
+            "media startup failed",
+            "speech transcription unavailable",
+            "notice playback not confirmed",
+        ):
             status, outcome = "failed", None
         await self.recorder.end(status, outcome, self.close_reason or reason)
 
@@ -326,7 +349,9 @@ def call_outcome(session: CallSession) -> tuple[str, str | None]:
             if tool.get("ok") and tool.get("name") in _TOOL_OUTCOME:
                 return "completed", _TOOL_OUTCOME[tool["name"]]
     if session.message_mode:
-        return "completed", "message_taken" if session.message else "no_action"
+        # Memory-only fallback is not a handled message. Only a committed staff-queue
+        # acknowledgement may yield a successful message_taken outcome.
+        return ("completed", "message_taken") if session.message_saved else ("failed", None)
     if not answered and session.failures:
         return "failed", None
     return "completed", "answered" if answered else "no_action"

@@ -5,9 +5,10 @@ Lifecycle: a call starts ``in_progress`` and ends exactly once, as ``completed``
 only be added while the call is in progress. Each append locks the call row, so events from
 concurrent writers (the brain and the client) get unique, gap-free sequence numbers.
 
-Consent: transcript text is stored only if the caller heard the recording notice
-(``transcript_retained``). Otherwise events keep their kind, speaker and data but not the words.
-Audio is never stored.
+Consent: transcript text is stored only after the recording notice checkpoint
+(``transcript_retained``). Phone events before that checkpoint also withhold
+arbitrary metadata, which could otherwise carry caller text or identifiers.
+Audio is never stored. SDK checkpoints are not proof of carrier receipt.
 """
 
 from __future__ import annotations
@@ -83,8 +84,19 @@ def get(db: Session, org_id: uuid.UUID, call_id: uuid.UUID, *, lock: bool = Fals
     return call
 
 
-def append(db: Session, org_id: uuid.UUID, call_id: uuid.UUID, events: list[dict[str, Any]]) -> list[CallEvent]:
-    """Adds events in order. Locks the call row; refuses ended calls and overlong logs."""
+def append(
+    db: Session,
+    org_id: uuid.UUID,
+    call_id: uuid.UUID,
+    events: list[dict[str, Any]],
+    *,
+    trusted_notice_receipt: bool = False,
+) -> list[CallEvent]:
+    """Adds ordered events, removing phone pre-notice text and arbitrary metadata.
+
+    The only trusted exception is the server's own system notice checkpoint.
+    A worker posting a lookalike event through /events cannot use that exception.
+    """
     call = get(db, org_id, call_id, lock=True)
     if call.status != "in_progress":
         raise CallError(409, "The call has ended; no more events can be added")
@@ -96,7 +108,24 @@ def append(db: Session, org_id: uuid.UUID, call_id: uuid.UUID, events: list[dict
         if len(json.dumps(data, default=str)) > MAX_DATA_CHARS:
             raise CallError(422, f"Event data is limited to {MAX_DATA_CHARS} characters")
         text = e.get("text")
-        if text is not None and not call.transcript_retained:
+        if call.channel == "phone" and not call.transcript_retained:
+            # Stripping only the text column is not enough: callers' speech,
+            # names and phone numbers may be embedded in arbitrary tool/utterance
+            # data. Retain only a coarse, non-PII omission marker.
+            is_notice = (
+                trusted_notice_receipt
+                and e.get("kind") == "system"
+                and e.get("speaker") == "system"
+                and text is None
+                and data.get("event") == "notice_playout_reported"
+                and data.get("notice") in ("ai_disclosure", "recording_notice")
+                and data.get("method") == "livekit_speech_playout"
+                and set(data) == {"event", "notice", "method"}
+            )
+            if not is_notice:
+                text = None
+                data = {"text_withheld": True} if e.get("kind") == "utterance" else {"metadata_withheld": True}
+        elif text is not None and not call.transcript_retained:
             text, data["text_withheld"] = None, True
         rows.append(
             CallEvent(

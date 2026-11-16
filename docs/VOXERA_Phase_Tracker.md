@@ -1,5 +1,124 @@
 # VOXERA Phase Tracker
 
+## Canonical execution register — 17 November 2026 (Asia/Kolkata)
+
+The owner's **Master GPT Work Execution Roadmap** supplies the current Phase 0–13 execution labels. Its table is provisional where historical definitions conflict. Preserve all requirements through the crosswalk below. The prior canonical Phase 0–10 dashboard and the historical release ledger are retained at the end of this file.
+
+| Current phase and owner scope | Original 0–10 crosswalk | Earlier expanded 0–13 crosswalk |
+| --- | --- | --- |
+| 0 Infrastructure and Security | 0 Infrastructure and isolation, part of 10 | 0 Infrastructure and Security |
+| 1 Core SaaS | 1 Receptionist and onboarding, tenancy from 0 | 1 Core SaaS Application |
+| 2 Business Operations | 2 Appointments and staff, parts of 1 and 7 | 2 Call Management and Business Operations, booking from 5 |
+| 3 AI Agent Studio | 3 Agent Studio | 4 AI Agent Studio |
+| 4 Testing Lab | 4 Testing Lab, QA tooling from 7 | Testing Lab in 4, test programme in 10 |
+| 5 Browser Voice | 5 Browser voice | Browser voice in 4, speech in 3 |
+| 6 Production Voice Engine | Voice engine from 5–6 | 3 Production-Grade Voice Receptionist |
+| 7 Telephony | 6 Telephony | SIP/PSTN and number routing from 3 |
+| 8 Integrations | 8 Integrations | 5 Appointments, Integrations and Automation |
+| 9 Analytics | Analytics from 7 Operations, analytics and QA | Reporting from 2, 6 and 8 |
+| 10 Security and Reliability | Security, performance and launch controls from 10, QA and operations from 7 | 8 Administration and Operations, 10 Complete Quality Assurance, technical gates from 11 |
+| 11 Billing and Subscriptions | 9 SaaS and billing | 6 Subscriptions, Billing and Monetization |
+| 12 Commercial Product Experience | UX from 1, 3 and 10 | 7 Premium Product Design, 12 Commercial Productization |
+| 13 Launch Readiness | 10 Launch, security and commercial readiness | 9 UK and India Compliance Readiness, 11 Release Engineering, 13 Pilot and Commercial Launch |
+
+“Phase 3 release candidate” in existing PR titles and in the immediate priority refers to the older voice release. Its work spans current phases 0, 2, 6, 7, 8 and 10. Current Phase 3 is Agent Studio. Phase status reflects final acceptance, while individual evidence below names the code and environment covered.
+
+| Phase | Status | Existing implementation and evidence | Remaining acceptance and dependencies |
+| --- | --- | --- | --- |
+| 0 | In Progress | PR #47 retired the PR28 migration job. PR45 isolated 0012 migration and hosted separation verified. | Recheck repository protection and settings, branch-only runtime identity, production recovery point and tested restore. Keep backups. Release and shared schema writes require owner approval. |
+| 1 | In Progress | Workspace auth, sessions, permissions, business config, export and account lifecycle in `services/api/app/routers`. Historical production evidence below and PR45 hosted synthetic checks. | Verify current release candidate onboarding, invitations, positive/negative role paths, export/delete and account lifecycle across desktop and mobile. Depends on 0 and exact deployed source. |
+| 2 | In Progress | Local appointments, staff desk, cases, call history and consent. #49 and #55–#57 add durable fallback, human acknowledgement and notification visibility. | Verify lead/enquiry lifecycle, concurrent booking, DST, staff shifts/skills/locations, call summaries, retention and staff desk on integrated source. External bookings and messages require approval. |
+| 3 | In Progress | Basic persisted agent CRUD and browser-only configuration preview. PR #2 contains visual flow editor/versioning work on old base. | Reconcile #2 without losing current safety work. Verify workspace configuration, FAQ, policy, publish/rollback and immutable live version selection. Depends on 0–2 and 4. |
+| 4 | In Progress | Browser simulator, scripted-call harness and stand-in integration CI. PR #2 includes Testing Lab. | Verify persisted scenario/version linkage, realistic regression corpus, scored evaluation, actionable failures, publish gating and test-run authorization. |
+| 5 | In Progress | Browser Voice Lab and synthetic provider integration. | Measure audio, language switching, latency, interruption and error recovery on browser devices with approved providers or local engines. Depends on 3, 4, 6. |
+| 6 | In Progress | #40/#41 included in #45. Worker timeout recovery, lifetime bound, model attestation gates, call binding and notice tests in #50/#53/#54. | Independently verify approved model, language, geography, budget, usage reconciliation and real audio. Exercise TTS/STT disconnect, interruption, mixed-language/noisy calls and long sessions. Paid providers require approval. |
+| 7 | Blocked | #41/#45 map numbers to tenants. #50 binds phone credentials to a call. #51 adds SIP ingress checks, #52 prevents phantom transfer, #53/#54 enforce notice and pre-notice privacy. | Carrier/trunk/dispatch verification, actual notice playout and consent, reliable transfer and hangup, provider limits and realistic UK/India call acceptance. Require model/carrier/legal evidence and owner approval before real calls. |
+| 8 | In Progress | #56 durable outbox, #57 desk visibility, #58 in-memory transport, #59 production adapter contract. Local booking and staff handoff foundations. | Verify calendar OAuth, CRM, signed and replay-safe callbacks, bounded retries, reconciliation, dedupe and truthful external outcomes. Approve providers/accounts/recipients before any external action. |
+| 9 | In Progress | Call events, usage, dashboard and synthetic metrics. | Validate tenant-scoped reporting and call outcomes, metering reconciliation, staff dashboards, exports, call quality and reporting accuracy. Depends on 2, 6–8 and 11. |
+| 10 | In Progress | Tenant RLS, auth/RBAC, rate limiting, sanitized metrics and migration verification. #54 adds pre-notice safeguards. | Exact deployed-source privacy/regression checks, abuse, load, backpressure, dependency review, retention scheduling, observability, incident procedures, restore and forward recovery. |
+| 11 | Not Started | Existing usage reservations are a building block. No verified subscription lifecycle or payment collection. | Verify plan/entitlement, minute and token metering, trial, webhook, invoice, tax, refund, renewal and failed-payment sandbox journeys. Price with current verified costs. Live payments require approval. |
+| 12 | In Progress | Flow is approved design direction. Authenticated dashboards plus browser-only demos. | Distinguish demo and real features, verify premium mobile/desktop accessibility, agent self-service, onboarding and support. Prepare accurate positioning, UK/India packages, demo, FAQs, docs and cancellation. |
+| 13 | Blocked | Issue #44 and commercial readiness document list open gates. | Obtain UK/India legal review and current provider, data processing, consent and tax evidence. Prepare policy/DPA/terms, recovery and incident runbooks, pilot metrics, final immutable release report and monitored smoke checks. Production promotions, pilot calls, customer outreach and commercial launch need explicit approval. |
+
+### Current release evidence
+
+- Production branch `claude/confident-shannon-7nb05f` was read at `21c5ac9e3ca3bb6dd9a2a5a5ad1dce760882e650`. Production Neon and shared staging both independently returned `0011` with their expected markers. Latest production API Vercel attempt `dpl_73pRt66f54LCna66LvUDbButXeoH` refused schema mismatch. Frontend `dpl_5uAKRiBunVXvHsBNUhgTZ6VtKD77` reports READY. Build history alone leaves live alias health unverified.
+- PR45 isolate `blue-night-16595257/br-shy-math-zaczmtq5` returned `0012 / staging`. Migration run [43866923135](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43866923135) passed. Hosted runs [43872852247](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43872852247) and [43874094532](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43874094532) passed on the earlier pinned Preview application commit `2839e46`. Current PR45 head `e529f93` contains later provider gates, so those hosted runs establish only the older deployment.
+- The stack is linear through PR #59 as of this audit. PR #59 head `030c6e4` contains `e529f93` and the production safeguard baseline. The full stack needs a single tested integration candidate. Each component PR remains available for review.
+- Migration 0013 adds a unique constraint to existing cases, RLS-protected outbox and attempts tables, tenant-bound composite foreign keys and restricted grants. The new rehearsal verifies seeded 0012 data after injected rollback, upgrade, repeated upgrade, downgrade and re-upgrade on a disposable GitHub PostgreSQL service. Hosted 0013 is pending.
+- Notification idempotency on an external provider remains unproven. Case acknowledgement can race an already submitted request. Approval and provider-backed reconciliation remain required before implementing live delivery.
+- The existing approval covers isolated PR45 migration 0012 only. The new GitHub Actions rehearsal uses loopback PostgreSQL, synthetic fixtures and in-memory transport. It consumes no new Neon resources. The $10 warning and $15 threshold are requested cost controls, with enforcement still subject to provider evidence.
+
+### Stack checked at start of integration
+
+| PR | Head | Depends on | Scope |
+| --- | --- | --- | --- |
+| [#45](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/45) | `e529f930aad8a5e1e7ed7a3acfabdbf5a5f83180` | `claude/confident-shannon-7nb05f` | Release candidate: voice routing, bounded call recovery and canonical phase verification |
+| [#48](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/48) | `152e4491e6fcc694c25cd84cfc6b97fadd6826e3` | `codex/uk-india-release-candidate-20261116` | fix(worker): fail closed when fallback message has no delivery acknowledgement |
+| [#49](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/49) | `038545751442a56c21185b9a64aabecba85b66f3` | `codex/worker-fallback-truthful-20261116` | feat(worker): persist simulated fallback messages in staff queue with acknowledgement |
+| [#50](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/50) | `70184a8e5d28ae5e950108ec29aa2f81c9b29341` | `codex/worker-fallback-queue-20261116` | security(worker): bind telephone credentials and inference to one immutable call |
+| [#51](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/51) | `7008dea93f2025f84b25ac110dfd67b490abecc1` | `codex/worker-call-bound-credentials-20261116` | security(sip): deny unreviewed inbound trunk and dispatch routes before call admission |
+| [#52](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/52) | `3479539da7f84af18321029efd23b8a890e4ce7e` | `codex/verified-sip-ingress-gate-20261116` | safety(phone): block phantom staff transfers without carrier confirmation |
+| [#53](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/53) | `f395811fcd83c3266ea3c2101d7ddce1715fcd4d` | `codex/no-phantom-phone-transfer-20261116` | safety(phone): require call-bound AI/recording notice playout before listening |
+| [#54](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/54) | `8d7eea906f3279cc7bbb66d893f3d8a0f37bbc15` | `codex/phone-notice-playout-proof-20261116` | privacy(phone): redact pre-notice event metadata and block spoofed receipt evidence |
+| [#55](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/55) | `509b0115acf36019130893b6a9fe802be28374c1` | `codex/phone-prenotice-metadata-privacy-20261116` | feat(desk): explicit human case acknowledgment without phantom notification delivery |
+| [#56](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/56) | `dcedb26a41f755d89dae6c2fcb6bd6e7e7b6bd73` | `codex/staff-case-acknowledgement-20261116` | feat(notifications): transactional staff outbox, bounded retries and separate delivery evidence |
+| [#57](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/57) | `0ff6a94af23c59dec741dabfb1cc6909801fa08b` | `codex/staff-notification-outbox-20261116` | feat(desk): truthful notification visibility and manual staff-review triage |
+| [#58](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/58) | `3f506da2894694405bc4bac84c33fac85cada712` | `codex/notification-attention-desk-20261117` | test(notifications): fail-closed fake dispatcher and recheck-before-send cancellation |
+| [#59](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/59) | `030c6e4b750b523daeaea5e0dad8c7adf237e952` | `codex/notification-sandbox-dispatcher-20261117` | docs(safety): formalize Phase 3 notification provider release contract |
+
+### Next executable gate
+
+Run API (including disposable migration rehearsal), worker, frontend and simulated integration workflows on the integration candidate. Inspect failures and record exact commit, run IDs, results and scope. Keep the production schema and the existing 0012 validation branch at their verified revisions until separate migration sequencing is approved. Review #2 and start the Agent Studio reconciliation separately when the integration candidate is stable.
+
+## Retained original Phase 0–10 dashboard — 2026-11-16 (Asia/Kolkata)
+
+**Owner requirement: complete every phase and verify everything. No inferred completion percentages.**
+Canonical numbering is **0–10**, recovered from the owner's `VOXERA_Phase_Tracker.md`,
+version 17, canonical dashboard. This supersedes the provisional phase labels in historical
+repository documents and PR titles. Historical evidence below is retained, not silently rewritten.
+
+Each requirement needs: acceptance criterion, exact source SHA, environment/database identity,
+test command or workflow URL, observed result, date, residual limitations and approval reference
+where required. Use separate states for **implemented**, **CI verified**, **hosted verified**,
+**production verified**, **blocked**, and **not run**. A phase is complete only when all applicable
+acceptance requirements have evidence. Fake-provider tests never establish real audio/PSTN quality.
+A successful build, merged migration file or upgraded service plan is not launch acceptance.
+
+| Phase | Canonical scope | Current acceptance state and next gate |
+| --- | --- | --- |
+| 0 | Infrastructure and isolation | Production database read-only verified at 0011. Source contains 0012; latest API build refuses mismatch. Fresh recovery point, protected migration, restore evidence and exact deployed-source parity remain open. |
+| 1 | Receptionist and onboarding | Historical production acceptance exists below. Revalidate complete current candidate: auth/session, persistent configuration, onboarding, permissions, booking flow and rollback. Do not treat earlier receipts as current-source acceptance. |
+| 2 | Appointments and staff | Scheduling/rescheduling and staff foundations have historical evidence. Complete requirement coverage for skills, shifts, holidays, locations, concurrent booking and timezone/DST behavior; current hosted acceptance required. |
+| 3 | Agent Studio | PR #2 is still open/unmerged at 15a89715a2a5437c839dcbdd9c1fa320a646be02 and targets an old branch. Reconcile with current production, preserve safety fixes, complete node/version/publish requirements and rerun acceptance. |
+| 4 | Testing Lab | Implementations/evidence partly live in unmerged PR #2. Verify deterministic scenarios, explicit failure reporting, evaluation matrix, version linkage and publish gating on the integrated source. |
+| 5 | Browser voice | Existing browser implementation and simulated checks. Real listening, interruption, language switching, latency and provider-policy enforcement remain unaccepted. |
+| 6 | Telephony | PR #45 integrates saved policy/number mapping, transcription recovery and an independent lifetime guard. Live inbound calls, actual transfer/hangup, disclosures, provider controls and country sign-offs remain blocked; no PSTN launch evidence. |
+| 7 | Operations, analytics and QA | Call records and simulated metrics exist. Verify durable fallback messages, actual outcomes, takeover, retention scheduling, monitoring, load and incident handling. |
+| 8 | Integrations | Validate OAuth, calendars, CRM, signed deliveries, replay/retry/revocation, and ORCHESTRA/REVORA contracts. Demos/interfaces are not live integration acceptance. |
+| 9 | SaaS and billing | Usage foundations exist. Implement and verify entitlements, subscription/payment lifecycle, invoice/tax handling, GBP/INR plans and cost reconciliation. Paid activation remains approval-gated. |
+| 10 | Launch, security and commercial readiness | BLOCKED for both UK and India. Requires current security/dependency, tenant isolation, privacy, accessibility, performance, recovery, real-call, billing and hosted release evidence plus owner sign-off. |
+
+Current release work: [PR #45](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/45).
+Detailed blockers and production release sequence:
+[UK/India commercial readiness](uk-india-commercial-readiness.md).
+
+Verification completed during this continuation on code commit
+`a018385ebcb78fec07a0d816840724c0f0ba6760`:
+worker lint/format, 110 core tests (3 optional skips), 37 real-SDK adapter tests;
+API lint/format, pytest, migration round-trip and Docker steps passed in
+[API run 43748910546](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43748910546).
+Worker/container evidence:
+[run 43748910476](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43748910476).
+Full latest-head CI and hosted acceptance must still be checked after subsequent changes.
+No production migration/merge/deploy, backup deletion, paid activation or external customer action
+was performed in this continuation. Existing approval gates remain intact.
+
+## Historical release ledger
+
+The phase numbers in the retained sections below are historical repository labels, not the
+canonical roadmap above. Their status statements apply to their recorded dates and commits.
+
 Status legend: **Verified** (evidence linked) · **Blocked** (named blocker) · **Not run**.
 Assumptions are listed separately from verified results.
 

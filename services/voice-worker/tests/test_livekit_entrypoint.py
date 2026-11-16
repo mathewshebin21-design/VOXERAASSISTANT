@@ -18,20 +18,38 @@ import pytest
 
 pytest.importorskip("livekit.agents")
 
+from voxera_worker import guard as guard_mod  # noqa: E402
 from voxera_worker import livekit_agent as worker  # noqa: E402
 from voxera_worker.guard import SIP_KIND  # noqa: E402
+from voxera_worker.recording import room_ref  # noqa: E402
 from voxera_worker.session import CallSession  # noqa: E402
 
 
 def token(mode: str, channel: str) -> str:
-    payload = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+    claims = {"mode": mode, "channel": channel}
+    if channel == "phone":
+        claims["call_ref"] = room_ref("isolated-rehearsal-room")
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
     return f"test.{payload}.sig"
 
 
 class FakeContext:
     def __init__(self, kind: int, events: list[str]) -> None:
         self.room = SimpleNamespace(name="isolated-rehearsal-room")
-        self.participant = SimpleNamespace(kind=kind)
+        # A SIP participant carries the dialled number as a LiveKit attribute.
+        attrs = (
+            {
+                "sip.trunkPhoneNumber": "+441179460000",
+                "sip.trunkID": "ST_TEST_INGRESS",
+                "sip.ruleID": "SDR_TEST_INGRESS",
+                "sip.callID": "lk-sip-call-test-01",
+                "sip.callIDFull": "carrier-sip-call-test-01",
+                "sip.callStatus": "ringing",
+            }
+            if kind == SIP_KIND
+            else {}
+        )
+        self.participant = SimpleNamespace(kind=kind, attributes=attrs)
         self.events = events
         self.shutdown_reason: str | None = None
         self.callbacks: list = []
@@ -52,7 +70,16 @@ class FakeContext:
         self.events.append("callback")
 
 
-def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | None):
+def setup(
+    monkeypatch,
+    *,
+    mode: str,
+    channel: str,
+    kind: int,
+    record_id: str | None,
+    refuse_notice: str | None = None,
+    failed_speech: str | None = None,
+):
     events: list[str] = []
     context = FakeContext(kind, events)
     recordings: list = []
@@ -60,19 +87,38 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
     monkeypatch.delenv("VOXERA_WORKER_TOKEN_CMD", raising=False)
     monkeypatch.setenv("VOXERA_WORKER_TOKEN", token(mode, channel))
     monkeypatch.setenv("VOXERA_SIP_ENABLED", "true")  # explicit opt-in for offline admission-path tests
+    # Hypothetical route exists ONLY inside this pytest fixture. The runtime
+    # allowlist stays empty, irrespective of VOXERA_SIP_ENABLED.
+    monkeypatch.setattr(
+        guard_mod,
+        "APPROVED_INBOUND_ROUTES",
+        {("ST_TEST_INGRESS", "SDR_TEST_INGRESS"): frozenset({"+441179460000"})},
+    )
     monkeypatch.setenv("VOXERA_MEDIA_ENABLED", "true")  # mocked; never reaches inference
     monkeypatch.setenv("VOXERA_MEDIA_PROVIDER", "livekit-inference")
     monkeypatch.setenv("VOXERA_STT_MODEL", "mock/stt-model")
     monkeypatch.setenv("VOXERA_TTS_MODEL", "mock/tts-model")
     monkeypatch.setenv("VOXERA_TTS_VOICE", "offline-voice")
     monkeypatch.setenv("VOXERA_API_URL", "http://isolated-api.test")
-    monkeypatch.setenv("VOXERA_LANGUAGES", "en-GB,hi-IN")
+    policy_reads: list = []
+
+    async def fake_authorized_languages(api, tokens, media):
+        assert api == "http://isolated-api.test"
+        events.append("policy")
+        policy_reads.append(tokens)
+        assert media.stt_model == "mock/stt-model" and media.tts_model == "mock/tts-model"
+        # Only this in-memory pytest double skips attestations. No runtime bypass exists.
+        return "en-GB", ("en-GB", "hi-IN")
+
+    monkeypatch.setattr(worker, "fetch_authorized_languages", fake_authorized_languages)
 
     class Recorder:
         def __init__(self, api, tokens):
             assert api == "http://isolated-api.test"
             self.tokens = tokens
+            self.call_id = None
             self.ends: list[tuple] = []
+            self.writes: list[dict] = []
             recordings.append(self)
 
         async def start(self, **kwargs):
@@ -80,20 +126,73 @@ def setup(monkeypatch, *, mode: str, channel: str, kind: int, record_id: str | N
             assert kwargs["ai_disclosure_played"] is False
             assert kwargs["recording_notice_played"] is False
             assert kwargs["external_ref"].startswith("room-")
+            context.start_kwargs = kwargs
+            self.call_id = record_id
             return record_id
+
+        def add(self, rows):
+            self.writes.extend(rows)
+
+        async def acknowledge_notice(self, kind):
+            events.append(f"notice_{kind}")
+            return kind != refuse_notice
 
         async def end(self, *args):
             self.ends.append(args)
             events.append("record_end")
 
+    class FakeSpeech:
+        def __init__(self, text):
+            self.text = text
+            self.interrupted = bool(failed_speech and failed_speech in text)
+
+        async def wait_for_playout(self):
+            if self.interrupted:
+                return None
+
+        def done(self):
+            return True
+
+        def exception(self):
+            return None
+
+        def __await__(self):
+            return self.wait_for_playout().__await__()
+
     class MediaSession:
         def __init__(self):
+            self.callbacks = {}
+            self.input = SimpleNamespace(set_audio_enabled=self.set_audio_enabled)
+            self.audio_input_enabled = False
             sessions.append(self)
 
-        async def start(self, *, agent, room):
+        def set_audio_enabled(self, enabled):
+            self.audio_input_enabled = enabled
+            events.append("input_on" if enabled else "input_off")
+
+        def on(self, name):
+            def register(callback):
+                self.callbacks[name] = callback
+                return callback
+
+            return register
+
+        async def start(self, *, agent, room, room_options=None, record=None):
             assert isinstance(agent.call, CallSession)
             assert room is context.room
+            if kind == SIP_KIND:
+                assert room_options is not None
+                assert room_options.audio_input is not False
+                assert room_options.text_input is False and room_options.text_output is False
+                assert record is False
+            else:
+                assert room_options is None and record is None
+            self.agent = agent
             events.append("media_start")
+
+        def say(self, text, *, allow_interruptions, add_to_chat_ctx):
+            events.append("media_say")
+            return FakeSpeech(text)
 
     monkeypatch.setattr(worker, "CallRecorder", Recorder)
     monkeypatch.setattr(worker, "build_media_session", lambda settings: MediaSession())
@@ -115,12 +214,61 @@ async def test_sip_refuses_non_live_phone_token_before_any_record_or_speech(monk
     assert recordings == [] and sessions == [] and ctx.callbacks == []
 
 
+async def test_sip_refuses_a_valid_phone_token_from_another_room_before_call_start(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    # The signed ref belongs to the original room, but the LiveKit job serves another.
+    ctx.room.name = "different-telephone-room"
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "worker channel mismatch"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_sip_default_unreviewed_trunk_is_refused_before_policy_media_and_record(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    # Source-controlled registry is empty. Only a test double normally authorizes
+    # this fictional trunk; remove it here to prove fail-closed default.
+    monkeypatch.setattr(guard_mod, "APPROVED_INBOUND_ROUTES", {})
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("sip.trunkID", "ST_UNKNOWN"),
+        ("sip.ruleID", "SDR_UNKNOWN"),
+        ("sip.callID", ""),
+        ("sip.callIDFull", None),
+        ("sip.callStatus", "hangup"),
+        ("sip.callStatus", "dialing"),
+        ("sip.callStatus", ["ringing"]),  # malformed unhashable value must fail closed
+        ("sip.trunkPhoneNumber", "+441179460001"),
+    ],
+)
+async def test_sip_missing_or_unapproved_origin_evidence_never_starts_media(monkeypatch, field, value):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+    ctx.participant.attributes[field] = value
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
+
+
 async def test_sip_refuses_even_valid_channel_when_api_denies_call_start(monkeypatch):
     ctx, events, recordings, sessions = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None)
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "telephone authorization failed"
-    assert events == ["connect", "participant", "record", "shutdown"]
+    assert events == ["connect", "participant", "policy", "record", "shutdown"]
     assert len(recordings) == 1 and sessions == [] and ctx.callbacks == []
 
 
@@ -131,10 +279,80 @@ async def test_sip_starts_media_only_after_api_authorized_call_record(monkeypatc
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason is None
-    assert events == ["connect", "participant", "record", "media_start", "callback"]
+    assert events == [
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "input_off",
+        "media_start",
+        "media_say",
+        "notice_ai_disclosure",
+        "media_say",
+        "notice_recording_notice",
+        "input_on",
+        "callback",
+    ]
     assert len(recordings) == len(sessions) == len(ctx.callbacks) == 1
+    assert sessions[0].audio_input_enabled is True and sessions[0].agent.notices_complete is True
+    assert sessions[0].agent.call.conversation_id == room_ref(ctx.room.name)
+    assert ctx.start_kwargs["external_ref"] == room_ref(ctx.room.name)
     await ctx.callbacks[0]()
     assert events[-1] == "record_end"
+
+
+@pytest.mark.parametrize(
+    ("refuse_notice", "failed_speech", "expected_events"),
+    [
+        (
+            "ai_disclosure",
+            None,
+            ["media_say", "notice_ai_disclosure", "record_end", "shutdown"],
+        ),
+        (
+            "recording_notice",
+            None,
+            [
+                "media_say",
+                "notice_ai_disclosure",
+                "media_say",
+                "notice_recording_notice",
+                "record_end",
+                "shutdown",
+            ],
+        ),
+        (
+            None,
+            "AI receptionist",
+            ["media_say", "record_end", "shutdown"],
+        ),
+        (
+            None,
+            "transcribed and saved",
+            ["media_say", "notice_ai_disclosure", "media_say", "record_end", "shutdown"],
+        ),
+    ],
+)
+async def test_phone_notice_failure_closes_call_without_enabling_caller_audio(
+    monkeypatch, refuse_notice, failed_speech, expected_events
+):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch,
+        mode="live",
+        channel="phone",
+        kind=SIP_KIND,
+        record_id="authorized-phone-notice",
+        refuse_notice=refuse_notice,
+        failed_speech=failed_speech,
+    )
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "notice playback not confirmed"
+    assert events[:6] == ["connect", "participant", "policy", "record", "input_off", "media_start"]
+    assert events[6:] == expected_events
+    assert sessions[0].audio_input_enabled is False
+    assert sessions[0].agent.notices_complete is False
+    assert recordings[0].ends == [("failed", None, "notice playback not confirmed")]
+    assert ctx.callbacks == []
 
 
 async def test_non_sip_participant_cannot_use_phone_credential(monkeypatch):
@@ -153,7 +371,7 @@ async def test_simulated_participant_may_start_without_record_on_best_effort_pat
     await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason is None
-    assert events == ["connect", "participant", "record", "media_start", "callback"]
+    assert events == ["connect", "participant", "policy", "record", "media_start", "callback"]
     assert len(recordings) == len(sessions) == 1
 
 
@@ -165,9 +383,12 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
 
     class FailingMediaSession:
         def __init__(self):
+            self.input = SimpleNamespace(
+                set_audio_enabled=lambda enabled: events.append("input_on" if enabled else "input_off")
+            )
             sessions.append(self)
 
-        async def start(self, *, agent, room):
+        async def start(self, *, agent, room, **_opts):
             events.append("media_start")
             raise error_type("simulated media startup failure")
 
@@ -176,7 +397,16 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
         await worker.entrypoint(ctx)
 
     assert ctx.shutdown_reason == "media startup failed"
-    assert events == ["connect", "participant", "record", "media_start", "record_end", "shutdown"]
+    assert events == [
+        "connect",
+        "participant",
+        "policy",
+        "record",
+        "input_off",
+        "media_start",
+        "record_end",
+        "shutdown",
+    ]
     assert len(recordings) == len(sessions) == 1
     assert recordings[0].ends == [("failed", None, "media startup failed")]
     assert ctx.callbacks == []  # startup never succeeded, so no later shutdown callback was registered
@@ -228,3 +458,116 @@ async def test_missing_tts_model_refuses_before_call_record_or_media(monkeypatch
     assert ctx.shutdown_reason == "speech media unavailable"
     assert events == ["connect", "participant", "shutdown"]
     assert recordings == [] and sessions == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "channel", "kind"),
+    [("test", "simulated", 0), ("live", "phone", SIP_KIND)],
+)
+async def test_unreviewed_media_is_refused_for_test_and_phone_channels_before_record(monkeypatch, mode, channel, kind):
+    """A test worker token must never turn an unreviewed model into an approved one."""
+    import httpx
+
+    from voxera_worker.media_policy import fetch_authorized_languages as real_policy_gate
+
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode=mode, channel=channel, kind=kind, record_id="would-not-be-used"
+    )
+    policy = {
+        "default_language": "en-GB",
+        "languages": ["en-GB"],
+        "allowed_regions": ["device", "uk", "eu", "us", "global"],
+        "blocked_providers": [],
+        "allow_paid": True,
+        "allow_unverified": True,
+    }
+
+    async def gate(api, tokens, media):
+        events.append("policy")
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json=policy))
+        ) as client:
+            return await real_policy_gate(api, tokens, media, http=client)
+
+    monkeypatch.setattr(worker, "fetch_authorized_languages", gate)
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "voice policy unavailable"
+    assert events == ["connect", "participant", "policy", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_no_saved_policy_means_no_call_and_no_record(monkeypatch):
+    from voxera_worker.policy import PolicyUnavailable
+
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="would-not-be-used"
+    )
+
+    async def unavailable(api, tokens, media):
+        events.append("policy")
+        raise PolicyUnavailable("voice policy request refused (503)")
+
+    monkeypatch.setattr(worker, "fetch_authorized_languages", unavailable)
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "voice policy unavailable"
+    assert events == ["connect", "participant", "policy", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
+async def test_the_dialled_number_goes_with_a_telephone_call_only(monkeypatch):
+    ctx, _, _, _ = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id="verified-call-id")
+    await worker.entrypoint(ctx)
+    assert ctx.start_kwargs["called_number"] == "+441179460000"
+
+    ctx, _, _, _ = setup(monkeypatch, mode="test", channel="simulated", kind=0, record_id="call-id")
+    await worker.entrypoint(ctx)
+    assert ctx.start_kwargs["called_number"] is None
+
+
+async def test_a_sip_call_without_a_usable_dialled_number_is_not_answered(monkeypatch):
+    # No number (or not E.164): nothing is sent, the API refuses the phone record (the fake returns
+    # None, as the real recorder does on a 403), and media never starts.
+    ctx, events, recordings, sessions = setup(monkeypatch, mode="live", channel="phone", kind=SIP_KIND, record_id=None)
+    ctx.participant.attributes = {"sip.trunkPhoneNumber": "not-a-number"}
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason == "unapproved SIP origin"
+    assert events == ["connect", "participant", "shutdown"]
+    assert recordings == [] and sessions == []
+
+
+async def test_the_call_starts_in_the_workspaces_default_language(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="test", channel="simulated", kind=0, record_id="call-id"
+    )
+
+    async def hindi_first(api, tokens, media):
+        events.append("policy")
+        return "hi-IN", ("hi-IN", "en-GB")
+
+    monkeypatch.setattr(worker, "fetch_authorized_languages", hindi_first)
+    await worker.entrypoint(ctx)
+    gate = sessions[0].agent.call.language
+    assert gate.current == "hi-IN" and gate.accepted == ("hi-IN", "en-GB")
+
+
+async def test_entrypoint_attaches_transcription_guard_and_closes_failed_call(monkeypatch):
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode="test", channel="simulated", kind=0, record_id="authorized-simulated-id"
+    )
+    await worker.entrypoint(ctx)
+    assert ctx.shutdown_reason is None
+    assert "user_input_transcribed" in sessions[0].callbacks
+    assert "user_transcription_timeout" in sessions[0].callbacks
+
+    timeout = sessions[0].callbacks["user_transcription_timeout"]
+    timeout(SimpleNamespace())
+    timeout(SimpleNamespace())
+    await asyncio.sleep(0)
+    assert ctx.shutdown_reason == "speech transcription unavailable"
+    assert len(recordings[0].writes) == 2
+    assert all(event["data"]["outcome"] == "transcription_timeout" for event in recordings[0].writes)
+    await ctx.callbacks[0]()
+    assert recordings[0].ends == [("failed", None, "speech transcription unavailable")]
+    assert events[-4:] == ["media_say", "media_say", "shutdown", "record_end"]

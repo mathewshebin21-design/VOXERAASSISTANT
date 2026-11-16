@@ -426,6 +426,18 @@ class CaseNoteOut(Out):
     created_at: datetime
 
 
+class CaseNotificationOut(BaseModel):
+    """Read-only internal delivery state; never a claim of staff receipt."""
+
+    channel: Literal["staff_email"]
+    state: Literal["pending", "leased", "retry", "provider_accepted", "delivered", "dead", "cancelled"]
+    attempts: int
+    last_error_code: str | None = None
+    staff_review_due_at: datetime
+    needs_staff_review: bool = False
+    review_reason: Literal["notification_failed", "staff_unacknowledged"] | None = None
+
+
 class CaseOut(Out):
     id: uuid.UUID
     kind: str
@@ -439,6 +451,10 @@ class CaseOut(Out):
     assigned_to: uuid.UUID | None
     assignee_name: str | None = None
     assigned_at: datetime | None
+    staff_acknowledged_at: datetime | None = None
+    staff_acknowledged_by: uuid.UUID | None = None
+    staff_acknowledged_by_name: str | None = None
+    notification: CaseNotificationOut | None = None
     resolution: str | None
     resolved_at: datetime | None
     resolved_by: uuid.UUID | None

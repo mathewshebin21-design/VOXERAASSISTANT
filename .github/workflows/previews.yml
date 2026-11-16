@@ -4,7 +4,8 @@ on:
   push:
     paths: ["apps/previews/**", ".github/workflows/previews.yml"]
   pull_request:
-    paths: ["apps/previews/**", ".github/workflows/previews.yml"]
+    # API changes can break frontend contracts even when no UI file changes.
+    paths: ["apps/previews/**", "services/api/**", ".github/workflows/previews.yml"]
 
 permissions:
   contents: read

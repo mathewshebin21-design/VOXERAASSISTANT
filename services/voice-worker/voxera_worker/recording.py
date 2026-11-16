@@ -47,19 +47,79 @@ class CallRecorder:
         *,
         external_ref: str | None = None,
         caller_number: str | None = None,
+        called_number: str | None = None,
         ai_disclosure_played: bool = False,
         recording_notice_played: bool = False,
     ) -> str | None:
-        """Opens the call record (idempotent on ``external_ref``). Returns its id, or None if it failed."""
+        """Opens the call record (idempotent on ``external_ref``). Returns its id, or None if it failed.
+        ``called_number`` (telephone calls only): the API records the call only if the number is
+        assigned to the token's workspace."""
         body: dict = {"ai_disclosure_played": ai_disclosure_played, "recording_notice_played": recording_notice_played}
         if external_ref:
             body["external_ref"] = external_ref
         if caller_number:
             body["caller_number"] = caller_number
+        if called_number:
+            body["called_number"] = called_number
         r = await self._post(self.base, body, expect=(200, 201))
         if r is not None:
             self.call_id = r.json()["id"]
         return self.call_id
+
+    async def acknowledge_notice(self, notice: str) -> bool:
+        """Persist an authenticated, ordered TTS playout report for this call.
+
+        False includes network errors, refusals, invalid receipts and expired
+        credentials. The caller's audio must remain disabled in every case.
+        """
+        if notice not in ("ai_disclosure", "recording_notice") or not self.call_id:
+            return False
+        response = await self._post(
+            f"{self.base}/{self.call_id}/notice-playback",
+            {"notice": notice, "method": "livekit_speech_playout"},
+            expect=(200,),
+            always=True,
+        )
+        if response is None:
+            return False
+        try:
+            body = response.json()
+            field = "ai_disclosure_played" if notice == "ai_disclosure" else "recording_notice_played"
+            return (
+                body.get("id") == self.call_id
+                and body.get("channel") == "phone"
+                and body.get(field) is True
+                and (notice != "recording_notice" or body.get("transcript_retained") is True)
+            )
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    async def save_fallback(self, name: str, phone: str, message: str) -> bool:
+        """Acknowledge an actual saved staff-queue case, never an attempted HTTP write.
+
+        The API only accepts this for a simulated worker call with notice flags.
+        The same call may safely retry after a lost response. Never log caller PII.
+        """
+        if not self.call_id:
+            return False
+        response = await self._post(
+            f"{self.base}/{self.call_id}/fallback-message",
+            {"caller_name": name, "caller_phone": phone, "message": message},
+            expect=(200, 201),
+            always=True,
+        )
+        if response is None:
+            return False
+        try:
+            body = response.json()
+            return (
+                body.get("saved") is True
+                and body.get("destination") == "staff_queue"
+                and isinstance(body.get("case_id"), str)
+                and bool(body["case_id"])
+            )
+        except (ValueError, TypeError, AttributeError):
+            return False
 
     def add(self, events: list[dict]) -> None:
         """Queues events behind earlier writes; returns at once."""

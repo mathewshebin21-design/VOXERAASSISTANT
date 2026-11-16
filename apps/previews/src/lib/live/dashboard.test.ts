@@ -9,7 +9,8 @@ const appt = (id: string, start: string, o: Partial<Appointment> = {}): Appointm
 });
 const kase = (o: Partial<DeskCase>): DeskCase => ({
   id: Math.random().toString(), kind: "message", caller_name: null, caller_phone: null, summary: "s", reason: null, urgent: false,
-  status: "new", source: "ai_receptionist", assigned_to: null, assignee_name: null, assigned_at: null, resolution: null,
+  status: "new", source: "ai_receptionist", assigned_to: null, assignee_name: null, assigned_at: null,
+  staff_acknowledged_at: null, staff_acknowledged_by: null, staff_acknowledged_by_name: null, notification: null, resolution: null,
   resolved_at: null, resolved_by: null, created_at: NOW.toISOString(), updated_at: NOW.toISOString(), ...o,
 });
 const empty: DashboardInput = { profile: null, settings: null, hours: [], services: [], agents: [], members: [], appointments: [], queue: [], inProgress: [], resolved: [], team: [], usage: null, voiceSessions: [] };

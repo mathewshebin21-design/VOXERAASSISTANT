@@ -22,6 +22,18 @@ def _start(client, token, **body):
     return client.post("/v1/worker/calls", json=body, headers=_h(token))
 
 
+def assign_number(owner_engine, org_id: str, e164: str = "+441179460000", status: str = "active") -> str:
+    """What scripts/phone_numbers.py does (as the owner): the API itself can never assign a number."""
+    with owner_engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO phone_numbers (id, organization_id, e164, status) VALUES (gen_random_uuid(), :o, :n, :s)"
+            ),
+            {"o": org_id, "n": e164, "s": status},
+        )
+    return e164
+
+
 TURN = [
     {"kind": "utterance", "speaker": "caller", "text": "Are you open on Saturday?", "data": {"language": "en-GB"}},
     {"kind": "tool", "speaker": "agent", "data": {"name": "get_opening_hours", "ok": True}},
@@ -64,6 +76,23 @@ def test_restarting_worker_continues_the_same_call(worker, make_account):  # noq
     first = _start(a.client, token, external_ref="room-restart01")
     again = _start(a.client, token, external_ref="room-restart01")
     assert first.status_code == 201 and again.status_code == 200 and again.json()["id"] == first.json()["id"]
+
+
+def test_ended_worker_room_cannot_be_reopened_by_replaying_its_signed_reference(worker, make_account):  # noqa: F811
+    a = make_account("ended-room@example.com")
+    ref = "room-ended-replay01"
+    token = worker_auth.mint(uuid.UUID(a.org_id), call_ref=ref)
+    first = _start(a.client, token, external_ref=ref)
+    assert first.status_code == 201
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{first.json()['id']}/end",
+            json={"status": "completed"},
+            headers=_h(token),
+        ).status_code
+        == 200
+    )
+    assert _start(a.client, token, external_ref=ref).status_code == 409
 
 
 def test_without_the_recording_notice_the_words_are_not_kept(worker, make_account):  # noqa: F811
@@ -129,7 +158,7 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     from app.voice import launch
 
     a = make_account("a@example.com")
-    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone")
+    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref="room-phone-001")
     assert _start(a.client, phone).status_code == 403
     live_sim = worker_auth.mint(uuid.UUID(a.org_id), mode="live")
     assert _start(a.client, live_sim).status_code == 403
@@ -139,17 +168,78 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     a.patch(a.o("/settings"), json={"locale": "en-GB"})
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
-    r = _start(a.client, phone, caller_number="+44 20 7946 0000", recording_notice_played=True)
+    number = assign_number(owner_engine, a.org_id)
+    r = _start(
+        a.client,
+        phone,
+        external_ref="room-phone-001",
+        called_number=number,
+        caller_number="+44 20 7946 0000",
+    )
     assert r.status_code == 201 and r.json()["channel"] == "phone"
+    assert r.json()["recording_notice_played"] is False and r.json()["transcript_retained"] is False
+
+
+def test_scoped_simulated_token_refuses_other_calls_in_the_same_tenant(worker, make_account):  # noqa: F811
+    a = make_account("bound-simulation@example.com")
+    one_ref, two_ref = "room-bound-test-01", "room-bound-test-02"
+    one = worker_auth.mint(uuid.UUID(a.org_id), call_ref=one_ref)
+    two = worker_auth.mint(uuid.UUID(a.org_id), call_ref=two_ref)
+    assert _start(a.client, one, external_ref=two_ref).status_code == 403
+    first = _start(a.client, one, external_ref=one_ref)
+    second = _start(a.client, two, external_ref=two_ref)
+    assert first.status_code == second.status_code == 201
+    second_id = second.json()["id"]
+    assert (
+        a.client.post(f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(one)).status_code == 404
+    )
+    assert a.client.post(f"/v1/worker/calls/{second_id}/end", json={}, headers=_h(one)).status_code == 404
+    assert (
+        a.client.post(f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(two)).status_code == 201
+    )
+
+
+def test_phone_worker_token_is_bound_to_only_one_signed_call(worker, make_account, monkeypatch, owner_engine):  # noqa: F811
+    from app.voice import launch
+
+    a = make_account("bound-phone@example.com")
+    a.patch(a.o("/settings"), json={"locale": "en-GB"})
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    number = assign_number(owner_engine, a.org_id)
+    a_ref, b_ref = "room-bound-phone-a", "room-bound-phone-b"
+    token_a = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=a_ref)
+    token_b = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=b_ref)
+    assert _start(a.client, token_a, external_ref=b_ref, called_number=number).status_code == 403
+    assert _start(a.client, token_a, called_number=number).status_code == 403
+    first = _start(a.client, token_a, external_ref=a_ref, called_number=number)
+    second = _start(a.client, token_b, external_ref=b_ref, called_number=number)
+    assert first.status_code == second.status_code == 201
+    b_id = second.json()["id"]
+    assert (
+        a.client.post(f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_a)).status_code == 404
+    )
+    assert a.client.post(f"/v1/worker/calls/{b_id}/end", json={}, headers=_h(token_a)).status_code == 404
+    assert (
+        a.client.post(f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_b)).status_code == 201
+    )
 
 
 @pytest.mark.parametrize("mode,channel", [("test", "simulated"), ("live", "phone")])
-def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkeypatch, mode, channel):  # noqa: F811
+def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkeypatch, owner_engine, mode, channel):  # noqa: F811
     from app.voice import launch
 
     a = make_account("a@example.com")
     full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
     monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
     a.patch(a.o("/settings"), json={"locale": "en-GB"})
-    r = _start(a.client, worker_auth.mint(uuid.UUID(a.org_id), mode=mode, channel=channel))
+    body = (
+        {"called_number": assign_number(owner_engine, a.org_id), "external_ref": "room-phone-002"}
+        if channel == "phone"
+        else {}
+    )
+    token = worker_auth.mint(
+        uuid.UUID(a.org_id), mode=mode, channel=channel, call_ref="room-phone-002" if channel == "phone" else None
+    )
+    r = _start(a.client, token, **body)
     assert r.status_code == 201 and r.json()["channel"] == ("phone" if mode == "live" else "simulated")

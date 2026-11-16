@@ -36,6 +36,10 @@ jobs:
       - run: uv run ruff check app tests migrations
       - run: uv run ruff format --check app tests migrations
       - run: uv run pytest -q
+      - name: Rehearse 0013 with existing data on disposable PostgreSQL
+        run: |
+          createdb -h localhost -U postgres -O voxera_owner voxera_migration_rehearsal
+          uv run python scripts/rehearse_0013.py
       - name: Migrations round-trip
         env:
           VOXERA_MIGRATION_DATABASE_URL: postgresql+psycopg://voxera_owner:owner-dev-only@localhost:5432/voxera
