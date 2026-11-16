@@ -68,6 +68,16 @@ and [telephony test checklist](https://docs.livekit.io/telephony/testing/).
 Neither the source allowlist nor hypothetical CI participant attributes
 constitute live-telephony acceptance.
 
+A further draft PR #52 blocks the virtual desk's `transfer_to_staff` tool
+on the **phone worker** path. Assigning a case or marking an employee busy
+is not proof that a carrier transfer connected. Until a reviewed LiveKit/SIP
+transfer is implemented and positively acknowledged, the caller must be told
+that telephone transfer is unavailable and offered a saved staff message
+instead. The simulated member Voice Lab's virtual desk remains independent.
+An eventual real transfer must verify the destination answered, handle
+busy/no-answer/rejected outcomes, record an auditable carrier receipt, and
+never count a requested or assigned transfer as a completed connection.
+
 ## Commercial acceptance
 
 1. Select the legal contracting and payment entity for UK and India; record the owner-approved
