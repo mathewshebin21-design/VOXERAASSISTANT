@@ -193,11 +193,90 @@ def test_live_mode_is_refused_until_the_country_passes_its_launch_review(worker,
         worker_auth.mint(uuid.UUID(a.org_id), mode="production")
 
 
+def test_scoped_worker_brain_rejects_cross_call_and_record_injection_before_spend(
+    worker,
+    live,  # noqa: F811
+    make_account,
+    monkeypatch,
+):
+    a = make_account("bound-brain@example.com")
+    approve_mock_llm_for_test(monkeypatch, a)
+    ref = "room-bound-brain-001"
+    token = worker_auth.mint(uuid.UUID(a.org_id), call_ref=ref)
+    h = {"authorization": f"Bearer {token}"}
+    wrong = {**body(rid="w-other-call-0001"), "conversation_id": "room-bound-brain-002"}
+    assert a.client.post("/v1/worker/live/brain", json=wrong, headers=h).status_code == 403
+    injection = {**body(rid="w-recording-0001"), "conversation_id": ref, "call_id": str(uuid.uuid4())}
+    assert a.client.post("/v1/worker/live/brain", json=injection, headers=h).status_code == 422
+    assert live["llm_requests"] == []
+    live["llm"] = [(200, message([("text", {"parts": ["Hello."]})], "end_turn", 8, 2))]
+    correct = {**body(rid="w-correct-call-0001"), "conversation_id": ref}
+    r = a.client.post("/v1/worker/live/brain", json=correct, headers=h)
+    assert r.status_code == 200 and events(r)[-1]["type"] == "done"
+    assert len(live["llm_requests"]) == 1
+
+
+def test_signed_ref_must_be_well_formed_even_for_valid_hmac(worker):
+    org = uuid.uuid4()
+    for bad_ref in ("", "short", "room/unsafe", "caller+44117946000", "r" * 65):
+        with pytest.raises(worker_auth.WorkerAuthError, match="Invalid call reference"):
+            worker_auth.mint(org, call_ref=bad_ref)
+    signed = worker_auth.mint(org, call_ref="room-valid-ref-01")
+    assert worker_auth.read_scoped(signed) == (org, "test", "simulated", "room-valid-ref-01")
+
+    now = int(datetime.now(UTC).timestamp())
+    forged = jwt.encode(
+        {
+            "iss": "voxera-api",
+            "aud": "voxera-worker-brain",
+            "org": str(org),
+            "scope": "live:brain",
+            "iat": now,
+            "exp": now + 60,
+            "mode": "test",
+            "channel": "simulated",
+            "call_ref": "invalid/ref",
+        },
+        SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(worker_auth.WorkerAuthError, match="Invalid call reference"):
+        worker_auth.read_scoped(forged)
+
+
+def test_live_phone_brain_requires_a_registered_active_call_even_after_mock_signoffs(
+    worker,
+    live,  # noqa: F811
+    make_account,
+    monkeypatch,
+):
+    from app.voice import launch
+
+    a = make_account("bound-phone-brain@example.com")
+    a.patch(a.o("/settings"), json={"locale": "en-GB"})
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    approve_mock_llm_for_test(monkeypatch, a)
+    ref = "room-phone-brain-001"
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=ref)
+    h = {"authorization": f"Bearer {token}"}
+    wrong = {**body(rid="w-phone-wrong-001"), "conversation_id": "room-phone-brain-002"}
+    assert a.client.post("/v1/worker/live/brain", json=wrong, headers=h).status_code == 403
+    right = {**body(rid="w-phone-right-001"), "conversation_id": ref}
+    assert a.client.post("/v1/worker/live/brain", json=right, headers=h).status_code == 403
+    assert live["llm_requests"] == []
+
+
 def test_a_telephone_call_can_never_use_test_mode(worker):
     org = uuid.uuid4()
     with pytest.raises(worker_auth.WorkerAuthError, match="live token"):
         worker_auth.mint(org, mode="test", channel="phone")
-    assert worker_auth.verify(worker_auth.mint(org, mode="live", channel="phone")) == (org, "live")
+    with pytest.raises(worker_auth.WorkerAuthError, match="identify one call"):
+        worker_auth.mint(org, mode="live", channel="phone")
+    assert worker_auth.verify(worker_auth.mint(org, mode="live", channel="phone", call_ref="room-phone-001")) == (
+        org,
+        "live",
+    )
     # A hand-made token claiming a phone channel in test mode, correctly signed: still refused.
     now = int(datetime.now(UTC).timestamp())
     crafted = {
@@ -219,6 +298,6 @@ def test_a_telephone_call_can_never_use_test_mode(worker):
 
 def test_a_live_phone_token_is_still_launch_gated(worker, live, make_account):  # noqa: F811
     a = make_account("a@example.com")
-    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone")
+    token = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref="room-phone-001")
     r = a.client.post("/v1/worker/live/brain", json=body(), headers={"authorization": f"Bearer {token}"})
     assert r.status_code == 403 and live["llm_requests"] == []

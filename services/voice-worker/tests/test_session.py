@@ -324,7 +324,10 @@ async def test_worker_token_channel_remains_bound_across_refresh():
     from voxera_worker.guard import SIP_KIND, CallBoundTokens, refusal
 
     def token(mode, channel):
-        body = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+        payload = {"mode": mode, "channel": channel}
+        if channel == "phone":
+            payload["call_ref"] = "room-session-0001"
+        body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
         return f"x.{body}.sig"
 
     class Rotating:
@@ -335,7 +338,7 @@ async def test_worker_token_channel_remains_bound_across_refresh():
             return token("test", "simulated")
 
     phone = SimpleNamespace(kind=SIP_KIND)
-    bound = CallBoundTokens(Rotating(), phone)
+    bound = CallBoundTokens(Rotating(), phone, "room-session-0001")
     assert await bound.get() == token("live", "phone")
     with pytest.raises(RuntimeError, match="live phone token"):
         await bound.refresh()
@@ -354,7 +357,10 @@ async def test_a_mid_call_credential_downgrade_ends_the_call_instead_of_crashing
     from voxera_worker.session import ENDED
 
     def token(mode, channel):
-        body = base64.urlsafe_b64encode(json.dumps({"mode": mode, "channel": channel}).encode()).decode().rstrip("=")
+        payload = {"mode": mode, "channel": channel}
+        if channel == "phone":
+            payload["call_ref"] = "room-session-0001"
+        body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
         return f"x.{body}.sig"
 
     class Rotating:  # the supervisor hands out a test token after the call started
@@ -370,7 +376,7 @@ async def test_a_mid_call_credential_downgrade_ends_the_call_instead_of_crashing
     source = Rotating()
     fb = FakeBrain([(200, ok("Hello."), 0, 0)])
     brain = fb.client()
-    brain.tokens = CallBoundTokens(source, SimpleNamespace(kind=SIP_KIND))
+    brain.tokens = CallBoundTokens(source, SimpleNamespace(kind=SIP_KIND), "room-session-0001")
     s = CallSession(brain)
     assert await say(s, "Hi") == "Hello."
     source.tok = token("test", "simulated")

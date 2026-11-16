@@ -66,13 +66,17 @@ class StaticToken:
         return self._token
 
 
-def command_fetch(cmd: str) -> Fetch:
-    """A supervisor command that prints a fresh worker token on stdout (e.g. mint_worker_token.py)."""
+def command_fetch(cmd: str, *, call_ref: str | None = None) -> Fetch:
+    """Get a fresh token from the supervisor, preserving the immutable call scope on refresh."""
     import shlex
+
+    argv = shlex.split(cmd)
+    if call_ref is not None:
+        argv += ["--call-ref", call_ref]
 
     async def fetch() -> str:
         proc = await asyncio.create_subprocess_exec(
-            *shlex.split(cmd), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
         )
         out, _ = await proc.communicate()
         if proc.returncode != 0:

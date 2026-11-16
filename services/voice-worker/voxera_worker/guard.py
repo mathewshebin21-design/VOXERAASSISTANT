@@ -53,14 +53,20 @@ class CallBoundTokens:
     These claims are only a preliminary local check: the API authenticates them.
     """
 
-    def __init__(self, source: object, participant: object) -> None:
+    def __init__(self, source: object, participant: object, call_ref: str | None = None) -> None:
         self.source = source
         self.participant = participant
+        self.call_ref = call_ref
 
     def _check(self, token: str) -> str:
         reason = refusal(self.participant, token)
         if reason is not None:
             raise ChannelMismatch(reason)
+        scoped_ref = claims(token).get("call_ref")
+        if is_phone(self.participant) and (not self.call_ref or scoped_ref != self.call_ref):
+            raise ChannelMismatch("telephone token is not bound to this call")
+        if scoped_ref is not None and scoped_ref != self.call_ref:
+            raise ChannelMismatch("worker token is bound to another call")
         return token
 
     async def get(self) -> str:

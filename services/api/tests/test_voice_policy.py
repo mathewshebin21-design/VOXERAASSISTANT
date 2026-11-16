@@ -212,13 +212,14 @@ def test_a_phone_call_is_recorded_only_for_the_workspaces_own_active_number(
     mine = assign_number(owner_engine, a.org_id, "+441179460000")
     theirs = assign_number(owner_engine, b.org_id, "+441179460001")
     off = assign_number(owner_engine, a.org_id, "+441179460002", status="disabled")
-    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone")
+    ref = "room-voice-pol-001"
+    phone = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=ref)
 
     refusals = [
-        _start(a.client, phone),  # no dialled number
-        _start(a.client, phone, called_number=theirs),  # another workspace's number
-        _start(a.client, phone, called_number=off),  # disabled
-        _start(a.client, phone, called_number="+441179469999"),  # nobody's
+        _start(a.client, phone, external_ref=ref),  # no dialled number
+        _start(a.client, phone, external_ref=ref, called_number=theirs),  # another workspace's number
+        _start(a.client, phone, external_ref=ref, called_number=off),  # disabled
+        _start(a.client, phone, external_ref=ref, called_number="+441179469999"),  # nobody's
     ]
     assert {r.status_code for r in refusals} == {403}
     # The same answer for "someone else's" and "nobody's": nothing reveals who owns a number.
@@ -226,7 +227,7 @@ def test_a_phone_call_is_recorded_only_for_the_workspaces_own_active_number(
     with owner_engine.connect() as c:
         assert c.execute(text("SELECT count(*) FROM calls")).scalar() == 0
 
-    r = _start(a.client, phone, called_number=mine)
+    r = _start(a.client, phone, external_ref=ref, called_number=mine)
     assert r.status_code == 201 and r.json()["channel"] == "phone"
 
 
