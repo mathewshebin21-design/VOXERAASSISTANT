@@ -204,6 +204,7 @@ async def test_sip_default_unreviewed_trunk_is_refused_before_policy_media_and_r
         ("sip.callIDFull", None),
         ("sip.callStatus", "hangup"),
         ("sip.callStatus", "dialing"),
+        ("sip.callStatus", ["ringing"]),  # malformed unhashable value must fail closed
         ("sip.trunkPhoneNumber", "+441179460001"),
     ],
 )
