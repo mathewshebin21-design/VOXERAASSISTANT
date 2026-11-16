@@ -363,11 +363,14 @@ def test_phone_model_spend_refuses_missing_or_partial_notice_playout(
     assert first.status_code == 200
     assert a.client.post("/v1/worker/live/brain", json=request, headers=h).status_code == 403
     assert live["llm_requests"] == []  # refusal precedes the budget reservation/provider
-    assert a.client.post(
-        f"/v1/worker/calls/{cid}/notice-playback",
-        json={"notice": "recording_notice", "method": "livekit_speech_playout"},
-        headers=h,
-    ).status_code == 200
+    assert (
+        a.client.post(
+            f"/v1/worker/calls/{cid}/notice-playback",
+            json={"notice": "recording_notice", "method": "livekit_speech_playout"},
+            headers=h,
+        ).status_code
+        == 200
+    )
     live["llm"] = [(200, message([("text", {"parts": ["I can help."]})], "end_turn", 8, 3))]
     done = a.client.post("/v1/worker/live/brain", json=request, headers=h)
     assert done.status_code == 200 and events(done)[-1]["type"] == "done"
