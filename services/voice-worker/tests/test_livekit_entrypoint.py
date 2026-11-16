@@ -262,6 +262,45 @@ async def test_missing_tts_model_refuses_before_call_record_or_media(monkeypatch
     assert recordings == [] and sessions == []
 
 
+@pytest.mark.parametrize(
+    ("mode", "channel", "kind"),
+    [("test", "simulated", 0), ("live", "phone", SIP_KIND)],
+)
+async def test_unreviewed_media_is_refused_for_test_and_phone_channels_before_record(
+    monkeypatch, mode, channel, kind
+):
+    """A test worker token must never turn an unreviewed model into an approved one."""
+    import httpx
+
+    from voxera_worker.media_policy import fetch_authorized_languages as real_policy_gate
+
+    ctx, events, recordings, sessions = setup(
+        monkeypatch, mode=mode, channel=channel, kind=kind, record_id="would-not-be-used"
+    )
+    policy = {
+        "default_language": "en-GB",
+        "languages": ["en-GB"],
+        "allowed_regions": ["device", "uk", "eu", "us", "global"],
+        "blocked_providers": [],
+        "allow_paid": True,
+        "allow_unverified": True,
+    }
+
+    async def gate(api, tokens, media):
+        events.append("policy")
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json=policy))
+        ) as client:
+            return await real_policy_gate(api, tokens, media, http=client)
+
+    monkeypatch.setattr(worker, "fetch_authorized_languages", gate)
+    await worker.entrypoint(ctx)
+
+    assert ctx.shutdown_reason == "voice policy unavailable"
+    assert events == ["connect", "participant", "policy", "shutdown"]
+    assert recordings == [] and sessions == [] and ctx.callbacks == []
+
+
 async def test_no_saved_policy_means_no_call_and_no_record(monkeypatch):
     from voxera_worker.policy import PolicyUnavailable
 
