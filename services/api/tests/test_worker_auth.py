@@ -259,8 +259,20 @@ def test_phone_worker_never_offers_or_executes_a_phantom_carrier_transfer(
     )
     assert start.status_code == 201
 
+    # Exercise the SECOND server-side guard even if the schema validator were
+    # accidentally loosened. The phone transfer must still never be executed.
+    from app.live import toolcheck
+
+    original_check = toolcheck.validate_call
+
+    def relaxed_for_test(by_name, name, args):
+        if name == "transfer_to_staff":
+            return args
+        return original_check(by_name, name, args)
+
+    monkeypatch.setattr(toolcheck, "validate_call", relaxed_for_test)
     # The fake provider maliciously returns a tool that was NOT offered.
-    # Its execution must be refused without writing or marking a handoff.
+    # The deeper routing guard refuses it without writing a case or handoff.
     live["llm"] = [
         (
             200,
