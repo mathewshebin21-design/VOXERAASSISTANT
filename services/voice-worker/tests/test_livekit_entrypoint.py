@@ -116,6 +116,7 @@ def setup(
         def __init__(self, api, tokens):
             assert api == "http://isolated-api.test"
             self.tokens = tokens
+            self.call_id = None
             self.ends: list[tuple] = []
             self.writes: list[dict] = []
             recordings.append(self)
@@ -126,6 +127,7 @@ def setup(
             assert kwargs["recording_notice_played"] is False
             assert kwargs["external_ref"].startswith("room-")
             context.start_kwargs = kwargs
+            self.call_id = record_id
             return record_id
 
         def add(self, rows):
@@ -382,7 +384,7 @@ async def test_media_startup_failure_marks_authorized_phone_call_failed_and_shut
         def __init__(self):
             sessions.append(self)
 
-        async def start(self, *, agent, room):
+        async def start(self, *, agent, room, **_opts):
             events.append("media_start")
             raise error_type("simulated media startup failure")
 
