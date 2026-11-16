@@ -72,7 +72,7 @@ def test_phone_notice_receipts_are_ordered_idempotent_and_prior_text_remains_wit
     assert a.client.post(f"/v1/worker/calls/{cid}/events", json={"events": TURN}, headers=_h(token)).status_code == 201
     events = a.get(a.o(f"/calls/{cid}")).json()["events"]
     said = [event["text"] for event in events if event["kind"] == "utterance"]
-    assert said == [None, None, None, None, TURN[0]["text"], TURN[1]["text"]]
+    assert said == [None, None, None, None, TURN[0]["text"], TURN[2]["text"]]
     notices = [event["data"] for event in events if event["data"].get("event") == "notice_playout_reported"]
     assert notices == [
         {"event": "notice_playout_reported", "notice": "ai_disclosure", "method": "livekit_speech_playout"},
