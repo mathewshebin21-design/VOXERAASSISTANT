@@ -163,6 +163,53 @@ def test_live_and_phone_call_records_stay_behind_the_launch_gate(worker, make_ac
     assert r.status_code == 201 and r.json()["channel"] == "phone"
 
 
+def test_scoped_simulated_token_refuses_other_calls_in_the_same_tenant(worker, make_account):  # noqa: F811
+    a = make_account("bound-simulation@example.com")
+    one_ref, two_ref = "room-bound-test-01", "room-bound-test-02"
+    one = worker_auth.mint(uuid.UUID(a.org_id), call_ref=one_ref)
+    two = worker_auth.mint(uuid.UUID(a.org_id), call_ref=two_ref)
+    assert _start(a.client, one, external_ref=two_ref).status_code == 403
+    first = _start(a.client, one, external_ref=one_ref)
+    second = _start(a.client, two, external_ref=two_ref)
+    assert first.status_code == second.status_code == 201
+    second_id = second.json()["id"]
+    assert a.client.post(
+        f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(one)
+    ).status_code == 404
+    assert a.client.post(
+        f"/v1/worker/calls/{second_id}/end", json={}, headers=_h(one)
+    ).status_code == 404
+    assert a.client.post(
+        f"/v1/worker/calls/{second_id}/events", json={"events": TURN}, headers=_h(two)
+    ).status_code == 201
+
+
+def test_phone_worker_token_is_bound_to_only_one_signed_call(worker, make_account, monkeypatch, owner_engine):  # noqa: F811
+    from app.voice import launch
+
+    a = make_account("bound-phone@example.com")
+    a.patch(a.o("/settings"), json={"locale": "en-GB"})
+    full = tuple(launch.SignOff(c, "owner", "2026-12-01", f"doc://{c}") for c in launch.CHECKS)
+    monkeypatch.setitem(launch.SIGN_OFFS, "GB", full)
+    number = assign_number(owner_engine, a.org_id)
+    a_ref, b_ref = "room-bound-phone-a", "room-bound-phone-b"
+    token_a = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=a_ref)
+    token_b = worker_auth.mint(uuid.UUID(a.org_id), mode="live", channel="phone", call_ref=b_ref)
+    assert _start(a.client, token_a, external_ref=b_ref, called_number=number).status_code == 403
+    assert _start(a.client, token_a, called_number=number).status_code == 403
+    first = _start(a.client, token_a, external_ref=a_ref, called_number=number)
+    second = _start(a.client, token_b, external_ref=b_ref, called_number=number)
+    assert first.status_code == second.status_code == 201
+    b_id = second.json()["id"]
+    assert a.client.post(
+        f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_a)
+    ).status_code == 404
+    assert a.client.post(f"/v1/worker/calls/{b_id}/end", json={}, headers=_h(token_a)).status_code == 404
+    assert a.client.post(
+        f"/v1/worker/calls/{b_id}/events", json={"events": TURN}, headers=_h(token_b)
+    ).status_code == 201
+
+
 @pytest.mark.parametrize("mode,channel", [("test", "simulated"), ("live", "phone")])
 def test_a_test_token_never_produces_a_phone_record(worker, make_account, monkeypatch, owner_engine, mode, channel):  # noqa: F811
     from app.voice import launch
