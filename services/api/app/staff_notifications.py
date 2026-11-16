@@ -52,8 +52,12 @@ def enqueue_case(db: Session, case: CallerMessage) -> StaffNotificationOutbox | 
     if existing is not None:
         return existing
     row = StaffNotificationOutbox(
-        organization_id=case.organization_id, case_id=case.id,
-        channel="staff_email", status="pending", attempts=0, max_attempts=MAX_ATTEMPTS,
+        organization_id=case.organization_id,
+        case_id=case.id,
+        channel="staff_email",
+        status="pending",
+        attempts=0,
+        max_attempts=MAX_ATTEMPTS,
         next_attempt_at=datetime.now(UTC),
     )
     db.add(row)
@@ -62,14 +66,19 @@ def enqueue_case(db: Session, case: CallerMessage) -> StaffNotificationOutbox | 
 
 
 def _staff_has_acknowledged(db: Session, row: StaffNotificationOutbox) -> bool:
-    return db.scalar(
-        select(AuditLog.id).where(
-            AuditLog.organization_id == row.organization_id,
-            AuditLog.target_type == "caller_message",
-            AuditLog.target_id == str(row.case_id),
-            AuditLog.action == "case.staff_acknowledged",
-        ).limit(1)
-    ) is not None
+    return (
+        db.scalar(
+            select(AuditLog.id)
+            .where(
+                AuditLog.organization_id == row.organization_id,
+                AuditLog.target_type == "caller_message",
+                AuditLog.target_id == str(row.case_id),
+                AuditLog.action == "case.staff_acknowledged",
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def _attempt(
@@ -80,18 +89,24 @@ def _attempt(
     error_code: str | None = None,
     provider_ref: str | None = None,
 ) -> None:
-    db.add(StaffNotificationAttempt(
-        organization_id=row.organization_id,
-        notification_id=row.id,
-        attempt_number=row.attempts,
-        result=result,
-        error_code=error_code,
-        provider_ref=provider_ref,
-    ))
+    db.add(
+        StaffNotificationAttempt(
+            organization_id=row.organization_id,
+            notification_id=row.id,
+            attempt_number=row.attempts,
+            result=result,
+            error_code=error_code,
+            provider_ref=provider_ref,
+        )
+    )
 
 
 def lease_due(
-    db: Session, org_id: uuid.UUID, *, now: datetime | None = None, limit: int = 10,
+    db: Session,
+    org_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+    limit: int = 10,
 ) -> list[StaffNotificationOutbox]:
     """Reserve due work without concurrent double-claims (SELECT SKIP LOCKED).
 
@@ -103,25 +118,24 @@ def lease_due(
     if not 1 <= limit <= 100:
         raise NotificationError("Notification batch limit must be 1..100")
     now = now or datetime.now(UTC)
-    rows = list(db.scalars(
-        select(StaffNotificationOutbox)
-        .where(
-            StaffNotificationOutbox.organization_id == org_id,
-            or_(
-                (
-                    StaffNotificationOutbox.status.in_(("pending", "retry"))
-                    & (StaffNotificationOutbox.next_attempt_at <= now)
+    rows = list(
+        db.scalars(
+            select(StaffNotificationOutbox)
+            .where(
+                StaffNotificationOutbox.organization_id == org_id,
+                or_(
+                    (
+                        StaffNotificationOutbox.status.in_(("pending", "retry"))
+                        & (StaffNotificationOutbox.next_attempt_at <= now)
+                    ),
+                    ((StaffNotificationOutbox.status == "leased") & (StaffNotificationOutbox.lease_until <= now)),
                 ),
-                (
-                    (StaffNotificationOutbox.status == "leased")
-                    & (StaffNotificationOutbox.lease_until <= now)
-                ),
-            ),
+            )
+            .order_by(StaffNotificationOutbox.next_attempt_at, StaffNotificationOutbox.created_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
         )
-        .order_by(StaffNotificationOutbox.next_attempt_at, StaffNotificationOutbox.created_at)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-    ))
+    )
     reserved: list[StaffNotificationOutbox] = []
     for row in rows:
         case = db.get(CallerMessage, row.case_id)
@@ -147,13 +161,18 @@ def lease_due(
 
 
 def _owned_lease(
-    db: Session, org_id: uuid.UUID, notification_id: uuid.UUID, lease_token: uuid.UUID,
+    db: Session,
+    org_id: uuid.UUID,
+    notification_id: uuid.UUID,
+    lease_token: uuid.UUID,
 ) -> StaffNotificationOutbox:
     row = db.scalar(
-        select(StaffNotificationOutbox).where(
+        select(StaffNotificationOutbox)
+        .where(
             StaffNotificationOutbox.organization_id == org_id,
             StaffNotificationOutbox.id == notification_id,
-        ).with_for_update()
+        )
+        .with_for_update()
     )
     if row is None:
         raise NotificationError("Notification not found")
@@ -234,10 +253,12 @@ def record_delivered(
     must be implemented in a separately approved transport adapter.
     """
     row = db.scalar(
-        select(StaffNotificationOutbox).where(
+        select(StaffNotificationOutbox)
+        .where(
             StaffNotificationOutbox.organization_id == org_id,
             StaffNotificationOutbox.id == notification_id,
-        ).with_for_update()
+        )
+        .with_for_update()
     )
     if row is None or row.provider_ref != provider_ref or not REF_PATTERN.fullmatch(provider_ref):
         raise NotificationError("Unknown notification delivery receipt")
