@@ -126,9 +126,7 @@ def test_unexpired_leased_case_is_not_cancelled_by_poll_and_stale_token_is_rejec
         with pytest.raises(staff_notifications.NotificationError):
             staff_notifications.cancel_leased_if_handled(db, org, ident, uuid.uuid4(), now=start)
         with pytest.raises(staff_notifications.NotificationError):
-            staff_notifications.cancel_leased_if_handled(
-                db, org, ident, token, now=start + timedelta(seconds=121)
-            )
+            staff_notifications.cancel_leased_if_handled(db, org, ident, token, now=start + timedelta(seconds=121))
         db.rollback()
     assert get_outbox(app_engine, owner.org_id, cid).status == "leased"
 
