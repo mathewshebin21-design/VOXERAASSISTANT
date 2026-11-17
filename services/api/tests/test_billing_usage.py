@@ -61,3 +61,9 @@ def test_conflicting_usage_replay_is_rejected(changed):
 def test_unrelated_usage_identity_cannot_be_reconciled():
     with pytest.raises(ValueError):
         reconcile_replay(event(), event(source_event_id="call-002"))
+
+
+@pytest.mark.parametrize("synthetic", [0, 1, "false", None, []])
+def test_synthetic_flag_requires_boolean(synthetic):
+    with pytest.raises(ValueError):
+        event(synthetic=synthetic)
