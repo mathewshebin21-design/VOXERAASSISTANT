@@ -92,10 +92,9 @@ def test_fake_subscription_rejects_cross_tenant(make_account, app_engine):
 
 def test_fake_subscription_invalid_transition_rolls_back(make_account, app_engine):
     a = make_account("fake-storage-rollback@example.com")
-    with pytest.raises(ValueError):
-        with app_engine.begin() as conn:
-            _tenant(conn, a.org_id)
-            _apply(conn, _event(a.org_id, FakeBillingEventKind.PAYMENT_SUCCEEDED, event_id="invalid"))
+    with pytest.raises(ValueError), app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        _apply(conn, _event(a.org_id, FakeBillingEventKind.PAYMENT_SUCCEEDED, event_id="invalid"))
     with app_engine.begin() as conn:
         _tenant(conn, a.org_id)
         assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
