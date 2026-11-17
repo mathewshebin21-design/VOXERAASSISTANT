@@ -1,6 +1,8 @@
 """Database acceptance for Phase 11 migration 0014 on disposable CI PostgreSQL."""
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import UTC, datetime
 
 import pytest
@@ -168,3 +170,23 @@ def test_atomic_writer_requires_tenant_context(make_account, app_engine):
         with pytest.raises(PermissionError):
             record_synthetic_usage(conn, event)
         assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 0
+
+
+def test_concurrent_identical_synthetic_usage_commits_once(make_account, app_engine):
+    a = make_account("billing-atomic-concurrent@example.com")
+    event = UsageEvent(a.org_id, "concurrent-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    barrier = Barrier(2, timeout=15)
+
+    def submit():
+        with app_engine.begin() as conn:
+            conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+            barrier.wait()
+            return record_synthetic_usage(conn, event)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(submit)
+        second = pool.submit(submit)
+        assert sorted([first.result(timeout=25), second.result(timeout=25)]) == [False, True]
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
