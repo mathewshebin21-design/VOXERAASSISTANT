@@ -8,7 +8,7 @@ import uuid
 
 from sqlalchemy import text
 
-from .billing_provider_replay import reconcile_provider_digest, raw_event_digest
+from app.billing_provider_replay import raw_event_digest, reconcile_provider_digest
 
 
 def record_synthetic_provider_event(
