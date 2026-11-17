@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import text
 
-from app.billing_usage import UsageEvent, UsageKind, reconcile_replay
+from app.billing_usage import UsageEvent, UsageKind, UsageReplayConflict, reconcile_replay
 
 
 def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | None = None) -> bool:
