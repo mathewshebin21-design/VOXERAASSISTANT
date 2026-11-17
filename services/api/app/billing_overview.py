@@ -5,6 +5,8 @@ changes entitlements, or exposes payment-provider credentials.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+
 from sqlalchemy import text
 
 
@@ -27,8 +29,15 @@ def read_billing_overview(conn, *, organization_id: str, period_key: str) -> Bil
     tenant = conn.execute(text("SELECT current_setting('app.org_id', true)")).scalar_one()
     if not tenant or tenant != organization_id:
         raise PermissionError("Billing overview tenant must match authenticated transaction")
-    if not period_key or len(period_key) > 64:
-        raise ValueError("Invalid billing period")
+    try:
+        year_text, month_text = period_key.split("-")
+        if len(year_text) != 4 or len(month_text) != 2 or not year_text.isascii() or not month_text.isascii():
+            raise ValueError("Invalid billing period")
+        year, month = int(year_text), int(month_text)
+        start = datetime(year, month, 1, tzinfo=UTC)
+        end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("Invalid billing period") from exc
     subscription = conn.execute(
         text(
             "SELECT state, price_code, currency, price_minor_units FROM billing_subscriptions "
@@ -46,9 +55,10 @@ def read_billing_overview(conn, *, organization_id: str, period_key: str) -> Bil
     count = conn.execute(
         text(
             "SELECT count(*) FROM billing_usage_events "
-            "WHERE organization_id = :org AND synthetic = true"
+            "WHERE organization_id = :org AND synthetic = true "
+            "AND occurred_at >= :start AND occurred_at < :end"
         ),
-        {"org": organization_id},
+        {"org": organization_id, "start": start, "end": end},
     ).scalar_one()
     return BillingOverview(
         organization_id=organization_id,
