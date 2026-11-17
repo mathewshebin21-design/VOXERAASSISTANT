@@ -63,7 +63,12 @@ def test_naive_timestamp_is_denied():
 
 
 def test_paid_resource_gate_is_denied_for_inactive_states():
-    for state in (SubscriptionState.PAST_DUE, SubscriptionState.PAUSED, SubscriptionState.CANCELED, SubscriptionState.EXPIRED):
+    for state in (
+        SubscriptionState.PAST_DUE,
+        SubscriptionState.PAUSED,
+        SubscriptionState.CANCELED,
+        SubscriptionState.EXPIRED,
+    ):
         assert not can_create_paid_resource(sample(state), at=NOW)
 
 
