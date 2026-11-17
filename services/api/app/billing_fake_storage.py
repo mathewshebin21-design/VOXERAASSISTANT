@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy import text
 
-from app.billing_fake_provider import FakeBillingEvent, FakeBillingEventKind, apply_fake_billing_event
+from app.billing_fake_provider import FakeBillingEvent, apply_fake_billing_event
 from app.billing_policy import PriceVersion, Subscription, SubscriptionState
 from app.billing_provider_inbox import record_synthetic_provider_event
 
