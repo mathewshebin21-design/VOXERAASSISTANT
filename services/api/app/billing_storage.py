@@ -21,6 +21,9 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
     """
     if not event.synthetic:
         raise PermissionError("Real usage requires an authenticated provider ingestion adapter")
+    tenant = conn.execute(text("SELECT current_setting('app.org_id', true)")).scalar_one()
+    if not tenant or tenant != event.organization_id:
+        raise PermissionError("Usage tenant must match authenticated transaction context")
     when = occurred_at or datetime.now(UTC)
     if when.tzinfo is None or when.utcoffset() is None:
         raise ValueError("Usage timestamp must be timezone aware")
