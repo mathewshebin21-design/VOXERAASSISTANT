@@ -15,6 +15,15 @@ from app.billing_policy import PriceVersion, Subscription, SubscriptionState
 from app.billing_provider_inbox import record_synthetic_provider_event
 
 
+def _unique_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate fake event JSON field")
+        result[key] = value
+    return result
+
+
 def apply_fake_subscription_event(
     conn,
     *,
@@ -29,7 +38,7 @@ def apply_fake_subscription_event(
     # Bind the immutable event envelope to the bytes recorded in the replay inbox.
     # Otherwise a caller could replay the same raw bytes with different event metadata.
     try:
-        envelope = json.loads(raw_body)
+        envelope = json.loads(raw_body, object_pairs_hook=_unique_json_fields)
     except (TypeError, ValueError) as exc:
         raise ValueError("Fake event requires a valid JSON envelope") from exc
     if not isinstance(envelope, dict) or set(envelope) != {"event_id", "organization_id", "kind", "occurred_at"}:
