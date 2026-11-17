@@ -21,6 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("billing_provider_inbox", sa.Column("payload_sha256", sa.String(64), nullable=True))
+    op.execute("GRANT UPDATE ON billing_provider_inbox TO voxera_app")
     op.create_check_constraint(
         "ck_billing_provider_payload_digest",
         "billing_provider_inbox",
@@ -29,5 +30,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("REVOKE UPDATE ON billing_provider_inbox FROM voxera_app")
     op.drop_constraint("ck_billing_provider_payload_digest", "billing_provider_inbox", type_="check")
     op.drop_column("billing_provider_inbox", "payload_sha256")
