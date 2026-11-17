@@ -29,7 +29,17 @@ def test_missing_subscription_fails_closed(make_account, app_engine):
         assert not can_create_subscription_resource(conn, organization_id=a.org_id, at=NOW)
 
 
-@pytest.mark.parametrize("state,expected", [("trialing", True), ("active", True), ("past_due", False), ("paused", False), ("canceled", False), ("expired", False)])
+@pytest.mark.parametrize(
+    "state,expected",
+    [
+        ("trialing", True),
+        ("active", True),
+        ("past_due", False),
+        ("paused", False),
+        ("canceled", False),
+        ("expired", False),
+    ],
+)
 def test_subscription_state_entitlements(make_account, app_engine, state, expected):
     a = make_account(f"billing-entitlement-{state}@example.com")
     with app_engine.begin() as conn:
