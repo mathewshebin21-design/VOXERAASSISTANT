@@ -1,8 +1,6 @@
 "use client";
 
 import { clsx } from "clsx";
-import { useDataMode } from "@/lib/live/data-mode";
-import { LiveBillingOverview } from "./live-overview";
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PageHead, Panel, Stat, Tag } from "@/components/command/ui";
@@ -10,11 +8,14 @@ import { CALLS } from "@/lib/demo-data";
 import { computeMetrics, dailySeries } from "@/lib/metrics";
 import { COST_ASSUMPTIONS, GBP_PER_MIN, PLANS, USD_TO_GBP } from "@/lib/pricing";
 import { DEMO_TODAY, addDays, dayNum, gbp } from "@/lib/time";
+import { useDataMode } from "@/lib/live/data-mode";
+import { LiveBillingOverview } from "./live-overview";
 
 export default function Billing() {
   const dm = useDataMode();
-  if (dm.mode === "live" && dm.org) return <LiveBillingOverview organizationId={dm.org.organization.id} />;
-  return <DemoBilling />;
+  if (dm.mode === "live" && dm.org) return <LiveBillingOverview key={dm.org.organization.id} organizationId={dm.org.organization.id} />;
+  if (dm.mode === "demo") return <DemoBilling />;
+  return <p role="status" className="p-6 text-sm text-cmd-mute">Loading workspace billing…</p>;
 }
 
 function DemoBilling() {
