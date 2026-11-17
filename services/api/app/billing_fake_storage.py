@@ -5,6 +5,7 @@ authenticate the tenant, validate the raw event envelope, and commit atomically.
 Never use this module for real payment-provider callbacks.
 """
 
+import json
 import uuid
 
 from sqlalchemy import text
@@ -25,6 +26,23 @@ def apply_fake_subscription_event(
     tenant = conn.execute(text("SELECT current_setting('app.org_id', true)")).scalar_one()
     if not tenant or tenant != event.organization_id:
         raise PermissionError("Subscription tenant must match authenticated transaction")
+    # Bind the immutable event envelope to the bytes recorded in the replay inbox.
+    # Otherwise a caller could replay the same raw bytes with different event metadata.
+    try:
+        envelope = json.loads(raw_body)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Fake event requires a valid JSON envelope") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {
+        "event_id", "organization_id", "kind", "occurred_at"
+    }:
+        raise ValueError("Fake event envelope fields do not match the contract")
+    if envelope != {
+        "event_id": event.event_id,
+        "organization_id": event.organization_id,
+        "kind": event.kind.value,
+        "occurred_at": event.occurred_at.isoformat(),
+    }:
+        raise ValueError("Fake event envelope does not match trusted event context")
     # Serialize both initial creation and subsequent transitions for this tenant.
     locked = conn.execute(
         text("SELECT id FROM organizations WHERE id = :org FOR UPDATE"),
