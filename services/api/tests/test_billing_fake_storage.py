@@ -110,3 +110,22 @@ def test_fake_subscription_rejects_envelope_identity_mismatch(make_account, app_
         with pytest.raises(ValueError, match="envelope"):
             _apply(conn, event, raw=b'{"event_id":"different"}', price=PRICE)
         assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
+
+
+def test_fake_subscription_rejects_duplicate_json_fields(make_account, app_engine):
+    a = make_account("fake-storage-duplicate@example.com")
+    event = _event(a.org_id, FakeBillingEventKind.TRIAL_ACTIVATED, event_id="trial")
+    raw = json.dumps(
+        {
+            "event_id": event.event_id,
+            "organization_id": event.organization_id,
+            "kind": event.kind.value,
+            "occurred_at": event.occurred_at.isoformat(),
+        }
+    ).encode()
+    raw = raw.replace(b'"event_id": "trial"', b'"event_id": "trial", "event_id": "trial"')
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        with pytest.raises(ValueError, match="Duplicate fake event"):
+            _apply(conn, event, raw=raw, price=PRICE)
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
