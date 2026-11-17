@@ -1,5 +1,6 @@
 """Disposable PostgreSQL fake subscription event acceptance."""
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,7 +24,15 @@ def _event(org, kind, *, event_id, at=NOW):
 
 
 def _apply(conn, event, *, raw=None, price=None):
-    body = raw if raw is not None else (event.event_id + ":" + event.kind.value).encode()
+    body = raw if raw is not None else json.dumps(
+        {
+            "event_id": event.event_id,
+            "organization_id": event.organization_id,
+            "kind": event.kind.value,
+            "occurred_at": event.occurred_at.isoformat(),
+        },
+        sort_keys=True,
+    ).encode()
     return apply_fake_subscription_event(conn, event=event, raw_body=body, initial_price=price)
 
 
@@ -82,3 +91,13 @@ def test_fake_subscription_invalid_transition_rolls_back(make_account, app_engin
         _tenant(conn, a.org_id)
         assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
         assert conn.execute(text("SELECT count(*) FROM billing_subscriptions")).scalar_one() == 0
+
+
+def test_fake_subscription_rejects_envelope_identity_mismatch(make_account, app_engine):
+    a = make_account("fake-storage-envelope@example.com")
+    event = _event(a.org_id, FakeBillingEventKind.TRIAL_ACTIVATED, event_id="trial")
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        with pytest.raises(ValueError, match="envelope"):
+            _apply(conn, event, raw=b'{"event_id":"different"}', price=PRICE)
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
