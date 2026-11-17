@@ -29,6 +29,11 @@ export function LiveBillingOverview({ organizationId }: { organizationId: string
     setOverview(null);
     setError(null);
     setLoading(true);
+    if (!/^(?!0000|9999-12)[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      setError("Select a valid billing month.");
+      setLoading(false);
+      return () => { active = false; };
+    }
     void api<BillingOverview>(`/orgs/${encodeURIComponent(organizationId)}/billing/overview?month=${encodeURIComponent(month)}`)
       .then((result) => {
         if (!active) return;
