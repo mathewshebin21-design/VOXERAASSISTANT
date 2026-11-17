@@ -46,14 +46,18 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
     ).scalar_one_or_none()
     if inserted is not None:
         return True
-    row = conn.execute(
-        text(
-            "SELECT organization_id, provider, source_event_id, kind, units, synthetic "
-            "FROM billing_usage_events "
-            "WHERE organization_id = :org AND provider = :provider AND source_event_id = :source"
-        ),
-        {"org": event.organization_id, "provider": event.provider, "source": event.source_event_id},
-    ).mappings().one()
+    row = (
+        conn.execute(
+            text(
+                "SELECT organization_id, provider, source_event_id, kind, units, synthetic "
+                "FROM billing_usage_events "
+                "WHERE organization_id = :org AND provider = :provider AND source_event_id = :source"
+            ),
+            {"org": event.organization_id, "provider": event.provider, "source": event.source_event_id},
+        )
+        .mappings()
+        .one()
+    )
     previous = UsageEvent(
         organization_id=str(row["organization_id"]),
         source_event_id=row["source_event_id"],
