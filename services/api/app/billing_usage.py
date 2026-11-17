@@ -32,6 +32,8 @@ class UsageEvent:
             raise ValueError("Usage units must be a positive integer")
         if not isinstance(self.kind, UsageKind):
             raise ValueError("Unknown usage unit")
+        if type(self.synthetic) is not bool:
+            raise ValueError("Synthetic status must be a boolean")
 
     @property
     def billable_units(self) -> int:
