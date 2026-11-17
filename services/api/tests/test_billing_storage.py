@@ -2,7 +2,7 @@
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Barrier
 
 import pytest
@@ -216,3 +216,35 @@ def test_concurrent_conflicting_synthetic_usage_rejects_replay(make_account, app
     with app_engine.begin() as conn:
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
+
+
+def test_explicit_timestamp_replay_is_idempotent(make_account, app_engine):
+    a = make_account("billing-timestamp-exact@example.com")
+    event = UsageEvent(a.org_id, "timestamp-exact-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    occurred = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert record_synthetic_usage(conn, event, occurred_at=occurred) is True
+        assert record_synthetic_usage(conn, event, occurred_at=occurred) is False
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
+
+
+def test_conflicting_explicit_timestamp_replay_is_rejected(make_account, app_engine):
+    a = make_account("billing-timestamp-conflict@example.com")
+    event = UsageEvent(a.org_id, "timestamp-conflict-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    occurred = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert record_synthetic_usage(conn, event, occurred_at=occurred) is True
+        with pytest.raises(UsageReplayConflict):
+            record_synthetic_usage(conn, event, occurred_at=occurred + timedelta(seconds=1))
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
+
+
+def test_implicit_timestamp_replay_remains_idempotent(make_account, app_engine):
+    a = make_account("billing-timestamp-implicit@example.com")
+    event = UsageEvent(a.org_id, "timestamp-implicit-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert record_synthetic_usage(conn, event) is True
+        assert record_synthetic_usage(conn, event) is False
