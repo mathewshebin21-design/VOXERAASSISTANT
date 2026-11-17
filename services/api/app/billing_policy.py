@@ -20,10 +20,18 @@ class SubscriptionState(StrEnum):
 
 # Explicitly disallow reinstatement from terminal states without creating a new subscription.
 _ALLOWED: dict[SubscriptionState, frozenset[SubscriptionState]] = {
-    SubscriptionState.TRIALING: frozenset({SubscriptionState.ACTIVE, SubscriptionState.EXPIRED, SubscriptionState.CANCELED}),
-    SubscriptionState.ACTIVE: frozenset({SubscriptionState.PAST_DUE, SubscriptionState.PAUSED, SubscriptionState.CANCELED}),
-    SubscriptionState.PAST_DUE: frozenset({SubscriptionState.ACTIVE, SubscriptionState.PAUSED, SubscriptionState.CANCELED, SubscriptionState.EXPIRED}),
-    SubscriptionState.PAUSED: frozenset({SubscriptionState.ACTIVE, SubscriptionState.CANCELED, SubscriptionState.EXPIRED}),
+    SubscriptionState.TRIALING: frozenset(
+        {SubscriptionState.ACTIVE, SubscriptionState.EXPIRED, SubscriptionState.CANCELED}
+    ),
+    SubscriptionState.ACTIVE: frozenset(
+        {SubscriptionState.PAST_DUE, SubscriptionState.PAUSED, SubscriptionState.CANCELED}
+    ),
+    SubscriptionState.PAST_DUE: frozenset(
+        {SubscriptionState.ACTIVE, SubscriptionState.PAUSED, SubscriptionState.CANCELED, SubscriptionState.EXPIRED}
+    ),
+    SubscriptionState.PAUSED: frozenset(
+        {SubscriptionState.ACTIVE, SubscriptionState.CANCELED, SubscriptionState.EXPIRED}
+    ),
     SubscriptionState.CANCELED: frozenset(),
     SubscriptionState.EXPIRED: frozenset(),
 }
