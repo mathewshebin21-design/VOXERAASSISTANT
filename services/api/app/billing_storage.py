@@ -24,7 +24,7 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
     tenant = conn.execute(text("SELECT current_setting('app.org_id', true)")).scalar_one()
     if not tenant or tenant != event.organization_id:
         raise PermissionError("Usage tenant must match authenticated transaction context")
-    when = occurred_at or datetime.now(UTC)
+    when = datetime.now(UTC) if occurred_at is None else occurred_at
     if when.tzinfo is None or when.utcoffset() is None:
         raise ValueError("Usage timestamp must be timezone aware")
     inserted = conn.execute(
@@ -52,7 +52,7 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
     row = (
         conn.execute(
             text(
-                "SELECT organization_id, provider, source_event_id, kind, units, synthetic "
+                "SELECT organization_id, provider, source_event_id, kind, units, synthetic, occurred_at "
                 "FROM billing_usage_events "
                 "WHERE organization_id = :org AND provider = :provider AND source_event_id = :source"
             ),
@@ -70,4 +70,6 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
         provider=row["provider"],
     )
     reconcile_replay(previous, event)
+    if occurred_at is not None and row["occurred_at"] != when:
+        raise UsageReplayConflict("Usage event identity reused with conflicting occurrence timestamp")
     return False
