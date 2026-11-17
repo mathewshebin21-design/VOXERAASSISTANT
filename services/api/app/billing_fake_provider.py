@@ -44,7 +44,11 @@ class FakeBillingEvent:
             raise ValueError("Fake event identity required")
         if not isinstance(self.kind, FakeBillingEventKind):
             raise ValueError("Unsupported fake billing event")
-        if not isinstance(self.occurred_at, datetime) or self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
+        if (
+            not isinstance(self.occurred_at, datetime)
+            or self.occurred_at.tzinfo is None
+            or self.occurred_at.utcoffset() is None
+        ):
             raise ValueError("Fake billing timestamp must be timezone aware")
 
 
