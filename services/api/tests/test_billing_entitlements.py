@@ -49,9 +49,8 @@ def test_future_effective_subscription_fails_closed(make_account, app_engine):
 def test_missing_or_foreign_tenant_context_is_denied(make_account, app_engine):
     a = make_account("billing-entitlement-a@example.com")
     b = make_account("billing-entitlement-b@example.com")
-    with app_engine.begin() as conn:
-        with pytest.raises(PermissionError):
-            can_create_subscription_resource(conn, organization_id=a.org_id, at=NOW)
+    with app_engine.begin() as conn, pytest.raises(PermissionError):
+        can_create_subscription_resource(conn, organization_id=a.org_id, at=NOW)
     with app_engine.begin() as conn:
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": b.org_id})
         with pytest.raises(PermissionError):
@@ -60,6 +59,5 @@ def test_missing_or_foreign_tenant_context_is_denied(make_account, app_engine):
 
 def test_entitlement_rejects_naive_timestamp(make_account, app_engine):
     a = make_account("billing-entitlement-time@example.com")
-    with app_engine.begin() as conn:
-        with pytest.raises(ValueError):
-            can_create_subscription_resource(conn, organization_id=a.org_id, at=datetime(2026, 11, 17))
+    with app_engine.begin() as conn, pytest.raises(ValueError):
+        can_create_subscription_resource(conn, organization_id=a.org_id, at=datetime(2026, 11, 17))
