@@ -57,9 +57,7 @@ def upgrade() -> None:
         sa.Column("synthetic", sa.Boolean(), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.UniqueConstraint(
-            "organization_id", "provider", "source_event_id", name="uq_billing_usage_source"
-        ),
+        sa.UniqueConstraint("organization_id", "provider", "source_event_id", name="uq_billing_usage_source"),
         sa.CheckConstraint("units > 0", name="ck_billing_usage_units"),
         sa.CheckConstraint(
             "kind IN ('call_second', 'stt_second', 'tts_character', 'llm_token', 'notification')",
