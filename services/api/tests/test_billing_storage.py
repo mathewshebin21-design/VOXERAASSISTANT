@@ -126,9 +126,7 @@ def test_atomic_synthetic_usage_rejects_conflicting_replay(make_account, app_eng
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         assert record_synthetic_usage(conn, event) is True
         with pytest.raises(UsageReplayConflict):
-            record_synthetic_usage(
-                conn, UsageEvent(a.org_id, "atomic-2", UsageKind.CALL_SECOND, 61, True, "fake")
-            )
+            record_synthetic_usage(conn, UsageEvent(a.org_id, "atomic-2", UsageKind.CALL_SECOND, 61, True, "fake"))
 
 
 def test_atomic_writer_refuses_real_usage(make_account, app_engine):
