@@ -34,3 +34,9 @@ def test_billing_overview_rejects_unicode_digits(make_account):
     account = make_account("billing-route-unicode-month@example.com")
     response = account.get(account.o("/billing/overview?month=２０２６-11"))
     assert response.status_code == 422
+
+
+def test_billing_overview_rejects_year_zero(make_account):
+    account = make_account("billing-route-year-zero@example.com")
+    response = account.get(account.o("/billing/overview?month=0000-01"))
+    assert response.status_code == 422
