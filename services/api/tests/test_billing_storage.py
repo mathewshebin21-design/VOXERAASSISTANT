@@ -7,6 +7,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.billing_storage import record_synthetic_usage
+from app.billing_usage import UsageEvent, UsageKind, UsageReplayConflict
+
 
 def _insert_usage(conn, org_id, source="event-1"):
     conn.execute(
@@ -104,3 +107,35 @@ def test_provider_inbox_rejects_replayed_event(make_account, app_engine):
                 ),
                 {"id": uuid.uuid4(), "org": a.org_id},
             )
+
+
+def test_atomic_synthetic_usage_insert_and_exact_replay(make_account, app_engine):
+    a = make_account("billing-atomic@example.com")
+    event = UsageEvent(a.org_id, "atomic-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert record_synthetic_usage(conn, event) is True
+        assert record_synthetic_usage(conn, event) is False
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
+
+
+def test_atomic_synthetic_usage_rejects_conflicting_replay(make_account, app_engine):
+    a = make_account("billing-atomic-conflict@example.com")
+    event = UsageEvent(a.org_id, "atomic-2", UsageKind.CALL_SECOND, 60, True, "fake")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert record_synthetic_usage(conn, event) is True
+        with pytest.raises(UsageReplayConflict):
+            record_synthetic_usage(
+                conn, UsageEvent(a.org_id, "atomic-2", UsageKind.CALL_SECOND, 61, True, "fake")
+            )
+
+
+def test_atomic_writer_refuses_real_usage(make_account, app_engine):
+    a = make_account("billing-atomic-real@example.com")
+    event = UsageEvent(a.org_id, "atomic-3", UsageKind.CALL_SECOND, 60, False, "fake")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        with pytest.raises(PermissionError):
+            record_synthetic_usage(conn, event)
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 0
