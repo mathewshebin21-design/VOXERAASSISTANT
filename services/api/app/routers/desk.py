@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 
-from .. import audit, reception
+from .. import audit, reception, staff_notifications
 from ..deps import DB, OrgContext, client_meta, require
 from ..models import (
     Appointment,
@@ -380,6 +380,8 @@ def acknowledge_case(case_id: uuid.UUID, ctx: Manager, db: DB, request: Request)
     if ack is not None:
         if ack.actor_user_id != ctx.user.id:
             raise HTTPException(status.HTTP_409_CONFLICT, "Another employee already acknowledged this case")
+        staff_notifications.cancel_queued_for_case(db, case)
+        db.commit()
         return _detail(db, case)
     if case.status == CallerMessageStatus.resolved:
         raise HTTPException(status.HTTP_409_CONFLICT, "A resolved case cannot be newly acknowledged")
@@ -395,6 +397,7 @@ def acknowledge_case(case_id: uuid.UUID, ctx: Manager, db: DB, request: Request)
         {"channel": "staff_desk", "evidence": "explicit_staff_action"},
         client_meta(request),
     )
+    staff_notifications.cancel_queued_for_case(db, case)
     db.commit()
     return _detail(db, case)
 
@@ -455,6 +458,7 @@ def resolve_case(case_id: uuid.UUID, body: ResolveIn, ctx: Manager, db: DB, requ
     if me is not None and me.status == DeskStatus.busy and not still_open:
         reception.set_presence(db, ctx.org_id, ctx.user.id, DeskStatus.available)
     audit.record(db, ctx.org_id, ctx.user.id, "case.resolved", "caller_message", c.id, None, client_meta(request))
+    staff_notifications.cancel_queued_for_case(db, c)
     db.commit()
     return _detail(db, c)
 

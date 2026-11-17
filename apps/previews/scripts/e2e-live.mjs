@@ -182,6 +182,7 @@ if (process.env.LIVE_FAKES === "1") {
     await p.getByRole("button", { name: "Acknowledge receipt" }).click();
     await status(p, "Staff receipt acknowledged");
     await p.getByTestId("staff-acknowledgement").getByText(/Staff acknowledged receipt/i).waitFor();
+    await p.getByTestId("notification-status").getByText(/Staff email: Notification processing cancelled/i).waitFor();
     await p.getByLabel("Add a note").fill("Called back, booked a consultation");
     await p.getByRole("button", { name: "Add", exact: true }).click();
     await p.getByTestId("case-detail").getByText("Called back, booked a consultation").waitFor({ timeout: 8000 });

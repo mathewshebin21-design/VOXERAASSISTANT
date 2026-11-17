@@ -71,7 +71,11 @@ The owner's **Master GPT Work Execution Roadmap** supplies the current Phase 0�
 
 ### Next executable gate
 
-Run API (including disposable migration rehearsal), worker, frontend and simulated integration workflows on the integration candidate. Inspect failures and record exact commit, run IDs, results and scope. Keep the production schema and the existing 0012 validation branch at their verified revisions until separate migration sequencing is approved. Review #2 and start the Agent Studio reconciliation separately when the integration candidate is stable.
+PR #60 passed integration CI. PR #61 reconciled PR #2 and passed API, frontend and synthetic integration CI on `2200c66`, with [16/16 Studio browser checks](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/43956568730). On 17 November (IST), Vercel still reported rate-limited deployment checks. The only Flow Preview for #61 was built from an earlier commit, and no matching API Preview or dedicated hosted 0013 branch was present.
+
+Hosted acceptance requires a dedicated synthetic-only Neon branch. Record the precise branch, endpoint, environment marker and runtime role. Use the existing release verifier to check schema `0013`, grants, tenant isolation and notification outbox constraints. Verify the matching API and Flow Preview commits and the Flow server's binding to the isolated API before creating synthetic accounts. Confirm the accounts and their workspaces are removed after the run. See the earlier [PR45 isolation evidence](pr45-isolated-validation.md). The PR45 branch serves as the historical `0012` baseline.
+
+The staff-desk follow-up cancels pending and retrying notifications when a case is explicitly acknowledged or resolved. Reopening the case leaves that cancellation in effect. A leased attempt keeps its pre-dispatch recheck and historical provider receipts stay in their recorded states. Verify these outcomes in API and browser CI. External dispatch acceptance, real calls and production migration still require separate approval.
 
 ## Retained original Phase 0–10 dashboard — 2026-11-16 (Asia/Kolkata)
 
