@@ -10,8 +10,15 @@ from sqlalchemy import text
 def test_billing_inbox_reconciliation_grant(app_engine):
     with app_engine.connect() as conn:
         assert conn.execute(
-            text("SELECT has_table_privilege(current_user, 'billing_provider_inbox', 'UPDATE')")
+            text("SELECT has_column_privilege(current_user, 'billing_provider_inbox', 'status', 'UPDATE')")
         ).scalar_one() is True
+
+
+def test_billing_inbox_payload_digest_is_not_mutable(app_engine):
+    with app_engine.connect() as conn:
+        assert conn.execute(
+            text("SELECT has_column_privilege(current_user, 'billing_provider_inbox', 'payload_sha256', 'UPDATE')")
+        ).scalar_one() is False
 
 
 def test_billing_quota_tables_have_rls_and_no_bypass(app_engine):
