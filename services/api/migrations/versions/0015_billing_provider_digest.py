@@ -28,7 +28,7 @@ def _role() -> str:
 
 def upgrade() -> None:
     op.add_column("billing_provider_inbox", sa.Column("payload_sha256", sa.String(64), nullable=True))
-    op.execute(f"GRANT UPDATE ON billing_provider_inbox TO {_role()}")
+    op.execute(f"GRANT UPDATE (status) ON billing_provider_inbox TO {_role()}")
     op.create_check_constraint(
         "ck_billing_provider_payload_digest",
         "billing_provider_inbox",
@@ -37,6 +37,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(f"REVOKE UPDATE ON billing_provider_inbox FROM {_role()}")
+    op.execute(f"REVOKE UPDATE (status) ON billing_provider_inbox FROM {_role()}")
     op.drop_constraint("ck_billing_provider_payload_digest", "billing_provider_inbox", type_="check")
     op.drop_column("billing_provider_inbox", "payload_sha256")
