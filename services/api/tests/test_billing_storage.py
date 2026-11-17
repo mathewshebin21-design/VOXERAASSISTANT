@@ -190,3 +190,29 @@ def test_concurrent_identical_synthetic_usage_commits_once(make_account, app_eng
     with app_engine.begin() as conn:
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
+
+
+def test_concurrent_conflicting_synthetic_usage_rejects_replay(make_account, app_engine):
+    a = make_account("billing-atomic-concurrent-conflict@example.com")
+    barrier = Barrier(2, timeout=15)
+
+    def submit(units):
+        event = UsageEvent(a.org_id, "concurrent-conflict-1", UsageKind.CALL_SECOND, units, True, "fake")
+        with app_engine.begin() as conn:
+            conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+            barrier.wait()
+            return record_synthetic_usage(conn, event)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(submit, 60)
+        second = pool.submit(submit, 61)
+        results = []
+        for future in (first, second):
+            try:
+                results.append(future.result(timeout=25))
+            except UsageReplayConflict:
+                results.append("conflict")
+        assert sorted(results, key=str) == sorted([True, "conflict"], key=str)
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 1
