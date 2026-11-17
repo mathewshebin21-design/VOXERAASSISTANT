@@ -143,7 +143,7 @@ def test_atomic_writer_respects_authenticated_tenant_rls(make_account, app_engin
     a = make_account("billing-atomic-tenant-a@example.com")
     b = make_account("billing-atomic-tenant-b@example.com")
     foreign = UsageEvent(a.org_id, "foreign-1", UsageKind.CALL_SECOND, 60, True, "fake")
-    with pytest.raises(DBAPIError), app_engine.begin() as conn:
+    with pytest.raises(PermissionError), app_engine.begin() as conn:
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": b.org_id})
         record_synthetic_usage(conn, foreign)
     with app_engine.begin() as conn:
@@ -158,4 +158,13 @@ def test_atomic_writer_rejects_naive_timestamps(make_account, app_engine):
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         with pytest.raises(ValueError):
             record_synthetic_usage(conn, event, occurred_at=datetime(2026, 11, 17))
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 0
+
+
+def test_atomic_writer_requires_tenant_context(make_account, app_engine):
+    a = make_account("billing-atomic-missing-context@example.com")
+    event = UsageEvent(a.org_id, "missing-tenant-1", UsageKind.CALL_SECOND, 60, True, "fake")
+    with app_engine.begin() as conn:
+        with pytest.raises(PermissionError):
+            record_synthetic_usage(conn, event)
         assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 0
