@@ -41,3 +41,20 @@ class UsageEvent:
     def deduplication_key(self) -> tuple[str, str, str]:
         """Scope provider event identity to tenant; enforce this key in the database."""
         return (self.organization_id, self.provider, self.source_event_id)
+
+
+class UsageReplayConflict(ValueError):
+    """An existing event ID was reused with a different immutable payload."""
+
+
+def reconcile_replay(existing: UsageEvent, incoming: UsageEvent) -> bool:
+    """Return False for an exact replay; reject identity reuse with changed payload.
+
+    The database writer must acquire/serialize the unique event identity before
+    invoking this check. This pure helper does not provide transactional safety.
+    """
+    if existing.deduplication_key != incoming.deduplication_key:
+        raise ValueError("Cannot reconcile distinct usage identities")
+    if existing != incoming:
+        raise UsageReplayConflict("Usage event identity reused with conflicting payload")
+    return False
