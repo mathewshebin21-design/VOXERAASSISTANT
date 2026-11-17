@@ -40,3 +40,9 @@ def test_billing_overview_rejects_year_zero(make_account):
     account = make_account("billing-route-year-zero@example.com")
     response = account.get(account.o("/billing/overview?month=0000-01"))
     assert response.status_code == 422
+
+
+def test_billing_overview_rejects_unrepresentable_final_month(make_account):
+    account = make_account("billing-route-year-max@example.com")
+    response = account.get(account.o("/billing/overview?month=9999-12"))
+    assert response.status_code == 422
