@@ -3,7 +3,6 @@
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
