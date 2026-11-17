@@ -52,3 +52,55 @@ def test_billing_usage_app_role_cannot_mutate_ledger(make_account, app_engine):
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         with pytest.raises(DBAPIError):
             conn.execute(text("UPDATE billing_usage_events SET units = 999"))
+
+
+def test_subscription_and_provider_inbox_are_tenant_isolated(make_account, app_engine):
+    a = make_account("billing-subscription-a@example.com")
+    b = make_account("billing-subscription-b@example.com")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        conn.execute(
+            text(
+                "INSERT INTO billing_subscriptions "
+                "(id, organization_id, price_code, currency, price_minor_units, state, effective_at) "
+                "VALUES (:id, :org, 'uk-basic-v1', 'GBP', 2900, 'trialing', :at)"
+            ),
+            {"id": uuid.uuid4(), "org": a.org_id, "at": datetime.now(UTC)},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO billing_provider_inbox "
+                "(id, organization_id, provider, provider_event_id) "
+                "VALUES (:id, :org, 'fake', 'payment-1')"
+            ),
+            {"id": uuid.uuid4(), "org": a.org_id},
+        )
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": b.org_id})
+        assert conn.execute(text("SELECT count(*) FROM billing_subscriptions")).scalar_one() == 0
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
+
+
+def test_provider_inbox_rejects_replayed_event(make_account, app_engine):
+    a = make_account("billing-inbox-replay@example.com")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        conn.execute(
+            text(
+                "INSERT INTO billing_provider_inbox "
+                "(id, organization_id, provider, provider_event_id) "
+                "VALUES (:id, :org, 'fake', 'replay-1')"
+            ),
+            {"id": uuid.uuid4(), "org": a.org_id},
+        )
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        with pytest.raises(DBAPIError):
+            conn.execute(
+                text(
+                    "INSERT INTO billing_provider_inbox "
+                    "(id, organization_id, provider, provider_event_id) "
+                    "VALUES (:id, :org, 'fake', 'replay-1')"
+                ),
+                {"id": uuid.uuid4(), "org": a.org_id},
+            )
