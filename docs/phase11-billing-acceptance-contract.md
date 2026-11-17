@@ -1,6 +1,6 @@
 # Phase 11 — Billing and subscription acceptance contract
 
-Status: **Design and test specification only**. No payment provider, charge, tax determination, or live entitlement enforcement is activated. This work is based on integrated candidate PR #62 and must remain isolated from production.
+Status: **Foundation implemented on draft PR #63; production activation blocked**. Migration 0014, pure subscription policy, tenant-scoped read-only entitlement evaluator, synthetic-only atomic usage writer, and PostgreSQL acceptance tests are implemented. No payment provider, charge, tax determination, or live entitlement enforcement is activated. This work is based on integrated candidate PR #62 and must remain isolated from production.
 
 ## Scope and invariants
 
@@ -42,7 +42,7 @@ Status: **Design and test specification only**. No payment provider, charge, tax
 
 ## Evidence to capture
 
-Exact commit SHA, migration identifier, test commands and results, database marker, synthetic tenant isolation, provider adapter mode, pricing version, security review, and approval references. Phase 11 remains **Not Started / specification drafted** until executable implementation and acceptance exist.
+Exact commit SHA, migration identifier, test commands and results, database marker, synthetic tenant isolation, provider adapter mode, pricing version, security review, and approval references. Phase 11 remains **In Progress**, not commercially complete. The isolated foundation has executable tests, but authenticated real-usage provenance, quota reservations, webhook verification, provider reconciliation, invoices, tax review, and launch approval remain open.
 
 ## Dependencies and prohibited shortcuts
 
