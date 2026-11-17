@@ -186,14 +186,15 @@ def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(mak
     # Creating a receipt is an explicit action; assignment alone is not one.
     assigned = a.post(a.o(f"/cases/{ca}/assign"), json={"user_id": a.user_id})
     assert assigned.status_code == 200
+    assert assigned.json()["notification"]["state"] == "pending"
     ack = a.post(a.o(f"/cases/{ca}/acknowledge"))
     assert ack.status_code == 200 and ack.json()["staff_acknowledged_by"] == a.user_id
+    assert ack.json()["notification"]["state"] == "cancelled"
     with Session(app_engine, expire_on_commit=False) as db:
         set_tenant(db, org_id=uuid.UUID(a.org_id))
-        assert staff_notifications.lease_due(db, uuid.UUID(a.org_id)) == []
         row = db.scalar(select(StaffNotificationOutbox).where(StaffNotificationOutbox.case_id == ca))
         assert row.status == "cancelled" and row.attempts == 0
-        db.commit()
+        assert staff_notifications.lease_due(db, uuid.UUID(a.org_id)) == []
     with Session(app_engine, expire_on_commit=False) as db:
         set_tenant(db, org_id=uuid.UUID(b.org_id))
         [r] = staff_notifications.lease_due(db, uuid.UUID(b.org_id))
@@ -210,3 +211,33 @@ def test_staff_acknowledgement_cancels_unsent_intent_and_tenant_rls_isolates(mak
             ),
             {"id": uuid.uuid4(), "org": a.org_id, "cid": cb},
         )
+
+
+def test_resolving_case_cancels_queued_retry_and_keeps_attempt_history(make_account, app_engine):
+    owner = make_account("outbox-resolve-retry@example.com")
+    case_id = new_ai_case(app_engine, owner.org_id)
+    org_id = uuid.UUID(owner.org_id)
+    now = datetime.now(UTC) + timedelta(seconds=1)
+    with Session(app_engine) as db:
+        set_tenant(db, org_id=org_id)
+        [row] = staff_notifications.lease_due(db, org_id, now=now)
+        notification_id = row.id
+        staff_notifications.retry_or_dead(db, org_id, row.id, row.lease_token, "timeout", now=now)
+        db.commit()
+
+    case_url = owner.o(f"/cases/{case_id}")
+    resolved = owner.post(case_url + "/resolve", json={"resolution": "Handled at the desk"})
+    assert resolved.status_code == 200
+    notification = resolved.json()["notification"]
+    assert notification["state"] == "cancelled" and notification["attempts"] == 1
+    assert notification["last_error_code"] == "timeout"
+    reopened = owner.post(case_url + "/reopen")
+    assert reopened.status_code == 200 and reopened.json()["notification"] == notification
+
+    with Session(app_engine) as db:
+        set_tenant(db, org_id=org_id)
+        history = db.scalars(
+            select(StaffNotificationAttempt.result).where(StaffNotificationAttempt.notification_id == notification_id)
+        )
+        assert sorted(history) == ["reserved", "retry"]
+        assert staff_notifications.lease_due(db, org_id, now=now + timedelta(days=1)) == []

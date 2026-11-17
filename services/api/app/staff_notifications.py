@@ -10,7 +10,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -63,6 +63,19 @@ def enqueue_case(db: Session, case: CallerMessage) -> StaffNotificationOutbox | 
     db.add(row)
     db.flush()
     return row
+
+
+def cancel_queued_for_case(db: Session, case: CallerMessage) -> None:
+    """Stop unleased processing in the same transaction that handles the case."""
+    db.execute(
+        update(StaffNotificationOutbox)
+        .where(
+            StaffNotificationOutbox.organization_id == case.organization_id,
+            StaffNotificationOutbox.case_id == case.id,
+            StaffNotificationOutbox.status.in_(("pending", "retry")),
+        )
+        .values(status="cancelled", updated_at=datetime.now(UTC))
+    )
 
 
 def _staff_has_acknowledged(db: Session, row: StaffNotificationOutbox) -> bool:
