@@ -29,8 +29,7 @@ def record_synthetic_usage(conn, event: UsageEvent, *, occurred_at: datetime | N
             "INSERT INTO billing_usage_events "
             "(id, organization_id, provider, source_event_id, kind, units, synthetic, occurred_at) "
             "VALUES (:id, :org, :provider, :source, :kind, :units, true, :occurred) "
-            "ON CONFLICT (organization_id, provider, source_event_id) DO NOTHING "
-            "RETURNING id"
+            "ON CONFLICT (organization_id, provider, source_event_id) DO NOTHING RETURNING id"
         ),
         {
             "id": uuid.uuid4(),
