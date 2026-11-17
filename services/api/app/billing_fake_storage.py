@@ -32,9 +32,7 @@ def apply_fake_subscription_event(
         envelope = json.loads(raw_body)
     except (TypeError, ValueError) as exc:
         raise ValueError("Fake event requires a valid JSON envelope") from exc
-    if not isinstance(envelope, dict) or set(envelope) != {
-        "event_id", "organization_id", "kind", "occurred_at"
-    }:
+    if not isinstance(envelope, dict) or set(envelope) != {"event_id", "organization_id", "kind", "occurred_at"}:
         raise ValueError("Fake event envelope fields do not match the contract")
     if envelope != {
         "event_id": event.event_id,
