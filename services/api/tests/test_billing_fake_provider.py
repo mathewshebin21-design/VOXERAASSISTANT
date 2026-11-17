@@ -1,6 +1,6 @@
 """Fake billing subscription lifecycle policy tests."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 
@@ -75,3 +75,20 @@ def test_fake_subscription_cannot_start_with_payment():
 def test_fake_event_identity_required(value):
     with pytest.raises(ValueError):
         FakeBillingEvent(value, "tenant-a", FakeBillingEventKind.TRIAL_ACTIVATED, NOW)
+
+
+class _MissingOffset(tzinfo):
+    def utcoffset(self, dt):
+        return None
+
+    def dst(self, dt):
+        return None
+
+    def tzname(self, dt):
+        return "unknown"
+
+
+def test_fake_event_rejects_timezone_without_offset():
+    timestamp = datetime(2026, 11, 17, tzinfo=_MissingOffset())
+    with pytest.raises(ValueError, match="timezone aware"):
+        FakeBillingEvent("event-1", "tenant-a", FakeBillingEventKind.TRIAL_ACTIVATED, timestamp)
