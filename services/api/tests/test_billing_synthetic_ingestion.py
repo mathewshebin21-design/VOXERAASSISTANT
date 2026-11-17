@@ -97,3 +97,15 @@ def test_untrusted_or_invalid_payload_is_rejected(make_account, app_engine, payl
         conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
         with pytest.raises(ValueError):
             _submit(conn, ctx, json.dumps(payload).encode())
+
+
+def test_signed_synthetic_ingestion_rejects_duplicate_json_keys(make_account, app_engine):
+    a = make_account("billing-signed-duplicate@example.com")
+    ctx = TrustedUsageContext(a.org_id, "fake", UsageOrigin.SYNTHETIC_HARNESS, True)
+    duplicate = _body().replace(b'"units": 60', b'"units": 60, "units": 60')
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        with pytest.raises(ValueError, match="Duplicate synthetic usage JSON field"):
+            _submit(conn, ctx, duplicate)
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
+        assert conn.execute(text("SELECT count(*) FROM billing_usage_events")).scalar_one() == 0
