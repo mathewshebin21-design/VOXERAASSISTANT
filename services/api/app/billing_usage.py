@@ -12,7 +12,7 @@ class UsageKind(StrEnum):
     CALL_SECOND = "call_second"
     STT_SECOND = "stt_second"
     TTS_CHARACTER = "tts_character"
-    LLM_TOKEN = "llm_token"
+    LLM_UNIT = "llm_token"
     NOTIFICATION = "notification"
 
 
