@@ -28,3 +28,9 @@ def test_billing_overview_rejects_other_organization(make_account):
     stranger = make_account("billing-route-tenant-stranger@example.com")
     response = stranger.get(owner.o("/billing/overview?month=2026-11"))
     assert response.status_code in (403, 404)
+
+
+def test_billing_overview_rejects_unicode_digits(make_account):
+    account = make_account("billing-route-unicode-month@example.com")
+    response = account.get(account.o("/billing/overview?month=２０２６-11"))
+    assert response.status_code == 422
