@@ -6,8 +6,9 @@ This writer does not verify a signature, change subscriptions, or accept payment
 
 import uuid
 
-from app.billing_provider_replay import reconcile_provider_digest, raw_event_digest
 from sqlalchemy import text
+
+from app.billing_provider_replay import reconcile_provider_digest, raw_event_digest
 
 
 def record_synthetic_provider_event(
