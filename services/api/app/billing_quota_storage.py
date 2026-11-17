@@ -6,6 +6,7 @@ No payment, phone, or external provider is activated.
 """
 
 import uuid
+
 from sqlalchemy import text
 
 from app.billing_quota_policy import QuotaSnapshot, reserve_quota, settle_quota
@@ -79,7 +80,13 @@ def reserve_quota_units(
             "(id, organization_id, period_key, reservation_id, units) "
             "VALUES (:id, :org, :period, :reservation, :units)"
         ),
-        {"id": uuid.uuid4(), "org": organization_id, "period": period_key, "reservation": reservation_id, "units": units},
+        {
+            "id": uuid.uuid4(),
+            "org": organization_id,
+            "period": period_key,
+            "reservation": reservation_id,
+            "units": units,
+        },
     )
     conn.execute(
         text(
