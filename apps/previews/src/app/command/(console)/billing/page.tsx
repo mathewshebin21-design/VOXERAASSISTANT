@@ -1,6 +1,8 @@
 "use client";
 
 import { clsx } from "clsx";
+import { useDataMode } from "@/lib/live/data-mode";
+import { LiveBillingOverview } from "./live-overview";
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PageHead, Panel, Stat, Tag } from "@/components/command/ui";
@@ -10,6 +12,12 @@ import { COST_ASSUMPTIONS, GBP_PER_MIN, PLANS, USD_TO_GBP } from "@/lib/pricing"
 import { DEMO_TODAY, addDays, dayNum, gbp } from "@/lib/time";
 
 export default function Billing() {
+  const dm = useDataMode();
+  if (dm.mode === "live" && dm.org) return <LiveBillingOverview organizationId={dm.org.organization.id} />;
+  return <DemoBilling />;
+}
+
+function DemoBilling() {
   const plan = PLANS[1];
   const from = "2026-10-01";
   const mtd = useMemo(() => computeMetrics(CALLS.filter((c) => c.date >= from && c.date <= DEMO_TODAY)), []);
