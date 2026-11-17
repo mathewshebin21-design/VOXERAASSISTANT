@@ -65,7 +65,16 @@ def test_fake_subscription_rejects_changed_event_payload(make_account, app_engin
         _tenant(conn, a.org_id)
         assert _apply(conn, event, price=PRICE) is True
         with pytest.raises(ProviderReplayConflict):
-            _apply(conn, event, raw=b"changed-event", price=PRICE)
+            alternate = json.dumps(
+                {
+                    "event_id": event.event_id,
+                    "organization_id": event.organization_id,
+                    "kind": event.kind.value,
+                    "occurred_at": event.occurred_at.isoformat(),
+                },
+                indent=2,
+            ).encode()
+            _apply(conn, event, raw=alternate, price=PRICE)
 
 
 def test_fake_subscription_rejects_cross_tenant(make_account, app_engine):
