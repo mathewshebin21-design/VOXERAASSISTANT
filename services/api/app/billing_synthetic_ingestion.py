@@ -14,6 +14,15 @@ from app.billing_synthetic_signature import verify_synthetic_signature
 from app.billing_usage import UsageKind
 
 
+def _unique_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate synthetic usage JSON field")
+        result[key] = value
+    return result
+
+
 def ingest_signed_synthetic_usage(
     conn,
     *,
@@ -39,7 +48,7 @@ def ingest_signed_synthetic_usage(
         now=now,
     )
     try:
-        payload = json.loads(raw_body)
+        payload = json.loads(raw_body, object_pairs_hook=_unique_json_fields)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid synthetic usage JSON") from exc
     if not isinstance(payload, dict) or set(payload) != {"event_id", "kind", "units", "occurred_at"}:
