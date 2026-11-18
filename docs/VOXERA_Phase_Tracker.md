@@ -1,3 +1,20 @@
+## Phase 11: billing foundation — active validation (2026-11-18)
+
+**Scope:** Synthetic, isolated billing only. PR #63 remains draft; no live payments, telephony, production migrations, or production deployments are authorized.
+
+| Workstream | Status | Verified evidence / next gate |
+|---|---|---|
+| Billing model, synthetic ledger, tenant-scoped storage and read-only overview | Implemented on development branch; release pending | PR #63, branch `codex/voxera-phase11-billing-contract-20261117`; require full API, migration and frontend validation |
+| Python Ruff formatting | Fixed on branch; revalidation pending | Automated maintenance run [44223499934](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223499934) succeeded; commit `8396997` |
+| Duplicate-field JSON validation regression | Fix committed; revalidation pending | Previous API run [44223823916](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223823916) failed one test expecting the duplicate-field error; commit `7877d14` preserves it |
+| Frontend dependency security | **Blocked** | `npm audit` reported 20 high findings in the picomatch dependency tree. Forced upgrade failed on `$postcss` and attempted incompatible major versions; no audit bypass accepted. See [44223817164](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223817164) |
+| Integration CI | Previous run passed; current run pending | [44223506851](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223506851) passed; newer runs must pass at current head |
+| Production promotion | **Not authorized** | Draft PR #63 must remain unmerged until owner approval and all release gates pass |
+
+**Tracker update policy:** Update this section with each material commit, confirmed CI outcome, blocker change, or release decision. Distinguish a committed fix from a verified passing run; record run IDs and commit SHAs. Do not mark a phase complete without acceptance evidence.
+
+---
+
 # VOXERA Phase Tracker
 
 ## Canonical execution register — 17 November 2026 (Asia/Kolkata)
