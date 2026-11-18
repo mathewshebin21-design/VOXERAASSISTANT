@@ -7,6 +7,10 @@ on:
     # API changes can break frontend contracts even when no UI file changes.
     paths: ["apps/previews/**", "services/api/**", ".github/workflows/previews.yml"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
