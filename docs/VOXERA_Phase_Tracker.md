@@ -10,6 +10,7 @@
 | Frontend dependency security | **Blocked; diagnostics improved** | `npm audit` reported 20 high findings in the picomatch dependency tree. Forced upgrade failed on `$postcss` and attempted incompatible major versions; no audit bypass accepted. See [44223817164](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223817164) |
 | Frontend test visibility | **Lint, typecheck, unit tests, script tests and build verified; E2E pending** | Run [44224578388](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224578388) passed lint, typecheck, unit tests, script tests and build; security gate failed, E2E skipped on that run. Commit `a204d9a` moves security enforcement after E2E |
 | Integration CI | Verified on `a204d9a`; current-head validation pending | [44224601254](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224601254) passed; newer runs must pass at current head |
+| CI concurrency control | Implemented; awaiting hosted verification | Commits `523bec6`, `d91178b`, `de76004` add per-workflow branch/PR concurrency with `cancel-in-progress: true` to prevent redundant overlapping validation |
 | Temporary maintenance workflow | Removed after formatter repair | Commit `7504406` deletes `.github/workflows/phase11-maintenance.yml` from development branch; release security gate remains in `previews.yml` |
 | Production promotion | **Not authorized** | Draft PR #63 must remain unmerged until owner approval and all release gates pass |
 
