@@ -87,7 +87,13 @@ def test_verified_provider_origin_cannot_enter_synthetic_path(make_account, app_
     [
         {"event_id": "x", "kind": "call_second", "units": 1, "occurred_at": "2026-11-17T12:00:00"},
         {"event_id": "x", "kind": "call_second", "units": True, "occurred_at": "2026-11-17T12:00:00+00:00"},
-        {"event_id": "x", "kind": "call_second", "units": 1, "occurred_at": "2026-11-17T12:00:00+00:00", "synthetic": False},
+        {
+            "event_id": "x",
+            "kind": "call_second",
+            "units": 1,
+            "occurred_at": "2026-11-17T12:00:00+00:00",
+            "synthetic": False,
+        },
     ],
 )
 def test_untrusted_or_invalid_payload_is_rejected(make_account, app_engine, payload):

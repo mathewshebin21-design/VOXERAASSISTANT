@@ -66,13 +66,17 @@ def apply_fake_subscription_event(
     )
     if not first:
         return False
-    row = conn.execute(
-        text(
-            "SELECT price_code, currency, price_minor_units, state, effective_at "
-            "FROM billing_subscriptions WHERE organization_id = :org FOR UPDATE"
-        ),
-        {"org": event.organization_id},
-    ).mappings().one_or_none()
+    row = (
+        conn.execute(
+            text(
+                "SELECT price_code, currency, price_minor_units, state, effective_at "
+                "FROM billing_subscriptions WHERE organization_id = :org FOR UPDATE"
+            ),
+            {"org": event.organization_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
     current = None
     if row is not None:
         current = Subscription(
@@ -101,10 +105,7 @@ def apply_fake_subscription_event(
         )
     else:
         conn.execute(
-            text(
-                "UPDATE billing_subscriptions SET state = :state, effective_at = :at "
-                "WHERE organization_id = :org"
-            ),
+            text("UPDATE billing_subscriptions SET state = :state, effective_at = :at WHERE organization_id = :org"),
             {"state": updated.state.value, "at": updated.effective_at, "org": event.organization_id},
         )
     conn.execute(

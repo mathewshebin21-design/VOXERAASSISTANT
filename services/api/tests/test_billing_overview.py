@@ -29,9 +29,7 @@ def test_billing_overview_reports_reserved_capacity(make_account, app_engine):
     with app_engine.begin() as conn:
         _tenant(conn, a.org_id)
         create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=100)
-        reserve_quota_units(
-            conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", units=30
-        )
+        reserve_quota_units(conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", units=30)
         result = read_billing_overview(conn, organization_id=a.org_id, period_key="2026-11")
         assert (result.quota_limit, result.quota_reserved, result.quota_available) == (100, 30, 70)
 

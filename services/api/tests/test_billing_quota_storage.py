@@ -66,9 +66,7 @@ def test_quota_tenant_isolation(make_account, app_engine):
         _tenant(conn, b.org_id)
         assert conn.execute(text("SELECT count(*) FROM billing_quota_periods")).scalar_one() == 0
         with pytest.raises(PermissionError):
-            reserve_quota_units(
-                conn, organization_id=a.org_id, period_key="2026-11", reservation_id="foreign", units=1
-            )
+            reserve_quota_units(conn, organization_id=a.org_id, period_key="2026-11", reservation_id="foreign", units=1)
 
 
 def test_concurrent_reservations_cannot_overallocate(make_account, app_engine):

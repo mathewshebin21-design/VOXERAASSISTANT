@@ -24,36 +24,39 @@ def _event(org, kind, *, event_id, at=NOW):
 
 
 def _apply(conn, event, *, raw=None, price=None):
-    body = raw if raw is not None else json.dumps(
-        {
-            "event_id": event.event_id,
-            "organization_id": event.organization_id,
-            "kind": event.kind.value,
-            "occurred_at": event.occurred_at.isoformat(),
-        },
-        sort_keys=True,
-    ).encode()
+    body = (
+        raw
+        if raw is not None
+        else json.dumps(
+            {
+                "event_id": event.event_id,
+                "organization_id": event.organization_id,
+                "kind": event.kind.value,
+                "occurred_at": event.occurred_at.isoformat(),
+            },
+            sort_keys=True,
+        ).encode()
+    )
     return apply_fake_subscription_event(conn, event=event, raw_body=body, initial_price=price)
 
 
 def test_fake_subscription_durable_lifecycle_and_replay(make_account, app_engine):
     a = make_account("fake-storage-lifecycle@example.com")
     trial = _event(a.org_id, FakeBillingEventKind.TRIAL_ACTIVATED, event_id="trial")
-    active = _event(
-        a.org_id, FakeBillingEventKind.PAYMENT_SUCCEEDED, event_id="paid", at=NOW + timedelta(minutes=1)
-    )
-    failed = _event(
-        a.org_id, FakeBillingEventKind.PAYMENT_FAILED, event_id="failed", at=NOW + timedelta(minutes=2)
-    )
+    active = _event(a.org_id, FakeBillingEventKind.PAYMENT_SUCCEEDED, event_id="paid", at=NOW + timedelta(minutes=1))
+    failed = _event(a.org_id, FakeBillingEventKind.PAYMENT_FAILED, event_id="failed", at=NOW + timedelta(minutes=2))
     with app_engine.begin() as conn:
         _tenant(conn, a.org_id)
         assert _apply(conn, trial, price=PRICE) is True
         assert _apply(conn, trial, price=PRICE) is False
         assert _apply(conn, active) is True
         assert _apply(conn, failed) is True
-        assert conn.execute(
-            text("SELECT state FROM billing_subscriptions WHERE organization_id = :org"), {"org": a.org_id}
-        ).scalar_one() == "past_due"
+        assert (
+            conn.execute(
+                text("SELECT state FROM billing_subscriptions WHERE organization_id = :org"), {"org": a.org_id}
+            ).scalar_one()
+            == "past_due"
+        )
         assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 3
         assert conn.execute(text("SELECT count(*) FROM billing_subscriptions")).scalar_one() == 1
 

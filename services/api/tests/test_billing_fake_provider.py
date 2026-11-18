@@ -61,9 +61,7 @@ def test_fake_subscription_rejects_duplicate_trial():
 def test_fake_subscription_rejects_out_of_order_event():
     trial = apply_fake_billing_event(None, event(FakeBillingEventKind.TRIAL_ACTIVATED), initial_price=PRICE)
     with pytest.raises(ValueError):
-        apply_fake_billing_event(
-            trial, event(FakeBillingEventKind.PAYMENT_SUCCEEDED, at=NOW - timedelta(seconds=1))
-        )
+        apply_fake_billing_event(trial, event(FakeBillingEventKind.PAYMENT_SUCCEEDED, at=NOW - timedelta(seconds=1)))
 
 
 def test_fake_subscription_cannot_start_with_payment():

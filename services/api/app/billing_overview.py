@@ -38,20 +38,28 @@ def read_billing_overview(conn, *, organization_id: str, period_key: str) -> Bil
         end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=UTC)
     except (ValueError, OverflowError) as exc:
         raise ValueError("Invalid billing period") from exc
-    subscription = conn.execute(
-        text(
-            "SELECT state, price_code, currency, price_minor_units FROM billing_subscriptions "
-            "WHERE organization_id = :org"
-        ),
-        {"org": organization_id},
-    ).mappings().one_or_none()
-    quota = conn.execute(
-        text(
-            "SELECT limit_units, consumed_units, reserved_units FROM billing_quota_periods "
-            "WHERE organization_id = :org AND period_key = :period"
-        ),
-        {"org": organization_id, "period": period_key},
-    ).mappings().one_or_none()
+    subscription = (
+        conn.execute(
+            text(
+                "SELECT state, price_code, currency, price_minor_units FROM billing_subscriptions "
+                "WHERE organization_id = :org"
+            ),
+            {"org": organization_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    quota = (
+        conn.execute(
+            text(
+                "SELECT limit_units, consumed_units, reserved_units FROM billing_quota_periods "
+                "WHERE organization_id = :org AND period_key = :period"
+            ),
+            {"org": organization_id, "period": period_key},
+        )
+        .mappings()
+        .one_or_none()
+    )
     count = conn.execute(
         text(
             "SELECT count(*) FROM billing_usage_events "
@@ -69,8 +77,6 @@ def read_billing_overview(conn, *, organization_id: str, period_key: str) -> Bil
         quota_limit=quota["limit_units"] if quota else None,
         quota_consumed=quota["consumed_units"] if quota else None,
         quota_reserved=quota["reserved_units"] if quota else None,
-        quota_available=(
-            quota["limit_units"] - quota["consumed_units"] - quota["reserved_units"] if quota else None
-        ),
+        quota_available=(quota["limit_units"] - quota["consumed_units"] - quota["reserved_units"] if quota else None),
         synthetic_usage_events=count,
     )
