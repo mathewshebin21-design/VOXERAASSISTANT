@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 jobs:
-  format-and-audit-fix:
+  format-and-audit-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,11 +27,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
-      - name: Resolve audited npm dependencies in isolated development branch
+      - name: Enforce npm dependency security gate (no forced major upgrades)
         working-directory: apps/previews
         run: |
           npm ci
-          npm audit fix --force
           npm audit --audit-level=high
       - name: Commit maintenance changes to development branch only
         run: |
