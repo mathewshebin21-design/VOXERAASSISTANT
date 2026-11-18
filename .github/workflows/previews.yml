@@ -24,13 +24,20 @@ jobs:
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - run: npm ci
-      - name: Dependency security gate
+      - name: Dependency security audit
+        id: security_audit
+        continue-on-error: true
         run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: node --test scripts/*.test.mjs
       - run: npm run build
+      - name: Enforce dependency security gate after build and tests
+        if: steps.security_audit.outcome == 'failure'
+        run: |
+          echo 'Dependency security audit failed; release is blocked.'
+          exit 1
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
       - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
       - name: E2E and accessibility (axe-core, WCAG 2.1 AA; serious/critical fail)
