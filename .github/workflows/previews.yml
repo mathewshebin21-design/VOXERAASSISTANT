@@ -41,6 +41,33 @@ jobs:
           npm audit --omit=dev --json > security-evidence/audit-production.json || true
           npm ls picomatch --all --json > security-evidence/picomatch-tree.json || true
           node -e 'const fs=require("fs"); for(const name of ["audit-full","audit-production"]){const x=JSON.parse(fs.readFileSync("security-evidence/"+name+".json","utf8"));console.log(name,JSON.stringify(x.metadata?.vulnerabilities??{}));}'
+      - name: Scan application source for glob matcher usage (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          node --input-type=module <<'NODE' > security-evidence/runtime-source-scan.json
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const root='src';
+          const files=[];
+          const walk=(dir)=>{
+            for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,entry.name);
+              if(entry.isDirectory())walk(p);
+              else if(/\.(js|jsx|mjs|cjs|ts|tsx)$/.test(p))files.push(p);
+            }
+          };
+          walk(root);
+          const pattern=/\b(?:picomatch|micromatch|tinyglobby|fast-glob|globSync|globStream|globParent|anymatch)\b|(?:from\s*['"]|require\s*\(\s*['"])(?:glob|globby)['"]/gi;
+          const hits=[];
+          for(const file of files){
+            const lines=fs.readFileSync(file,'utf8').split(/\r?\n/);
+            lines.forEach((line,i)=>{if(pattern.test(line))hits.push({file,line:i+1,text:line.trim().slice(0,240)});pattern.lastIndex=0;});
+          }
+          process.stdout.write(JSON.stringify({scannedFiles:files.length,matchedLines:hits.length,hits},null,2));
+          NODE
+          cat security-evidence/runtime-source-scan.json
       - name: Upload dependency exposure evidence
         if: always()
         uses: actions/upload-artifact@v4
