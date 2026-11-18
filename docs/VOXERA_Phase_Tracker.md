@@ -257,3 +257,10 @@ Commit `c93ca92` passed API [44225792086](https://github.com/mathewshebin21-desi
 - **Compiled Next.js scan: 276 JS bundles, 0 name-signature matches** (artifact `14405876284`, run [44254912052](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44254912052)); heuristic and not conclusive proof of absence.
 - **Last verified same-commit complete result:** commit `bed7fc9`: API [44239196308](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196308) success; integration [44239196316](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196316) success; frontend [44239196287](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196287) failed only at full-audit enforcement, with E2E and accessibility passing. Newer commit CI results must be checked separately.
 - **Decision:** keep PR #63 draft and full security gate active; no production merge, paid deployment, or live billing. Await verified compatible upstream patch and rerun complete gates, or seek explicit time-limited owner-approved exception and separate release-policy authorization.
+
+
+### Phase 11 remediation ownership and current CI (2026-11-18)
+
+- Open tracking issue: [#64 — picomatch CVE-2026-112366 remediation](https://github.com/mathewshebin21-design/VOXERAASSISTANT/issues/64). Acceptance criteria require a genuine patched dependency and full audit passing; do not disable or suppress the audit.
+- **Verified same commit `b8a501c`:** [API run 44255611267](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611267) success, [integration run 44255611153](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611153) success, [frontend run 44255611306](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611306) failed only at final full dependency audit gate; compiled bundle scan and browser E2E/accessibility steps succeeded.
+- Release remains blocked; draft PR #63, no production merge/deployment or live payments.
