@@ -81,6 +81,42 @@ jobs:
       - run: node --test scripts/*.test.mjs
       - run: npm run build
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
+      - name: Inspect compiled Next.js bundles for glob matcher signatures (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          node --input-type=module <<'NODE' > security-evidence/compiled-bundle-scan.json
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const roots=['.next/server','.next/static'];
+          const files=[];
+          function walk(dir){
+            if(!fs.existsSync(dir))return;
+            for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,ent.name);
+              if(ent.isDirectory())walk(p);
+              else if(/\.(js|mjs|cjs)$/.test(p))files.push(p);
+            }
+          }
+          roots.forEach(walk);
+          const signatures=['picomatch','micromatch','tinyglobby','fast-glob','anymatch'];
+          const hits=[];
+          for(const file of files){
+            const contents=fs.readFileSync(file,'utf8');
+            const matched=signatures.filter(sig=>contents.includes(sig));
+            if(matched.length)hits.push({file,signatures:matched});
+          }
+          process.stdout.write(JSON.stringify({buildPresent:fs.existsSync('.next/BUILD_ID'),scannedBundles:files.length,matchedBundles:hits.length,hits},null,2));
+          NODE
+          cat security-evidence/compiled-bundle-scan.json
+      - name: Upload compiled bundle scan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-bundle-security-evidence
+          path: apps/previews/security-evidence/compiled-bundle-scan.json
+          retention-days: 14
       - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
       - name: E2E and accessibility (axe-core, WCAG 2.1 AA; serious/critical fail)
         run: |
