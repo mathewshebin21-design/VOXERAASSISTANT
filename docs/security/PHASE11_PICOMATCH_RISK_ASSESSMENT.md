@@ -41,3 +41,11 @@ The [CI evidence artifact](https://github.com/mathewshebin21-design/VOXERAASSIST
 ## Compiled Next.js bundle inspection — run 44254912052
 
 Downloaded and inspected [compiled-bundle-security-evidence](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44254912052), artifact ID `14405876284`. `compiled-bundle-scan.json` reports `buildPresent: true`, **276 compiled JS bundles scanned** under `.next/server` and `.next/static`, **zero signature matches** for the configured matcher names. The scan is heuristic: minification, inlining, renaming, and runtime-loaded dependencies can evade name-based detection. The production-only npm audit and 162-file application-source scan also report zero matches/findings, but the **full npm audit continues to report 20 high vulnerabilities** and remains a release blocker. No waiver, production deployment, or live payment enablement is authorized by these diagnostics.
+
+## Upstream remediation availability checked — 2026-11-18
+
+- The reviewed [GitHub advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), [OSV entry](https://osv.dev/vulnerability/GHSA-fc5q-39xc-vjpf), and [GitLab advisory](https://advisories.gitlab.com/npm/picomatch/CVE-2026-112366/) identify affected `picomatch` releases through `4.0.7` and **do not identify a patched release**.
+- [Upstream GitHub latest release](https://github.com/micromatch/picomatch/releases/tag/4.0.7) is `4.0.7`. Do not claim that bumping to this release fixes CVE-2026-112366.
+- The 20 npm high findings are cascading dependency-graph impacts, not necessarily 20 independent vulnerabilities. Unrelated major downgrades or upgrades, blind overrides, or modifying the audit gate are **not** acceptable remediation.
+- **Approved path when a fixed release becomes available:** update only compatible affected dependency chains and lockfile in an isolated branch; verify `npm ci`, full `npm audit --audit-level=high`, lint, typecheck, tests, build, E2E/accessibility and API/integration checks at the same commit. Retain CI evidence and only then propose moving PR #63 out of draft.
+- **If a fixed release remains unavailable:** keep the release blocked; owner may separately review a scoped, expiring risk acceptance and release-policy change. Neither has been granted.
