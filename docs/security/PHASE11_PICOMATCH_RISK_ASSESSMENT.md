@@ -25,3 +25,7 @@ Required verification before any exception is considered:
 ## Non-negotiable constraints
 
 Do not suppress the advisory, disable the audit, declare the issue non-exploitable without evidence, merge draft PR #63, enable live billing, deploy production, or provision billable services without explicit approval. Keep synthetic billing and isolated staging boundaries.
+
+## Collected dependency evidence — run 44238963895
+
+Artifact [dependency-security-evidence](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44238963895) (artifact ID `14398782348`, retained 14 days) contains `audit-full.json`, `audit-production.json`, and `picomatch-tree.json`. Inspected the downloaded JSON files: **full audit = 20 high, 0 critical; `npm audit --omit=dev` = 0 vulnerabilities across all severity levels**. The tree includes `tailwindcss@3.4.19` -> `chokidar@3.6.0` -> `anymatch@3.1.3` -> `picomatch@2.3.2`, among other development tooling paths. This is evidence of a clean production-only npm dependency audit **for this lockfile**, not proof that deployed bundles or dynamic runtime paths are safe. Keep full audit gate failing until fixed or explicitly authorized via release policy.
