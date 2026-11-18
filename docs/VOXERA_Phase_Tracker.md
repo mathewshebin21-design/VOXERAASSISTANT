@@ -237,3 +237,8 @@ run. All voice results are **simulated** (stand-in providers); none is a real-ca
   accepted either way.
 - Not exercised on the hosted run: DST transitions (none within the 60-day horizon for the test
   zones) and expiry of tokens signed with the real key. Unit tests cover both.
+
+
+### Latest same-commit validation (2026-11-18)
+
+Commit `c93ca92` passed API [44225792086](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792086) and integration [44225792149](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792149). Frontend [44225792062](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792062) passed install, lint, typecheck, unit tests, script tests, build, Playwright browser E2E and accessibility; overall workflow **failed solely at final dependency security enforcement**. No release clearance; PR #63 remains draft, no live payments or production merge.
