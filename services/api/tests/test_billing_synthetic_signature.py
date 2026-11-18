@@ -56,3 +56,38 @@ def test_timestamp_and_raw_body_are_cryptographically_bound():
     with pytest.raises(SyntheticSignatureError):
         verify(timestamp=altered_time)
     assert verify(timestamp=altered_time, signature_hex=sign(timestamp=altered_time)) is None
+
+
+
+@pytest.mark.parametrize("delta", [-300, 300])
+def test_timestamp_window_includes_exact_boundaries(delta):
+    event_timestamp = TIMESTAMP + delta
+    assert verify(timestamp=event_timestamp, signature_hex=sign(timestamp=event_timestamp)) is None
+
+
+@pytest.mark.parametrize("delta", [-301, 301])
+def test_timestamp_window_excludes_first_outside_second(delta):
+    event_timestamp = TIMESTAMP + delta
+    with pytest.raises(SyntheticSignatureError, match="outside accepted window"):
+        verify(timestamp=event_timestamp, signature_hex=sign(timestamp=event_timestamp))
+
+
+@pytest.mark.parametrize("invalid_now", [True, False, "1800000000", 1800000000.0, None])
+def test_invalid_or_untrusted_clock_inputs_fail_closed(invalid_now):
+    if invalid_now is None:
+        # None intentionally means use the system clock; test deterministic invalid values only.
+        return
+    with pytest.raises(SyntheticSignatureError, match="outside accepted window"):
+        verify(now=invalid_now)
+
+
+@pytest.mark.parametrize("invalid_policy", [True, False, -1, 0, 0.5, "300"])
+def test_invalid_timestamp_policy_types_fail_closed(invalid_policy):
+    with pytest.raises(SyntheticSignatureError, match="Invalid signature timestamp policy"):
+        verify(max_age_seconds=invalid_policy)
+
+
+def test_empty_or_non_bytes_raw_payload_fails_closed():
+    for payload in ("not bytes", bytearray(BODY), b""):
+        with pytest.raises(SyntheticSignatureError, match="Raw request body required"):
+            verify(raw_body=payload)
