@@ -33,11 +33,6 @@ jobs:
       - run: npm test
       - run: node --test scripts/*.test.mjs
       - run: npm run build
-      - name: Enforce dependency security gate after build and tests
-        if: steps.security_audit.outcome == 'failure'
-        run: |
-          echo 'Dependency security audit failed; release is blocked.'
-          exit 1
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
       - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
       - name: E2E and accessibility (axe-core, WCAG 2.1 AA; serious/critical fail)
@@ -46,6 +41,11 @@ jobs:
           npx wait-on -t 60000 http://localhost:3000
           BASE_URL=http://localhost:3000 npm run e2e
           BASE_URL=http://localhost:3000 node scripts/rc1-a11y.mjs a11y-results.json
+      - name: Enforce dependency security gate after all checks
+        if: steps.security_audit.outcome == 'failure'
+        run: |
+          echo 'Dependency security audit failed; release is blocked.'
+          exit 1
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
