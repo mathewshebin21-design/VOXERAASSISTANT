@@ -39,7 +39,11 @@ def apply_fake_subscription_event(
     # Otherwise a caller could replay the same raw bytes with different event metadata.
     try:
         envelope = json.loads(raw_body, object_pairs_hook=_unique_json_fields)
-    except (TypeError, ValueError) as exc:
+    except ValueError as exc:
+        if str(exc) == "Duplicate fake event JSON field":
+            raise
+        raise ValueError("Fake event requires a valid JSON envelope") from exc
+    except TypeError as exc:
         raise ValueError("Fake event requires a valid JSON envelope") from exc
     if not isinstance(envelope, dict) or set(envelope) != {"event_id", "organization_id", "kind", "occurred_at"}:
         raise ValueError("Fake event envelope fields do not match the contract")
