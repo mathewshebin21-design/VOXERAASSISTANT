@@ -32,6 +32,22 @@ jobs:
         id: security_audit
         continue-on-error: true
         run: npm audit --audit-level=high
+      - name: Collect dependency exposure evidence (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          npm audit --json > security-evidence/audit-full.json || true
+          npm audit --omit=dev --json > security-evidence/audit-production.json || true
+          npm ls picomatch --all --json > security-evidence/picomatch-tree.json || true
+          node -e 'const fs=require("fs"); for(const name of ["audit-full","audit-production"]){const x=JSON.parse(fs.readFileSync("security-evidence/"+name+".json","utf8"));console.log(name,JSON.stringify(x.metadata?.vulnerabilities??{}));}'
+      - name: Upload dependency exposure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-evidence
+          path: apps/previews/security-evidence/
+          retention-days: 14
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
