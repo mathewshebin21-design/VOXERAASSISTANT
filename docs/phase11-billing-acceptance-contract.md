@@ -47,3 +47,21 @@ Exact commit SHA, migration identifier, test commands and results, database mark
 ## Dependencies and prohibited shortcuts
 
 Depends on Phases 0, 1, 6, 9 and 10; integrate only after reviewing PR #62 and the open release stack. Do not merge to production, run shared database migrations, activate payment services, send invoices or contact customers without explicit owner approval.
+
+
+## Release-candidate evidence register — 2026-11-20
+
+**Current branch:** `codex/voxera-phase11-billing-contract-20261117`; [draft PR #63](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/63) currently targets `codex/voxera-staff-queue-cancellation-20261117`, **not** the production branch. GitHub reports mergeable, but mergeability does not establish approval, deployment safety, or release readiness. The stacked branch must be reconciled with its base and the production promotion plan before any merge.
+
+| Gate | Evidence / disposition |
+| --- | --- |
+| Synthetic billing unit and API validation | [API run 44678129274](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129274) succeeded at `d46935a`, including Ruff after the synthetic signature boundary-test formatting correction |
+| Integration | [Integration run 44678129589](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129589) succeeded on the same commit |
+| Frontend, browser E2E and accessibility | [Frontend run 44678129270](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129270) succeeded on the same commit |
+| Full dependency audit | The same frontend run recorded zero vulnerabilities; `GHSA-fc5q-39xc-vjpf` was officially withdrawn November 18, 2026, not fixed by package upgrade. See [security assessment](security/PHASE11_PICOMATCH_RISK_ASSESSMENT.md). Full audit gate stays enabled |
+| Latest documentation commit | `2f351a5` security assessment updated; API [44690134115](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44690134115) succeeded; frontend/integration results were still in progress when this register was written |
+| Isolated database migration acceptance | **Not independently verified in this register.** Capture exact disposable database identity, migration 0014–0016 upgrade/rollback, restricted role, RLS and concurrency test evidence before approval |
+| Commercial readiness | **Not approved.** Provider selection, UK/India tax treatment, pricing, refund/invoice policies, payment sandbox, real webhook acceptance and operational rollback remain gated |
+| Production promotion | **Prohibited without separate owner authorization**; no live billing, provider credentials, shared production migrations or production deployment |
+
+**Next release work:** (1) collect latest same-commit CI and migration evidence; (2) audit stacked PR dependencies and branch ancestry; (3) exercise failure and reconciliation scenarios with synthetic provider in isolated PostgreSQL; (4) prepare an explicit production go/no-go checklist for owner review. Do not substitute green synthetic tests for real-provider, regulatory or deployment acceptance.
