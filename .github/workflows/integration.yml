@@ -7,6 +7,10 @@ on:
   pull_request:
     paths: ["apps/previews/**", "services/api/**", "services/voice-worker/**", ".github/workflows/integration.yml"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

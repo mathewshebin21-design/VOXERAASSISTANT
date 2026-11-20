@@ -7,6 +7,10 @@ on:
     # API changes can break frontend contracts even when no UI file changes.
     paths: ["apps/previews/**", "services/api/**", ".github/workflows/previews.yml"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -24,14 +28,95 @@ jobs:
           cache: npm
           cache-dependency-path: apps/previews/package-lock.json
       - run: npm ci
-      - name: Dependency security gate
+      - name: Dependency security audit
+        id: security_audit
+        continue-on-error: true
         run: npm audit --audit-level=high
+      - name: Collect dependency exposure evidence (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          npm audit --json > security-evidence/audit-full.json || true
+          npm audit --omit=dev --json > security-evidence/audit-production.json || true
+          npm ls picomatch --all --json > security-evidence/picomatch-tree.json || true
+          node -e 'const fs=require("fs"); for(const name of ["audit-full","audit-production"]){const x=JSON.parse(fs.readFileSync("security-evidence/"+name+".json","utf8"));console.log(name,JSON.stringify(x.metadata?.vulnerabilities??{}));}'
+      - name: Scan application source for glob matcher usage (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          node --input-type=module <<'NODE' > security-evidence/runtime-source-scan.json
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const root='src';
+          const files=[];
+          const walk=(dir)=>{
+            for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,entry.name);
+              if(entry.isDirectory())walk(p);
+              else if(/\.(js|jsx|mjs|cjs|ts|tsx)$/.test(p))files.push(p);
+            }
+          };
+          walk(root);
+          const pattern=/\b(?:picomatch|micromatch|tinyglobby|fast-glob|globSync|globStream|globParent|anymatch)\b|(?:from\s*['"]|require\s*\(\s*['"])(?:glob|globby)['"]/gi;
+          const hits=[];
+          for(const file of files){
+            const lines=fs.readFileSync(file,'utf8').split(/\r?\n/);
+            lines.forEach((line,i)=>{if(pattern.test(line))hits.push({file,line:i+1,text:line.trim().slice(0,240)});pattern.lastIndex=0;});
+          }
+          process.stdout.write(JSON.stringify({scannedFiles:files.length,matchedLines:hits.length,hits},null,2));
+          NODE
+          cat security-evidence/runtime-source-scan.json
+      - name: Upload dependency exposure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-evidence
+          path: apps/previews/security-evidence/
+          retention-days: 14
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: node --test scripts/*.test.mjs
       - run: npm run build
       # Playwright is installed only in CI; the E2E script resolves it at runtime.
+      - name: Inspect compiled Next.js bundles for glob matcher signatures (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p security-evidence
+          node --input-type=module <<'NODE' > security-evidence/compiled-bundle-scan.json
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const roots=['.next/server','.next/static'];
+          const files=[];
+          function walk(dir){
+            if(!fs.existsSync(dir))return;
+            for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,ent.name);
+              if(ent.isDirectory())walk(p);
+              else if(/\.(js|mjs|cjs)$/.test(p))files.push(p);
+            }
+          }
+          roots.forEach(walk);
+          const signatures=['picomatch','micromatch','tinyglobby','fast-glob','anymatch'];
+          const hits=[];
+          for(const file of files){
+            const contents=fs.readFileSync(file,'utf8');
+            const matched=signatures.filter(sig=>contents.includes(sig));
+            if(matched.length)hits.push({file,signatures:matched});
+          }
+          process.stdout.write(JSON.stringify({buildPresent:fs.existsSync('.next/BUILD_ID'),scannedBundles:files.length,matchedBundles:hits.length,hits},null,2));
+          NODE
+          cat security-evidence/compiled-bundle-scan.json
+      - name: Upload compiled bundle scan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-bundle-security-evidence
+          path: apps/previews/security-evidence/compiled-bundle-scan.json
+          retention-days: 14
       - run: npm i --no-save playwright@1.63.0 axe-core@4.10.3 && npx playwright install --with-deps chromium
       - name: E2E and accessibility (axe-core, WCAG 2.1 AA; serious/critical fail)
         run: |
@@ -39,6 +124,11 @@ jobs:
           npx wait-on -t 60000 http://localhost:3000
           BASE_URL=http://localhost:3000 npm run e2e
           BASE_URL=http://localhost:3000 node scripts/rc1-a11y.mjs a11y-results.json
+      - name: Enforce dependency security gate after all checks
+        if: steps.security_audit.outcome == 'failure'
+        run: |
+          echo 'Dependency security audit failed; release is blocked.'
+          exit 1
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
