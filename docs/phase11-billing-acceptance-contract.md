@@ -65,3 +65,10 @@ Depends on Phases 0, 1, 6, 9 and 10; integrate only after reviewing PR #62 and t
 | Production promotion | **Prohibited without separate owner authorization**; no live billing, provider credentials, shared production migrations or production deployment |
 
 **Next release work:** (1) collect latest same-commit CI and migration evidence; (2) audit stacked PR dependencies and branch ancestry; (3) exercise failure and reconciliation scenarios with synthetic provider in isolated PostgreSQL; (4) prepare an explicit production go/no-go checklist for owner review. Do not substitute green synthetic tests for real-provider, regulatory or deployment acceptance.
+
+
+### Verified isolated database acceptance — 2026-11-20
+
+Commit [`ca3f3b0`](https://github.com/mathewshebin21-design/VOXERAASSISTANT/commit/ca3f3b0d4879521ab9f7c83a0513f822230abd20) passed [API workflow 44691308037](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44691308037). Its job confirms success for `uv run ruff check`, `uv run ruff format --check`, `uv run pytest -q`, disposable PostgreSQL existing-data migration rehearsal, migrations round-trip, and Docker image builds. Newly added PostgreSQL regression assertions verify quota check/uniqueness constraints and tenant-scoped `pg_policies` read/write predicates under the application role. This is **CI evidence**, not proof that any production database was migrated.
+
+Remaining gates: verify all frontend/integration workflows on the exact current commit; review stacked PR ancestry; complete provider reconciliation and operational failure-mode acceptance; obtain separate approvals for provider configuration, commercial terms, live billing and production promotion.
