@@ -48,7 +48,6 @@ def test_billing_quota_tables_not_accessible_without_tenant(app_engine):
         assert conn.execute(text("SELECT count(*) FROM billing_quota_reservations")).scalar_one() == 0
 
 
-
 def test_billing_quota_constraints_exist_in_database(app_engine):
     """Check that quota safety is enforced by PostgreSQL, not only Python."""
     expected = {
@@ -63,10 +62,7 @@ def test_billing_quota_constraints_exist_in_database(app_engine):
         for table, names in expected.items():
             actual = set(
                 conn.execute(
-                    text(
-                        "SELECT conname FROM pg_constraint "
-                        "WHERE conrelid = to_regclass(:table)"
-                    ),
+                    text("SELECT conname FROM pg_constraint WHERE conrelid = to_regclass(:table)"),
                     {"table": table},
                 ).scalars()
             )
