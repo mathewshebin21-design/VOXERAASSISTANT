@@ -61,10 +61,7 @@ def test_timestamp_and_raw_body_are_cryptographically_bound():
 @pytest.mark.parametrize("delta", [-300, 300])
 def test_timestamp_window_includes_exact_boundaries(delta):
     event_timestamp = TIMESTAMP + delta
-    assert (
-        verify(timestamp=event_timestamp, signature_hex=sign(timestamp=event_timestamp))
-        is None
-    )
+    verify(timestamp=event_timestamp, signature_hex=sign(timestamp=event_timestamp))
 
 
 @pytest.mark.parametrize("delta", [-301, 301])
