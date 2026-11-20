@@ -49,3 +49,12 @@ Downloaded and inspected [compiled-bundle-security-evidence](https://github.com/
 - The 20 npm high findings are cascading dependency-graph impacts, not necessarily 20 independent vulnerabilities. Unrelated major downgrades or upgrades, blind overrides, or modifying the audit gate are **not** acceptable remediation.
 - **Approved path when a fixed release becomes available:** update only compatible affected dependency chains and lockfile in an isolated branch; verify `npm ci`, full `npm audit --audit-level=high`, lint, typecheck, tests, build, E2E/accessibility and API/integration checks at the same commit. Retain CI evidence and only then propose moving PR #63 out of draft.
 - **If a fixed release remains unavailable:** keep the release blocked; owner may separately review a scoped, expiring risk acceptance and release-policy change. Neither has been granted.
+
+
+## 2026-11-20 — audit-feed discrepancy confirmed from downloadable CI artifact
+
+The successful frontend run [44678129270](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129270) produced dependency evidence artifact **14603196115**. Its `audit-full.json` and `audit-production.json` both report zero vulnerabilities at all severities, and the workflow's actual `npm audit --audit-level=high` step succeeded. The audit enforcement step was skipped by its conditional because the audit succeeded, not disabled.
+
+**Important:** `picomatch-tree.json` from that *same run* still contains `picomatch@2.3.2` through Tailwind 3.4.19 → chokidar/anymatch and micromatch, and `picomatch@4.0.7` through Vitest 4.1.12 → Vite/tinyglobby. Therefore, a clean npm audit **does not demonstrate patched code or removal of the previously flagged versions**. The discrepancy may involve advisory metadata, withdrawal/reclassification, or audit-service behavior; no cause has yet been verified. Do not assert that CVE-2026-112366 has been remediated solely on the audit result.
+
+Keep [security issue #64](https://github.com/mathewshebin21-design/VOXERAASSISTANT/issues/64) open until the current authoritative advisory and exploitability are reconciled, or an owner-approved exception is documented. The full audit gate remains active; no production merge, deployment or live billing is authorized.
