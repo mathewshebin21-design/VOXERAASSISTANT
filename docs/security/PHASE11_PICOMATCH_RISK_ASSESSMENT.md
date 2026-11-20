@@ -58,3 +58,12 @@ The successful frontend run [44678129270](https://github.com/mathewshebin21-desi
 **Important:** `picomatch-tree.json` from that *same run* still contains `picomatch@2.3.2` through Tailwind 3.4.19 → chokidar/anymatch and micromatch, and `picomatch@4.0.7` through Vitest 4.1.12 → Vite/tinyglobby. Therefore, a clean npm audit **does not demonstrate patched code or removal of the previously flagged versions**. The discrepancy may involve advisory metadata, withdrawal/reclassification, or audit-service behavior; no cause has yet been verified. Do not assert that CVE-2026-112366 has been remediated solely on the audit result.
 
 Keep [security issue #64](https://github.com/mathewshebin21-design/VOXERAASSISTANT/issues/64) open until the current authoritative advisory and exploitability are reconciled, or an owner-approved exception is documented. The full audit gate remains active; no production merge, deployment or live billing is authorized.
+
+
+## 2026-11-20 — authoritative advisory resolution (supersedes earlier blocker assessment)
+
+**Resolved as withdrawn advisory, not a patched package.** The official [GitHub advisory GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) states: **Withdrawn Nov 18, 2026**, updated Nov 19, 2026, with the reason *"This advisory has been withdrawn because it is not a security issue."* The advisory links to upstream [micromatch/picomatch#235](https://github.com/micromatch/picomatch/issues/235) for its rationale. This authoritative change explains the observed disappearance of the 20 cascade findings from npm audit without a change in installed picomatch versions.
+
+At commit `d46935a`, [frontend run 44678129270](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129270) reports full `npm audit --audit-level=high` **0 vulnerabilities**, production audit **0 vulnerabilities**, and successful frontend/E2E/accessibility; [API 44678129274](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129274) and [integration 44678129589](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129589) passed on the same commit. Security audit enforcement remains enabled.
+
+**Disposition:** Close issue #64 as resolved by advisory withdrawal, not a dependency remediation or waiver. This specific GHSA is no longer a release blocker. Do not infer general release readiness: remaining environment, authorization, billing, operational and launch gates are separate. No production merge, deploy or live payments authorized.
