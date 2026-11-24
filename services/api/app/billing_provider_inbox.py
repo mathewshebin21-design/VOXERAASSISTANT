@@ -26,6 +26,8 @@ def record_synthetic_provider_event(
     """
     if not organization_id or not provider or not provider_event_id:
         raise ValueError("Provider event identity must be complete")
+    if provider not in ("fake", "fake-subscription"):
+        raise PermissionError("Synthetic provider inbox accepts only fake adapters")
     tenant = conn.execute(text("SELECT current_setting('app.org_id', true)")).scalar_one()
     if not tenant or tenant != organization_id:
         raise PermissionError("Provider inbox tenant must match authenticated context")
