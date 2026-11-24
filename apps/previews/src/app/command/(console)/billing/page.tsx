@@ -8,8 +8,17 @@ import { CALLS } from "@/lib/demo-data";
 import { computeMetrics, dailySeries } from "@/lib/metrics";
 import { COST_ASSUMPTIONS, GBP_PER_MIN, PLANS, USD_TO_GBP } from "@/lib/pricing";
 import { DEMO_TODAY, addDays, dayNum, gbp } from "@/lib/time";
+import { useDataMode } from "@/lib/live/data-mode";
+import { LiveBillingOverview } from "./live-overview";
 
 export default function Billing() {
+  const dm = useDataMode();
+  if (dm.mode === "live" && dm.org) return <LiveBillingOverview key={dm.org.organization.id} organizationId={dm.org.organization.id} />;
+  if (dm.mode === "demo") return <DemoBilling />;
+  return <p role="status" className="p-6 text-sm text-cmd-mute">Loading workspace billing…</p>;
+}
+
+function DemoBilling() {
   const plan = PLANS[1];
   const from = "2026-10-01";
   const mtd = useMemo(() => computeMetrics(CALLS.filter((c) => c.date >= from && c.date <= DEMO_TODAY)), []);
@@ -23,9 +32,10 @@ export default function Billing() {
   const over = Math.max(0, projected - plan.includedMinutes);
   return (
     <>
-      <PageHead kicker="Admin · usage" title="Usage & billing"><Tag tone="warn">Draft pricing · nothing is charged</Tag></PageHead>
+      <PageHead kicker="Admin · usage" title="Usage & billing"><Tag tone="warn">Demonstration only · no charges</Tag></PageHead>
+      <p className="mb-4 rounded-lg border border-cmd-line bg-cmd-panel px-4 py-3 text-sm text-cmd-mute" role="status">This page uses simulated October 2026 calls and illustrative pricing. The displayed plan is not a verified subscription, and the figures are not invoices, actual usage, or charges. Live billing data is not connected.</p>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Plan" value={plan.name} sub={`${gbp(plan.monthlyGBP, 0)}/mo · ${plan.includedMinutes} min`} tone="violet" />
+        <Stat label="Plan" value={plan.name} sub={`Sample · ${gbp(plan.monthlyGBP, 0)}/mo · ${plan.includedMinutes} min`} tone="violet" />
         <Stat label="Minutes used · Oct" value={used.toFixed(0)} sub={`${((used / plan.includedMinutes) * 100).toFixed(0)}% of allowance`} tone={used > plan.includedMinutes ? "warn" : "text"} />
         <Stat label="Projected month end" value={projected.toFixed(0)} sub={over ? `≈ ${gbp(over * plan.overagePerMinGBP)} overage` : "within allowance"} tone={over ? "warn" : "ok"} />
         <Stat label="Est. provider cost · Oct" value={gbp(mtd.totalCostGBP)} sub={`${gbp(GBP_PER_MIN, 3)}/min assumption`} />
@@ -54,7 +64,7 @@ export default function Billing() {
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         {PLANS.map((p) => (
           <div key={p.id} className={clsx("rounded-lg border p-5", p.id === plan.id ? "border-cmd-violet bg-cmd-violet/5" : "border-cmd-line bg-cmd-panel")}>
-            <div className="flex items-center justify-between"><span className="font-medium">{p.name}</span>{p.id === plan.id && <Tag tone="violet">current</Tag>}</div>
+            <div className="flex items-center justify-between"><span className="font-medium">{p.name}</span>{p.id === plan.id && <Tag tone="violet">sample</Tag>}</div>
             <div className="mt-2 font-mono text-2xl">{gbp(p.monthlyGBP, 0)}<span className="text-sm text-cmd-mute">/mo</span></div>
             <div className="text-xs text-cmd-mute">{p.includedMinutes} min incl. · {gbp(p.overagePerMinGBP)}/min after · setup {p.setupFeeGBP ? gbp(p.setupFeeGBP, 0) : "free"}</div>
             <ul className="mt-3 space-y-1 text-sm text-cmd-mute">{p.features.map((f) => <li key={f}>· {f}</li>)}</ul>
@@ -62,7 +72,7 @@ export default function Billing() {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-xs text-cmd-mute">Invoices, payment methods and VAT handling are out of scope for the preview. Range: 1 Oct – {dayNum(DEMO_TODAY)} Oct ({addDays(DEMO_TODAY, 0)}).</p>
+      <p className="mt-3 text-xs text-cmd-mute">All figures above are simulated estimates, not customer billing records. Invoices, payment methods and VAT handling are out of scope for the preview. Range: 1 Oct – {dayNum(DEMO_TODAY)} Oct ({addDays(DEMO_TODAY, 0)}).</p>
     </>
   );
 }

@@ -1,3 +1,25 @@
+## Phase 11: billing foundation — active validation (2026-11-24)
+
+**Scope:** Synthetic, isolated billing only. PR #63 remains draft; no live payments, telephony, production migrations, or production deployments are authorized.
+
+| Workstream | Status | Verified evidence / next gate |
+|---|---|---|
+| Billing model, synthetic ledger, tenant-scoped storage and read-only overview | Implemented on development branch; release pending | PR #63, branch `codex/voxera-phase11-billing-contract-20261117`; require full API, migration and frontend validation |
+| Python Ruff formatting | Fixed on branch; revalidation pending | Automated maintenance run [44223499934](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223499934) succeeded; commit `8396997` |
+| Duplicate-field JSON validation regression | **Verified fixed in multiple API CI runs** | Previous API run [44223823916](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223823916) failed; fix `7877d14` passed [API run 44224244019](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224244019); [run 44224640827](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224640827) passed on `eb51669` |
+| Frontend dependency security | Verified audit cleared at `eb06847` | Fresh `npm ci --ignore-scripts` and `npm audit --json` on 24 November reported zero vulnerabilities. [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) was withdrawn on 18 November. The CI security gate remains enforced. |
+| Frontend functional and accessibility checks | **Verified passed at `a204d9a`; overall CI blocked by security** | [Run 44224601269](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224601269): npm install, lint, typecheck, unit tests, script tests, build, browser E2E and axe accessibility all succeeded; final security enforcement failed. Current-head retest pending |
+| Integration CI | Verified on `a204d9a`; current-head validation pending | [44224601254](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224601254) passed; newer runs must pass at current head |
+| CI concurrency control | **Verified cancellation of superseded runs** | Commits `523bec6`, `d91178b`, `de76004` add branch/PR concurrency; GitHub Actions cancelled superseded API, integration and previews runs at `de76004` (44225289123, 44225289152, 44225289291). Some older runs started before this policy remain active |
+| Temporary maintenance workflow | Removed after formatter repair | Commit `7504406` deletes `.github/workflows/phase11-maintenance.yml` from development branch; release security gate remains in `previews.yml` |
+| Production promotion | **Not authorized** | Draft PR #63 must remain unmerged until owner approval and all release gates pass |
+
+**24 November review:** PR #63 at `eb0684743876546880efa8c11558cbf642fe9692` contains implementation and migrations 0014–0016. API run [45323663699](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663699), frontend run [45323663534](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663534), and integration run [45323663721](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663721) were running at review time. Follow-on quota replay validation requires its own tests and final candidate CI. Hosted evidence from PR #62 covers schema 0013 and its pinned application revision. Billing schemas 0014–0016 require separate isolated hosted acceptance before release.
+
+**Tracker update policy:** Update this section with each material commit, confirmed CI outcome, blocker change, or release decision. Distinguish a committed fix from a verified passing run; record run IDs and commit SHAs. Do not mark a phase complete without acceptance evidence.
+
+---
+
 # VOXERA Phase Tracker
 
 ## Canonical execution register — 17 November 2026 (Asia/Kolkata)
@@ -36,7 +58,7 @@ The owner's **Master GPT Work Execution Roadmap** supplies the current Phase 0�
 | 8 | In Progress | #56 durable outbox, #57 desk visibility, #58 in-memory transport, #59 production adapter contract. Local booking and staff handoff foundations. | Verify calendar OAuth, CRM, signed and replay-safe callbacks, bounded retries, reconciliation, dedupe and truthful external outcomes. Approve providers/accounts/recipients before any external action. |
 | 9 | In Progress | Call events, usage, dashboard and synthetic metrics. | Validate tenant-scoped reporting and call outcomes, metering reconciliation, staff dashboards, exports, call quality and reporting accuracy. Depends on 2, 6–8 and 11. |
 | 10 | In Progress | Tenant RLS, auth/RBAC, rate limiting, sanitized metrics and migration verification. #54 adds pre-notice safeguards. | Exact deployed-source privacy/regression checks, abuse, load, backpressure, dependency review, retention scheduling, observability, incident procedures, restore and forward recovery. |
-| 11 | Not Started | Existing usage reservations are a building block. No verified subscription lifecycle or payment collection. | Verify plan/entitlement, minute and token metering, trial, webhook, invoice, tax, refund, renewal and failed-payment sandbox journeys. Price with current verified costs. Live payments require approval. |
+| 11 | In Progress | Draft PR #63 adds pure subscription/usage policies and migration 0014 for tenant-scoped subscription snapshots, usage ledger and provider inbox. CI at `2a178e1` passed API tests (including atomic synthetic-only usage ingestion, replay conflict detection, tenant RLS and timestamp validation), database migration round-trip, Docker builds, frontend and synthetic integration. The usage writer is not connected to production call provenance or payment transport; no charges enabled. | Verify authenticated usage provenance, transactional idempotency and reconciliation, plan enforcement, trial, signed webhook, invoice, tax, refund, renewal and failed-payment sandbox journeys. Price with current verified costs. Live payments require approval. |
 | 12 | In Progress | Flow is approved design direction. Authenticated dashboards plus browser-only demos. | Distinguish demo and real features, verify premium mobile/desktop accessibility, agent self-service, onboarding and support. Prepare accurate positioning, UK/India packages, demo, FAQs, docs and cancellation. |
 | 13 | Blocked | Issue #44 and commercial readiness document list open gates. | Obtain UK/India legal review and current provider, data processing, consent and tax evidence. Prepare policy/DPA/terms, recovery and incident runbooks, pilot metrics, final immutable release report and monitored smoke checks. Production promotions, pilot calls, customer outreach and commercial launch need explicit approval. |
 
@@ -217,3 +239,38 @@ run. All voice results are **simulated** (stand-in providers); none is a real-ca
   accepted either way.
 - Not exercised on the hosted run: DST transitions (none within the 60-day horizon for the test
   zones) and expiry of tokens signed with the real key. Unit tests cover both.
+
+
+### Latest same-commit validation (2026-11-18)
+
+Commit `c93ca92` passed API [44225792086](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792086) and integration [44225792149](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792149). Frontend [44225792062](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44225792062) passed install, lint, typecheck, unit tests, script tests, build, Playwright browser E2E and accessibility; overall workflow **failed solely at final dependency security enforcement**. No release clearance; PR #63 remains draft, no live payments or production merge.
+
+
+### Phase 11 security dependency disposition (2026-11-18)
+
+**OPEN — release blocking, not waived.** Frontend npm audit reports 20 high-severity findings propagated from `picomatch` (`GHSA-fc5q-39xc-vjpf`, `CVE-2026-112366`), a crafted-glob ReDoS advisory affecting releases through 4.0.7. Upstream advisory currently lists **no known patched version** ([GitHub advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf); [OSV](https://osv.dev/vulnerability/GHSA-fc5q-39xc-vjpf)). A dependency major-version downgrade/forced upgrade is not an established remediation; do not force it or suppress npm audit. Security review must determine whether any untrusted user-controlled glob reaches vulnerable matching paths in the actual deployed frontend, distinguish development-only dependencies from production runtime, and document exploitability/mitigations. Once a fixed upstream version exists, update dependency graph and lockfile and require clean npm audit plus complete API/integration/frontend/E2E/accessibility on one final commit. If release is required before upstream patch, obtain explicit owner/security acceptance of documented residual risk; **do not silently bypass the gate**. No live payments or production deployment.
+
+
+### Phase 11 security verification and remediation status (2026-11-18)
+
+- **Full dependency audit: blocked** — 20 high findings associated with `picomatch` GHSA-fc5q-39xc-vjpf; no upstream patched version verified as of 2026-11-18. See [security assessment](security/PHASE11_PICOMATCH_RISK_ASSESSMENT.md).
+- **Production-only audit: 0 vulnerabilities** (artifact `14398782348`, run [44238963895](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44238963895)). This is diagnostic, not a release waiver.
+- **Frontend application-source scan: 162 files, 0 matching glob-library references** (artifact `14404794330`, run [44254381952](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44254381952)).
+- **Compiled Next.js scan: 276 JS bundles, 0 name-signature matches** (artifact `14405876284`, run [44254912052](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44254912052)); heuristic and not conclusive proof of absence.
+- **Last verified same-commit complete result:** commit `bed7fc9`: API [44239196308](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196308) success; integration [44239196316](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196316) success; frontend [44239196287](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44239196287) failed only at full-audit enforcement, with E2E and accessibility passing. Newer commit CI results must be checked separately.
+- **Decision:** keep PR #63 draft and full security gate active; no production merge, paid deployment, or live billing. Await verified compatible upstream patch and rerun complete gates, or seek explicit time-limited owner-approved exception and separate release-policy authorization.
+
+
+### Phase 11 remediation ownership and current CI (2026-11-18)
+
+- Open tracking issue: [#64 — picomatch CVE-2026-112366 remediation](https://github.com/mathewshebin21-design/VOXERAASSISTANT/issues/64). Acceptance criteria require a genuine patched dependency and full audit passing; do not disable or suppress the audit.
+- **Verified same commit `b8a501c`:** [API run 44255611267](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611267) success, [integration run 44255611153](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611153) success, [frontend run 44255611306](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44255611306) failed only at final full dependency audit gate; compiled bundle scan and browser E2E/accessibility steps succeeded.
+- Release remains blocked; draft PR #63, no production merge/deployment or live payments.
+
+
+### Phase 11 same-commit green CI and audit-feed discrepancy (2026-11-20)
+
+- Commit `d46935a` has **three passing workflows**: [API 44678129274](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129274), [integration 44678129589](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129589), [previews 44678129270](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129270). API Ruff regression is resolved; frontend E2E and accessibility passed.
+- Crucially, frontend CI log now reports **`npm audit --audit-level=high`: 0 vulnerabilities**, and both full and production audit JSON summaries are zero across all severities. The final security enforcement step was **skipped because the audit passed**, not because enforcement was disabled.
+- **Security reconciliation required before release:** earlier identical dependency tree had 20 high findings attributed to `picomatch` GHSA-fc5q-39xc-vjpf; the upstream release still appeared to be 4.0.7 when checked. Determine whether the advisory was withdrawn/reclassified, registry metadata changed, or the dependency graph changed. Archive current audit JSON and dependency tree, and reconcile with [issue #64](https://github.com/mathewshebin21-design/VOXERAASSISTANT/issues/64) and the security assessment. A clean current audit is evidence of a passing gate, **not by itself evidence that vulnerable code was patched**.
+- PR #63 remains draft; no production merge/deployment or live payments without separate authorization and remaining release gates.

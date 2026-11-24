@@ -5,10 +5,12 @@ without changing the role's password, the schema or the environment claim."""
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 
 from app import platform
 
@@ -123,7 +125,16 @@ def runtime_role(fresh_db, owner_engine):
     yield role
     eng.dispose()
     with owner_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-        c.execute(text("DROP DATABASE IF EXISTS voxera_build_test WITH (FORCE)"))
+        # Disposed clients may still be disconnecting on the server. Do not force-kill
+        # sessions owned by another role; wait for normal disconnect instead.
+        for attempt in range(20):
+            try:
+                c.execute(text("DROP DATABASE IF EXISTS voxera_build_test"))
+                break
+            except DBAPIError as exc:
+                if getattr(exc.orig, "sqlstate", None) != "55006" or attempt == 19:
+                    raise
+                time.sleep(0.25)
         c.execute(text(f"DROP ROLE IF EXISTS {role}"))
 
 

@@ -1,0 +1,74 @@
+# Phase 11 — Billing and subscription acceptance contract
+
+Status: **Foundation implemented on draft PR #63; production activation blocked**. Migration 0014, pure subscription policy, tenant-scoped read-only entitlement evaluator, synthetic-only atomic usage writer, and PostgreSQL acceptance tests are implemented. No payment provider, charge, tax determination, or live entitlement enforcement is activated. This work is based on integrated candidate PR #62 and must remain isolated from production.
+
+## Scope and invariants
+
+- One authoritative tenant-scoped subscription state machine; no cross-workspace entitlement sharing. All writes require workspace authorization and audit events.
+- States: `trialing`, `active`, `past_due`, `paused`, `canceled`, `expired`. Define provider-neutral transitions, effective timestamps, grace period and access behavior before coding.
+- Separate commercial billing from the existing **safety** spend and model-admission gates. A paid plan must never override country, phone, model, consent, or global cost kill switches.
+- Store amounts in integer minor units with ISO 4217 currency; GBP and INR plans must have distinct price versions. Never silently convert currency or use floating point for money.
+- Meter provider events idempotently with immutable event identity, tenant, service, event time, ingestion time, source and unit. Reconcile reserved, consumed, refunded and failed usage against provider evidence; never bill simulated/test usage.
+- Subscription entitlements are evaluated server-side; the browser is informational, not an authority. Fail closed for new paid resource creation when entitlement cannot be verified, while preserving safe access to existing customer data.
+- Verify signed provider webhooks against raw payload, timestamp and replay controls. Deduplicate event IDs; support out-of-order, delayed, repeated and conflicting events via fetch-and-reconcile, not blind event ordering.
+- No card data or payment secrets stored in VOXERA. Hosted checkout and provider tokens only, after separate approval.
+- Invoices, refunds, tax treatment and business registration requirements require finance/legal confirmation for each jurisdiction. Do not assert UK VAT or Indian GST rates without verified evidence.
+
+## Suggested implementation slices (approval-gated where applicable)
+
+1. **Schema and state machine:** tenant-bound plans, immutable price versions, subscriptions, entitlement snapshots, usage ledger, provider event inbox and audit history. Add tenant RLS, foreign keys, restricted runtime grants, migration round trip and concurrency tests on disposable PostgreSQL only.
+2. **Entitlement evaluator:** pure deterministic evaluation, cache invalidation, downgrade effective dates, limits, trial expiry, past-due grace policy and concurrent reservation handling. Preserve all existing telephony launch gates.
+3. **Usage ledger:** idempotent reservations/settlements, refunds and reconciliation for calls, minutes, STT/TTS, LLM tokens, notifications and storage. Record provenance and provider reconciliation state; reject synthetic usage.
+4. **Payment adapter:** interface plus fake provider first. Test signature failures, duplicate and out-of-order events, failed renewals, cancellations, retries and reconciliation. No real provider configuration or live billing.
+5. **Customer UI and admin:** clearly distinguish estimates, pending settlement and invoiced charges; GBP/INR plan versions; invoices and cancellation policies subject to review.
+6. **Commercial gate:** obtain owner approval of provider, pricing, country/tax treatment, external messaging and production activation; then run separately approved provider sandbox and hosted acceptance.
+
+## Required test matrix
+
+| Scenario | Required result |
+| --- | --- |
+| Tenant A attempts to access tenant B subscription or invoice | Denied at API and database RLS |
+| Two simultaneous reservations at a hard usage limit | At most one accepted; no negative balance |
+| Duplicate provider event or retry after crash | Exactly one durable financial effect |
+| Events arrive out of order | Reconcile to authoritative provider state |
+| Webhook invalid signature, stale timestamp or wrong tenant | Reject, audit, no entitlement change |
+| Currency mismatch, price-version mismatch or fractional minor unit | Reject without charge |
+| Trial expiry, downgrade, payment failure, cancellation and refund | Deterministic documented access and ledger behavior |
+| Existing safety kill switch on paid plan | Telephone/media operation still refused |
+| Synthetic call, fake provider or test tenant | Zero billable usage |
+| Migration upgrade, rollback, repeat upgrade and restricted role | No tenant leakage or lost ledger entries |
+| Provider timeout after accepted payment | No blind duplicate charge; reconciliation required |
+| Invoice/export/deletion/retention | Preserve legally required records without exposing other tenants |
+
+## Evidence to capture
+
+Exact commit SHA, migration identifier, test commands and results, database marker, synthetic tenant isolation, provider adapter mode, pricing version, security review, and approval references. Phase 11 remains **In Progress**, not commercially complete. The isolated foundation has executable tests, but authenticated real-usage provenance, quota reservations, webhook verification, provider reconciliation, invoices, tax review, and launch approval remain open.
+
+## Dependencies and prohibited shortcuts
+
+Depends on Phases 0, 1, 6, 9 and 10; integrate only after reviewing PR #62 and the open release stack. Do not merge to production, run shared database migrations, activate payment services, send invoices or contact customers without explicit owner approval.
+
+
+## Release-candidate evidence register — 2026-11-20
+
+**Current branch:** `codex/voxera-phase11-billing-contract-20261117`; [draft PR #63](https://github.com/mathewshebin21-design/VOXERAASSISTANT/pull/63) currently targets `codex/voxera-staff-queue-cancellation-20261117`, **not** the production branch. GitHub reports mergeable, but mergeability does not establish approval, deployment safety, or release readiness. The stacked branch must be reconciled with its base and the production promotion plan before any merge.
+
+| Gate | Evidence / disposition |
+| --- | --- |
+| Synthetic billing unit and API validation | [API run 44678129274](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129274) succeeded at `d46935a`, including Ruff after the synthetic signature boundary-test formatting correction |
+| Integration | [Integration run 44678129589](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129589) succeeded on the same commit |
+| Frontend, browser E2E and accessibility | [Frontend run 44678129270](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44678129270) succeeded on the same commit |
+| Full dependency audit | The same frontend run recorded zero vulnerabilities; `GHSA-fc5q-39xc-vjpf` was officially withdrawn November 18, 2026, not fixed by package upgrade. See [security assessment](security/PHASE11_PICOMATCH_RISK_ASSESSMENT.md). Full audit gate stays enabled |
+| Latest documentation commit | `2f351a5` security assessment updated; API [44690134115](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44690134115) succeeded; frontend/integration results were still in progress when this register was written |
+| Isolated database migration acceptance | **Not independently verified in this register.** Capture exact disposable database identity, migration 0014–0016 upgrade/rollback, restricted role, RLS and concurrency test evidence before approval |
+| Commercial readiness | **Not approved.** Provider selection, UK/India tax treatment, pricing, refund/invoice policies, payment sandbox, real webhook acceptance and operational rollback remain gated |
+| Production promotion | **Prohibited without separate owner authorization**; no live billing, provider credentials, shared production migrations or production deployment |
+
+**Next release work:** (1) collect latest same-commit CI and migration evidence; (2) audit stacked PR dependencies and branch ancestry; (3) exercise failure and reconciliation scenarios with synthetic provider in isolated PostgreSQL; (4) prepare an explicit production go/no-go checklist for owner review. Do not substitute green synthetic tests for real-provider, regulatory or deployment acceptance.
+
+
+### Verified isolated database acceptance — 2026-11-20
+
+Commit [`ca3f3b0`](https://github.com/mathewshebin21-design/VOXERAASSISTANT/commit/ca3f3b0d4879521ab9f7c83a0513f822230abd20) passed [API workflow 44691308037](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44691308037). Its job confirms success for `uv run ruff check`, `uv run ruff format --check`, `uv run pytest -q`, disposable PostgreSQL existing-data migration rehearsal, migrations round-trip, and Docker image builds. Newly added PostgreSQL regression assertions verify quota check/uniqueness constraints and tenant-scoped `pg_policies` read/write predicates under the application role. This is **CI evidence**, not proof that any production database was migrated.
+
+Remaining gates: verify all frontend/integration workflows on the exact current commit; review stacked PR ancestry; complete provider reconciliation and operational failure-mode acceptance; obtain separate approvals for provider configuration, commercial terms, live billing and production promotion.
