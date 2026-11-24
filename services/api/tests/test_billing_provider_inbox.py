@@ -100,6 +100,7 @@ def test_concurrent_conflicting_provider_payload_rejected(make_account, app_engi
                 results.append("conflict")
         assert sorted(results, key=str) == sorted([True, "conflict"], key=str)
 
+
 @pytest.mark.parametrize("provider", ["stripe", "razorpay", "unknown"])
 def test_synthetic_inbox_rejects_non_fake_adapters(make_account, app_engine, provider):
     a = make_account("provider-inbox-nonfake@example.com")
