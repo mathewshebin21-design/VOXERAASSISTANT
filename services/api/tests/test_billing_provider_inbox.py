@@ -99,3 +99,14 @@ def test_concurrent_conflicting_provider_payload_rejected(make_account, app_engi
             except ProviderReplayConflict:
                 results.append("conflict")
         assert sorted(results, key=str) == sorted([True, "conflict"], key=str)
+
+@pytest.mark.parametrize("provider", ["stripe", "razorpay", "unknown"])
+def test_synthetic_inbox_rejects_non_fake_adapters(make_account, app_engine, provider):
+    a = make_account("provider-inbox-nonfake@example.com")
+    with app_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": a.org_id})
+        with pytest.raises(PermissionError, match="only fake adapters"):
+            record_synthetic_provider_event(
+                conn, organization_id=a.org_id, provider=provider, provider_event_id="evt-1", raw_body=b"event"
+            )
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
