@@ -1,4 +1,4 @@
-## Phase 11: billing foundation — active validation (2026-11-18)
+## Phase 11: billing foundation — active validation (2026-11-24)
 
 **Scope:** Synthetic, isolated billing only. PR #63 remains draft; no live payments, telephony, production migrations, or production deployments are authorized.
 
@@ -7,12 +7,14 @@
 | Billing model, synthetic ledger, tenant-scoped storage and read-only overview | Implemented on development branch; release pending | PR #63, branch `codex/voxera-phase11-billing-contract-20261117`; require full API, migration and frontend validation |
 | Python Ruff formatting | Fixed on branch; revalidation pending | Automated maintenance run [44223499934](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223499934) succeeded; commit `8396997` |
 | Duplicate-field JSON validation regression | **Verified fixed in multiple API CI runs** | Previous API run [44223823916](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223823916) failed; fix `7877d14` passed [API run 44224244019](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224244019); [run 44224640827](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224640827) passed on `eb51669` |
-| Frontend dependency security | **Blocked; upstream remediation required** | `npm audit` reported 20 high findings in the picomatch dependency tree; its report labels `picomatch *` vulnerable (GHSA-fc5q-39xc-vjpf), so no safe patched version is established. Forced upgrade failed on `$postcss` and attempted incompatible major versions; no audit bypass accepted. See [44223817164](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44223817164) |
+| Frontend dependency security | Verified audit cleared at `eb06847` | Fresh `npm ci --ignore-scripts` and `npm audit --json` on 24 November reported zero vulnerabilities. [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) was withdrawn on 18 November. The CI security gate remains enforced. |
 | Frontend functional and accessibility checks | **Verified passed at `a204d9a`; overall CI blocked by security** | [Run 44224601269](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224601269): npm install, lint, typecheck, unit tests, script tests, build, browser E2E and axe accessibility all succeeded; final security enforcement failed. Current-head retest pending |
 | Integration CI | Verified on `a204d9a`; current-head validation pending | [44224601254](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/44224601254) passed; newer runs must pass at current head |
 | CI concurrency control | **Verified cancellation of superseded runs** | Commits `523bec6`, `d91178b`, `de76004` add branch/PR concurrency; GitHub Actions cancelled superseded API, integration and previews runs at `de76004` (44225289123, 44225289152, 44225289291). Some older runs started before this policy remain active |
 | Temporary maintenance workflow | Removed after formatter repair | Commit `7504406` deletes `.github/workflows/phase11-maintenance.yml` from development branch; release security gate remains in `previews.yml` |
 | Production promotion | **Not authorized** | Draft PR #63 must remain unmerged until owner approval and all release gates pass |
+
+**24 November review:** PR #63 at `eb0684743876546880efa8c11558cbf642fe9692` contains implementation and migrations 0014–0016. API run [45323663699](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663699), frontend run [45323663534](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663534), and integration run [45323663721](https://github.com/mathewshebin21-design/VOXERAASSISTANT/actions/runs/45323663721) were running at review time. Follow-on quota replay validation requires its own tests and final candidate CI. Hosted evidence from PR #62 covers schema 0013 and its pinned application revision. Billing schemas 0014–0016 require separate isolated hosted acceptance before release.
 
 **Tracker update policy:** Update this section with each material commit, confirmed CI outcome, blocker change, or release decision. Distinguish a committed fix from a verified passing run; record run IDs and commit SHAs. Do not mark a phase complete without acceptance evidence.
 

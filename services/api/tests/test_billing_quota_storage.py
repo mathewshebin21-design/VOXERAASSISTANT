@@ -1,6 +1,7 @@
 """Disposable PostgreSQL acceptance for atomic quota reservations."""
 
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from threading import Barrier
 
 import pytest
@@ -56,6 +57,41 @@ def test_quota_conflicting_replay_and_overuse_denied(make_account, app_engine):
             )
 
 
+def test_quota_period_replay_preserves_limit_and_rejects_a_changed_limit(make_account, app_engine):
+    a = make_account("quota-storage-period-replay@example.com")
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        assert create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=100)
+        assert not create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=100)
+        with pytest.raises(ValueError, match="Conflicting quota period replay"):
+            create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=200)
+        assert conn.execute(text("SELECT limit_units FROM billing_quota_periods")).scalar_one() == 100
+
+
+@pytest.mark.parametrize("invalid_units", [True, 1.0, Decimal("1")])
+def test_quota_settlement_replay_rejects_noninteger_equal_values(make_account, app_engine, invalid_units):
+    a = make_account("quota-storage-settlement-types@example.com")
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=100)
+        reserve_quota_units(conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", units=60)
+        settle_reserved_quota(
+            conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", consumed_units=1
+        )
+        with pytest.raises(ValueError, match="Settlement units must be nonnegative integers"):
+            settle_reserved_quota(
+                conn,
+                organization_id=a.org_id,
+                period_key="2026-11",
+                reservation_id="call-1",
+                consumed_units=invalid_units,
+            )
+        assert conn.execute(text("SELECT consumed_units, reserved_units FROM billing_quota_periods")).one() == (1, 0)
+        assert not settle_reserved_quota(
+            conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", consumed_units=1
+        )
+
+
 def test_quota_tenant_isolation(make_account, app_engine):
     a = make_account("quota-storage-tenant-a@example.com")
     b = make_account("quota-storage-tenant-b@example.com")
@@ -96,6 +132,32 @@ def test_concurrent_reservations_cannot_overallocate(make_account, app_engine):
     with app_engine.begin() as conn:
         _tenant(conn, a.org_id)
         assert conn.execute(text("SELECT reserved_units FROM billing_quota_periods")).scalar_one() == 60
+
+
+def test_concurrent_period_creation_rejects_conflicting_limits(make_account, app_engine):
+    a = make_account("quota-storage-period-race@example.com")
+    barrier = Barrier(2, timeout=15)
+
+    def submit(limit):
+        with app_engine.begin() as conn:
+            _tenant(conn, a.org_id)
+            barrier.wait()
+            return create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=limit)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(submit, limit) for limit in (100, 200)]
+        results = []
+        for future in futures:
+            try:
+                results.append(future.result(timeout=25))
+            except ValueError as exc:
+                assert str(exc) == "Conflicting quota period replay"
+                results.append("conflict")
+    assert sorted(results, key=str) == sorted([True, "conflict"], key=str)
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        assert conn.execute(text("SELECT count(*) FROM billing_quota_periods")).scalar_one() == 1
+        assert conn.execute(text("SELECT limit_units FROM billing_quota_periods")).scalar_one() in (100, 200)
 
 
 def test_concurrent_settlement_retries_are_idempotent(make_account, app_engine):

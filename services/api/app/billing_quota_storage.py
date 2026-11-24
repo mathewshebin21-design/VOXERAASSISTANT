@@ -34,22 +34,28 @@ def _snapshot(conn, organization_id: str, period_key: str) -> QuotaSnapshot:
 
 
 def create_quota_period(conn, *, organization_id: str, period_key: str, limit_units: int) -> bool:
-    """Initialize an immutable period limit; never overwrite an existing limit."""
+    """Initialize once and reject a replay that changes the immutable period limit."""
     _tenant(conn, organization_id)
     QuotaSnapshot(limit_units, 0, 0)
     if not period_key or len(period_key) > 64:
         raise ValueError("Invalid quota period")
-    return (
-        conn.execute(
-            text(
-                "INSERT INTO billing_quota_periods (organization_id, period_key, limit_units) "
-                "VALUES (:org, :period, :limit) ON CONFLICT (organization_id, period_key) DO NOTHING "
-                "RETURNING organization_id"
-            ),
-            {"org": organization_id, "period": period_key, "limit": limit_units},
-        ).scalar_one_or_none()
-        is not None
-    )
+    inserted = conn.execute(
+        text(
+            "INSERT INTO billing_quota_periods (organization_id, period_key, limit_units) "
+            "VALUES (:org, :period, :limit) ON CONFLICT (organization_id, period_key) DO NOTHING "
+            "RETURNING organization_id"
+        ),
+        {"org": organization_id, "period": period_key, "limit": limit_units},
+    ).scalar_one_or_none()
+    if inserted is not None:
+        return True
+    existing_limit = conn.execute(
+        text("SELECT limit_units FROM billing_quota_periods WHERE organization_id = :org AND period_key = :period"),
+        {"org": organization_id, "period": period_key},
+    ).scalar_one()
+    if existing_limit != limit_units:
+        raise ValueError("Conflicting quota period replay")
+    return False
 
 
 def reserve_quota_units(
@@ -117,6 +123,8 @@ def settle_reserved_quota(
 ) -> bool:
     """Settle exactly once, releasing unused units and rejecting changed replays."""
     _tenant(conn, organization_id)
+    if type(consumed_units) is not int or consumed_units < 0:
+        raise ValueError("Settlement units must be nonnegative integers")
     snapshot = _snapshot(conn, organization_id, period_key)
     row = (
         conn.execute(
