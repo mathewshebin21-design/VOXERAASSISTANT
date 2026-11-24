@@ -96,3 +96,28 @@ def test_concurrent_reservations_cannot_overallocate(make_account, app_engine):
     with app_engine.begin() as conn:
         _tenant(conn, a.org_id)
         assert conn.execute(text("SELECT reserved_units FROM billing_quota_periods")).scalar_one() == 60
+
+
+def test_concurrent_settlement_retries_are_idempotent(make_account, app_engine):
+    a = make_account("quota-storage-settlement-race@example.com")
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        create_quota_period(conn, organization_id=a.org_id, period_key="2026-11", limit_units=100)
+        reserve_quota_units(conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", units=60)
+    barrier = Barrier(2, timeout=15)
+
+    def submit():
+        with app_engine.begin() as conn:
+            _tenant(conn, a.org_id)
+            barrier.wait()
+            return settle_reserved_quota(
+                conn, organization_id=a.org_id, period_key="2026-11", reservation_id="call-1", consumed_units=25
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(submit) for _ in range(2)]
+        assert sorted(future.result(timeout=25) for future in futures) == [False, True]
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        balances = conn.execute(text("SELECT consumed_units, reserved_units FROM billing_quota_periods")).one()
+        assert balances == (25, 0)
