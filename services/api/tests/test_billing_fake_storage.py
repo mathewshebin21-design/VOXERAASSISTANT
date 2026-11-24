@@ -1,7 +1,9 @@
 """Disposable PostgreSQL fake subscription event acceptance."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 
 import pytest
 from sqlalchemy import text
@@ -131,3 +133,41 @@ def test_fake_subscription_rejects_duplicate_json_fields(make_account, app_engin
         with pytest.raises(ValueError, match="Duplicate fake event"):
             _apply(conn, event, raw=raw, price=PRICE)
         assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 0
+
+
+def test_concurrent_fake_subscription_replay_reconciles_once(make_account, app_engine):
+    a = make_account("fake-storage-concurrent@example.com")
+    event = _event(a.org_id, FakeBillingEventKind.TRIAL_ACTIVATED, event_id="trial")
+    barrier = Barrier(2, timeout=15)
+
+    def submit():
+        with app_engine.begin() as conn:
+            _tenant(conn, a.org_id)
+            barrier.wait()
+            return _apply(conn, event, price=PRICE)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(submit) for _ in range(2)]
+        assert sorted(future.result(timeout=25) for future in futures) == [False, True]
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        assert conn.execute(text("SELECT count(*) FROM billing_subscriptions")).scalar_one() == 1
+        assert conn.execute(text("SELECT status FROM billing_provider_inbox")).scalar_one() == "reconciled"
+
+
+def test_stale_fake_event_does_not_change_subscription(make_account, app_engine):
+    a = make_account("fake-storage-stale@example.com")
+    trial = _event(a.org_id, FakeBillingEventKind.TRIAL_ACTIVATED, event_id="trial")
+    paid = _event(a.org_id, FakeBillingEventKind.PAYMENT_SUCCEEDED, event_id="paid", at=NOW + timedelta(minutes=2))
+    stale = _event(a.org_id, FakeBillingEventKind.PAYMENT_FAILED, event_id="stale", at=NOW + timedelta(minutes=1))
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        assert _apply(conn, trial, price=PRICE)
+        assert _apply(conn, paid)
+    with pytest.raises(ValueError), app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        _apply(conn, stale)
+    with app_engine.begin() as conn:
+        _tenant(conn, a.org_id)
+        assert conn.execute(text("SELECT state FROM billing_subscriptions")).scalar_one() == "active"
+        assert conn.execute(text("SELECT count(*) FROM billing_provider_inbox")).scalar_one() == 2
