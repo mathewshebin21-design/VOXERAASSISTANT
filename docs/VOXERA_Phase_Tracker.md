@@ -1,3 +1,10 @@
+## 25 November — integrated acceptance checkpoint
+
+- PR #63 at 57a324d: API 45377437611 and 45377426233, frontend 45377437732, integration 45377437789 and 45377426149 all passed. This verifies the teardown correction and fake-provider allowlist regressions in CI.
+- PR #65 at 6196421: API 45377847992 and 45377836126, frontend 45377848758 and integration 45377847732 passed. Duplicate integration 45377836003 failed during post-job uv cache cleanup (300-second lock timeout), not a reported product assertion failure. Investigate runner process cleanup before final acceptance.
+- PRs #45, #60, #61, #62, #63 and #65 reported mergeable; no merges authorized. Hosted acceptance of billing migrations 0014–0016 remains open.
+- Prioritize current-candidate acceptance of phases 0–4 alongside billing. Preserve earlier hosted evidence and distinguish it from current-source acceptance. Phases 7 and 13 remain blocked on external approvals and real-provider evidence.
+
 ## Phase 11: billing foundation — active validation (2026-11-24)
 
 **Scope:** Synthetic, isolated billing only. PR #63 remains draft; no live payments, telephony, production migrations, or production deployments are authorized.
