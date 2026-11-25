@@ -1,3 +1,9 @@
+## 25 November — infrastructure and integrated regression acceptance
+
+- PR #66 commit f8d7539: integration runs 45562802219 and 45562795072 both passed, including explicit service shutdown and post-job uv cache cleanup. The earlier intermittent failure did not recur in these two runs; continue monitoring.
+- Integrated candidate 06d8de1: API 45562614155, integration 45562613925 and frontend 45562613929 all passed. Integration logs confirm 29/29 design selection, 14/14 design live, 8/8 call records, 9/9 language routing, 16/16 Studio and 17/17 synthetic voice scenarios. Frontend E2E and accessibility step passed.
+- Phases 1–4 have current integrated CI evidence, not hosted acceptance. Next gate: exact-source isolated hosted acceptance with schema 0016, runtime identity and frontend upstream verification before synthetic writes. No shared database migration, production promotion or paid provider activation authorized.
+
 ## 25 November — integrated acceptance checkpoint
 
 - PR #63 at 57a324d: API 45377437611 and 45377426233, frontend 45377437732, integration 45377437789 and 45377426149 all passed. This verifies the teardown correction and fake-provider allowlist regressions in CI.
