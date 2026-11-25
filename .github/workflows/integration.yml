@@ -59,14 +59,17 @@ jobs:
           VOXERA_LIVE_TTS_CHARS_GLOBAL_MONTH: "100000"
           VOXERA_WORKER_SECRET: ci-only-worker-secret-ci-only-worker-0001
         run: |
-          nohup uv run python scripts/fake_providers.py 8090 ../../apps/previews/scripts/fixtures/beep.mp3 > fake.log 2>&1 &
-          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          nohup .venv/bin/python scripts/fake_providers.py 8090 ../../apps/previews/scripts/fixtures/beep.mp3 > fake.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/voxera-fake.pid"
+          nohup .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/voxera-api.pid"
       - name: Build and start web
         working-directory: apps/previews
         run: |
           npm ci
           npm run build
-          VOXERA_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > web.log 2>&1 &
+          VOXERA_API_URL=http://127.0.0.1:8000 nohup node node_modules/next/dist/bin/next start -p 3000 > web.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/voxera-web.pid"
           npx wait-on -t 60000 http://localhost:3000 http-get://127.0.0.1:8000/healthz
       - name: Live end-to-end
         working-directory: apps/previews
@@ -98,3 +101,23 @@ jobs:
           if-no-files-found: ignore
       - if: failure()
         run: tail -n 100 services/api/api.log apps/previews/web.log
+      - name: Stop integration background services
+        if: always()
+        run: |
+          for service in fake api web; do
+            file="$RUNNER_TEMP/voxera-$service.pid"
+            if [ -f "$file" ]; then
+              pid="$(cat "$file")"
+              if kill -0 "$pid" 2>/dev/null; then
+                kill -TERM "$pid" 2>/dev/null || true
+                for attempt in {1..20}; do
+                  kill -0 "$pid" 2>/dev/null || break
+                  sleep 0.25
+                done
+                if kill -0 "$pid" 2>/dev/null; then
+                  kill -KILL "$pid" 2>/dev/null || true
+                fi
+              fi
+              rm -f "$file"
+            fi
+          done
